@@ -129,6 +129,9 @@ let package = Package(
         // Cacao's engine: the display list QuartzCore's layers are drawn as,
         // and its compositor on an SDL renderer.
         .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop"),
+        // WPE WebKit's engine, shared with Cacao's web views: the pages
+        // UIKit's web views show.
+        .package(url: "https://github.com/PureSwift/WebKit.git", branch: "master"),
         // SDL3, which UIKit's and AppKit's windows, QuartzCore's compositor, CoreGraphics' displays and
         // GameController's gamepads are drawn and read through.
         .package(url: "https://github.com/PureSwift/SDL.git", branch: "master"),
@@ -530,7 +533,7 @@ let package = Package(
         .target(
             name: "PerryUIKit",
             dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop",
-                           "PerryScrollPhysics", .product(name: "SDL3Swift", package: "SDL")],
+                           "PerryScrollPhysics", .product(name: "SDL3Swift", package: "SDL"), .product(name: "WPEWebKit", package: "WebKit")],
             plugins: ["PerryProviderPlugin"]
         ),
         // AppKit: variadic entry points.

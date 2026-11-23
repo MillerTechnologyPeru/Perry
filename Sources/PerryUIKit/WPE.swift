@@ -1,281 +1,25 @@
+import CacaoRender
+import Foundation
 import Glibc
+import WPEWebKit
 
-// WPE WebKit, WebKit's port for embedding, loaded when a web view first
-// needs it. Each web view has a WebKitWebView of its own over a view backend
-// from WPEBackend-fdo, which hands every frame the web process draws to the
-// view in shared memory; the view shows it as its layer's contents. The
-// pages run in WPE's web and network processes, which are Linux programs;
-// their replies come through GLib's main context, which runs on the main
-// queue while there are pages. Without WPE web views load nothing.
+// WPE WebKit, WebKit's port for embedding, through the engine Cacao's web
+// views share (PureSwift/WebKit's WPEWebKit), loaded when a web view first
+// needs it. Each web view has a page of its own, which draws into frames of
+// the view's size in shared memory; the view shows each as its layer's
+// contents. The pages run in WPE's web and network processes, which are
+// Linux programs; their replies come through GLib's main context, which
+// runs on the main queue while there are pages. Without WPE web views load
+// nothing.
 
-final class WPE: @unchecked Sendable {
-    typealias Pointer = UnsafeMutableRawPointer
+/// WPE WebKit as Perry's web views use it: whether it's there, and the load
+/// events they tell apart (WebKitLoadEvent's).
+enum WPE {
+    static var isAvailable: Bool { WPEEngine.isAvailable }
 
-    // libwpe and WPEBackend-fdo.
-    let viewBackendAddActivityState: @convention(c) (Pointer, UInt32) -> Void
-    let viewBackendDispatchSetSize: @convention(c) (Pointer, UInt32, UInt32) -> Void
-    let viewBackendDispatchSetDeviceScaleFactor: @convention(c) (Pointer, Float) -> Void
-    let viewBackendDispatchPointerEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
-    let viewBackendDispatchAxisEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
-    let viewBackendDispatchKeyboardEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
-    let unicodeToKeyCode: @convention(c) (UInt32) -> UInt32
-    let exportableCreate: @convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?
-    let exportableDestroy: @convention(c) (Pointer) -> Void
-    let exportableGetViewBackend: @convention(c) (Pointer) -> Pointer?
-    let exportableFrameComplete: @convention(c) (Pointer) -> Void
-    let exportableReleaseShmBuffer: @convention(c) (Pointer, Pointer) -> Void
-    let shmExportedBufferGetShmBuffer: @convention(c) (Pointer) -> Pointer?
-    // libwayland-server's shared-memory buffers.
-    let shmBufferGetData: @convention(c) (Pointer) -> Pointer?
-    let shmBufferGetWidth: @convention(c) (Pointer) -> Int32
-    let shmBufferGetHeight: @convention(c) (Pointer) -> Int32
-    let shmBufferGetStride: @convention(c) (Pointer) -> Int32
-    let shmBufferBeginAccess: @convention(c) (Pointer) -> Void
-    let shmBufferEndAccess: @convention(c) (Pointer) -> Void
-    // WPE WebKit's API, and its JavaScriptCore's values.
-    let webViewBackendNew: @convention(c) (Pointer, Pointer?, Pointer?) -> Pointer?
-    let webViewNew: @convention(c) (Pointer) -> Pointer?
-    let webViewLoadHTML: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void
-    let webViewLoadURI: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
-    let webViewGetTitle: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-    let webViewGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-    let webViewIsLoading: @convention(c) (Pointer) -> Int32
-    let webViewGetEstimatedLoadProgress: @convention(c) (Pointer) -> Double
-    let webViewCanGoBack: @convention(c) (Pointer) -> Int32
-    let webViewCanGoForward: @convention(c) (Pointer) -> Int32
-    let webViewGoBack: @convention(c) (Pointer) -> Void
-    let webViewGoForward: @convention(c) (Pointer) -> Void
-    let webViewReload: @convention(c) (Pointer) -> Void
-    let webViewStopLoading: @convention(c) (Pointer) -> Void
-    let webViewGetSettings: @convention(c) (Pointer) -> Pointer?
-    let settingsSetUserAgent: @convention(c) (Pointer, UnsafePointer<CChar>?) -> Void
-    /// With PERRY_UIKIT_WEB_CONSOLE set: pages' console messages go to the web process's standard output.
-    let settingsSetWriteConsoleToStdout: (@convention(c) (Pointer, Int32) -> Void)?
-    let webViewEvaluateJavaScript: @convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
-                                                   UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void
-    let webViewCallAsyncJavaScriptFunction: @convention(c) (Pointer, UnsafePointer<CChar>, Int, Pointer?, UnsafePointer<CChar>?,
-                                                            UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void
-    let webViewEvaluateJavaScriptFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
-    let webViewCallAsyncJavaScriptFunctionFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
-    let valueIsUndefined: @convention(c) (Pointer) -> Int32
-    let valueIsString: @convention(c) (Pointer) -> Int32
-    let valueIsNumber: @convention(c) (Pointer) -> Int32
-    let valueIsBoolean: @convention(c) (Pointer) -> Int32
-    let valueToString: @convention(c) (Pointer) -> UnsafeMutablePointer<CChar>?
-    // Policy decisions on navigations.
-    let navigationPolicyDecisionGetNavigationAction: @convention(c) (Pointer) -> Pointer?
-    let navigationActionGetRequest: @convention(c) (Pointer) -> Pointer?
-    let navigationActionGetNavigationType: @convention(c) (Pointer) -> Int32
-    let uriRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-    let policyDecisionUse: @convention(c) (Pointer) -> Void
-    let policyDecisionIgnore: @convention(c) (Pointer) -> Void
-    let valueToJSON: @convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?
-    // Scripts, script messages and the schemes an app serves itself.
-    let webViewGetUserContentManager: @convention(c) (Pointer) -> Pointer?
-    let registerScriptMessageHandler: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32
-    let unregisterScriptMessageHandler: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void
-    let userScriptNew: @convention(c) (UnsafePointer<CChar>, Int32, Int32, UnsafeRawPointer?, UnsafeRawPointer?) -> Pointer?
-    let userScriptUnref: @convention(c) (Pointer) -> Void
-    let userContentManagerAddScript: @convention(c) (Pointer, Pointer) -> Void
-    let userContentManagerRemoveAllScripts: @convention(c) (Pointer) -> Void
-    let contextGetDefault: @convention(c) () -> Pointer?
-    let contextRegisterURIScheme: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void
-    let contextGetSecurityManager: @convention(c) (Pointer) -> Pointer?
-    let securityManagerRegisterSecure: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
-    let securityManagerRegisterCORSEnabled: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
-    let uriSchemeRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-    let uriSchemeRequestGetHTTPMethod: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-    let uriSchemeRequestFinishWithResponse: @convention(c) (Pointer, Pointer) -> Void
-    let uriSchemeRequestFinishError: @convention(c) (Pointer, Pointer) -> Void
-    let uriSchemeResponseNew: @convention(c) (Pointer, Int64) -> Pointer?
-    let uriSchemeResponseSetStatus: @convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void
-    let uriSchemeResponseSetContentType: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
-    let bytesNew: @convention(c) (UnsafeRawPointer?, Int) -> Pointer?
-    let bytesUnref: @convention(c) (Pointer) -> Void
-    let memoryInputStreamNewFromBytes: @convention(c) (Pointer) -> Pointer?
-    let idleAdd: @convention(c) (UnsafeRawPointer, Pointer?) -> UInt32
-    let errorNewLiteral: @convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?
-    let quarkFromString: @convention(c) (UnsafePointer<CChar>) -> UInt32
-    let objectRef: @convention(c) (Pointer) -> Pointer?
-    // GLib and GObject.
-    let mainContextIteration: @convention(c) (Pointer?, Int32) -> Int32
-    let signalConnectData: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt
-    let signalHandlerDisconnect: @convention(c) (Pointer, UInt) -> Void
-    let objectUnref: @convention(c) (Pointer) -> Void
-    let free: @convention(c) (Pointer?) -> Void
-    let errorFree: @convention(c) (Pointer) -> Void
-    let quarkToString: @convention(c) (UInt32) -> UnsafePointer<CChar>?
-    let paramSpecGetName: @convention(c) (Pointer) -> UnsafePointer<CChar>?
-
-    // WebKitLoadEvent.
-    static let loadStarted: Int32 = 0, loadCommitted: Int32 = 2, loadFinished: Int32 = 3
-    /// wpe_view_activity_state: visible, focused, in a window.
-    static let activityShown: UInt32 = 1 | 2 | 4
-
-    /// WPE, initialized; nil when it isn't installed.
-    static let shared: WPE? = WPE()
-
-    private init?() {
-        let names = ["libwpe-1.0.so.1", "libWPEBackend-fdo-1.0.so.1", "libwayland-server.so.0", "libWPEWebKit-2.0.so.1",
-                     "libglib-2.0.so.0", "libgobject-2.0.so.0", "libgio-2.0.so.0"]
-        // Local, so WPE's JavaScriptCore never stands in for the one
-        // JavaScriptCore.framework is over.
-        let libraries = names.map { dlopen($0, RTLD_NOW | RTLD_LOCAL) }
-        guard let wpe = libraries[0], let fdo = libraries[1], let wayland = libraries[2], let webkit = libraries[3],
-              let glib = libraries[4], let gobject = libraries[5], let gio = libraries[6] else {
-            WPE.log("WPE WebKit is not installed; web views load nothing")
-            return nil
-        }
-        var missing: [String] = []
-        func bind<T>(_ library: Pointer, _ name: String, _: T.Type) -> T {
-            guard let symbol = dlsym(library, name) else {
-                missing.append(name)
-                return unsafeBitCast(WPE.missingFunction, to: T.self)
-            }
-            return unsafeBitCast(symbol, to: T.self)
-        }
-        let loaderInit = bind(wpe, "wpe_loader_init", (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
-        let initializeShm = bind(fdo, "wpe_fdo_initialize_shm", (@convention(c) () -> Int32).self)
-        viewBackendAddActivityState = bind(wpe, "wpe_view_backend_add_activity_state", (@convention(c) (Pointer, UInt32) -> Void).self)
-        viewBackendDispatchSetSize = bind(wpe, "wpe_view_backend_dispatch_set_size", (@convention(c) (Pointer, UInt32, UInt32) -> Void).self)
-        viewBackendDispatchSetDeviceScaleFactor = bind(wpe, "wpe_view_backend_dispatch_set_device_scale_factor",
-                                                       (@convention(c) (Pointer, Float) -> Void).self)
-        viewBackendDispatchPointerEvent = bind(wpe, "wpe_view_backend_dispatch_pointer_event",
-                                               (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
-        viewBackendDispatchAxisEvent = bind(wpe, "wpe_view_backend_dispatch_axis_event",
-                                            (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
-        viewBackendDispatchKeyboardEvent = bind(wpe, "wpe_view_backend_dispatch_keyboard_event",
-                                                (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
-        unicodeToKeyCode = bind(wpe, "wpe_unicode_to_key_code", (@convention(c) (UInt32) -> UInt32).self)
-        exportableCreate = bind(fdo, "wpe_view_backend_exportable_fdo_create",
-                                (@convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?).self)
-        exportableDestroy = bind(fdo, "wpe_view_backend_exportable_fdo_destroy", (@convention(c) (Pointer) -> Void).self)
-        exportableGetViewBackend = bind(fdo, "wpe_view_backend_exportable_fdo_get_view_backend", (@convention(c) (Pointer) -> Pointer?).self)
-        exportableFrameComplete = bind(fdo, "wpe_view_backend_exportable_fdo_dispatch_frame_complete", (@convention(c) (Pointer) -> Void).self)
-        exportableReleaseShmBuffer = bind(fdo, "wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer",
-                                          (@convention(c) (Pointer, Pointer) -> Void).self)
-        shmExportedBufferGetShmBuffer = bind(fdo, "wpe_fdo_shm_exported_buffer_get_shm_buffer", (@convention(c) (Pointer) -> Pointer?).self)
-        shmBufferGetData = bind(wayland, "wl_shm_buffer_get_data", (@convention(c) (Pointer) -> Pointer?).self)
-        shmBufferGetWidth = bind(wayland, "wl_shm_buffer_get_width", (@convention(c) (Pointer) -> Int32).self)
-        shmBufferGetHeight = bind(wayland, "wl_shm_buffer_get_height", (@convention(c) (Pointer) -> Int32).self)
-        shmBufferGetStride = bind(wayland, "wl_shm_buffer_get_stride", (@convention(c) (Pointer) -> Int32).self)
-        shmBufferBeginAccess = bind(wayland, "wl_shm_buffer_begin_access", (@convention(c) (Pointer) -> Void).self)
-        shmBufferEndAccess = bind(wayland, "wl_shm_buffer_end_access", (@convention(c) (Pointer) -> Void).self)
-        webViewBackendNew = bind(webkit, "webkit_web_view_backend_new", (@convention(c) (Pointer, Pointer?, Pointer?) -> Pointer?).self)
-        webViewNew = bind(webkit, "webkit_web_view_new", (@convention(c) (Pointer) -> Pointer?).self)
-        webViewLoadHTML = bind(webkit, "webkit_web_view_load_html",
-                               (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void).self)
-        webViewLoadURI = bind(webkit, "webkit_web_view_load_uri", (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
-        webViewGetTitle = bind(webkit, "webkit_web_view_get_title", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        webViewGetURI = bind(webkit, "webkit_web_view_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        webViewIsLoading = bind(webkit, "webkit_web_view_is_loading", (@convention(c) (Pointer) -> Int32).self)
-        webViewGetEstimatedLoadProgress = bind(webkit, "webkit_web_view_get_estimated_load_progress", (@convention(c) (Pointer) -> Double).self)
-        webViewCanGoBack = bind(webkit, "webkit_web_view_can_go_back", (@convention(c) (Pointer) -> Int32).self)
-        webViewCanGoForward = bind(webkit, "webkit_web_view_can_go_forward", (@convention(c) (Pointer) -> Int32).self)
-        webViewGoBack = bind(webkit, "webkit_web_view_go_back", (@convention(c) (Pointer) -> Void).self)
-        webViewGoForward = bind(webkit, "webkit_web_view_go_forward", (@convention(c) (Pointer) -> Void).self)
-        webViewReload = bind(webkit, "webkit_web_view_reload", (@convention(c) (Pointer) -> Void).self)
-        webViewStopLoading = bind(webkit, "webkit_web_view_stop_loading", (@convention(c) (Pointer) -> Void).self)
-        webViewGetSettings = bind(webkit, "webkit_web_view_get_settings", (@convention(c) (Pointer) -> Pointer?).self)
-        settingsSetUserAgent = bind(webkit, "webkit_settings_set_user_agent", (@convention(c) (Pointer, UnsafePointer<CChar>?) -> Void).self)
-        settingsSetWriteConsoleToStdout = dlsym(webkit, "webkit_settings_set_enable_write_console_messages_to_stdout")
-            .map { unsafeBitCast($0, to: (@convention(c) (Pointer, Int32) -> Void).self) }
-        webViewEvaluateJavaScript = bind(webkit, "webkit_web_view_evaluate_javascript",
-                                         (@convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
-                                                          UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void).self)
-        webViewCallAsyncJavaScriptFunction = bind(webkit, "webkit_web_view_call_async_javascript_function",
-                                                  (@convention(c) (Pointer, UnsafePointer<CChar>, Int, Pointer?, UnsafePointer<CChar>?,
-                                                                   UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void).self)
-        webViewEvaluateJavaScriptFinish = bind(webkit, "webkit_web_view_evaluate_javascript_finish",
-                                               (@convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?).self)
-        webViewCallAsyncJavaScriptFunctionFinish = bind(webkit, "webkit_web_view_call_async_javascript_function_finish",
-                                                        (@convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?).self)
-        valueIsUndefined = bind(webkit, "jsc_value_is_undefined", (@convention(c) (Pointer) -> Int32).self)
-        valueIsString = bind(webkit, "jsc_value_is_string", (@convention(c) (Pointer) -> Int32).self)
-        valueIsNumber = bind(webkit, "jsc_value_is_number", (@convention(c) (Pointer) -> Int32).self)
-        valueIsBoolean = bind(webkit, "jsc_value_is_boolean", (@convention(c) (Pointer) -> Int32).self)
-        valueToString = bind(webkit, "jsc_value_to_string", (@convention(c) (Pointer) -> UnsafeMutablePointer<CChar>?).self)
-        navigationPolicyDecisionGetNavigationAction = bind(webkit, "webkit_navigation_policy_decision_get_navigation_action",
-                                                           (@convention(c) (Pointer) -> Pointer?).self)
-        navigationActionGetRequest = bind(webkit, "webkit_navigation_action_get_request", (@convention(c) (Pointer) -> Pointer?).self)
-        navigationActionGetNavigationType = bind(webkit, "webkit_navigation_action_get_navigation_type",
-                                                 (@convention(c) (Pointer) -> Int32).self)
-        uriRequestGetURI = bind(webkit, "webkit_uri_request_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        policyDecisionUse = bind(webkit, "webkit_policy_decision_use", (@convention(c) (Pointer) -> Void).self)
-        policyDecisionIgnore = bind(webkit, "webkit_policy_decision_ignore", (@convention(c) (Pointer) -> Void).self)
-        valueToJSON = bind(webkit, "jsc_value_to_json", (@convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?).self)
-        webViewGetUserContentManager = bind(webkit, "webkit_web_view_get_user_content_manager", (@convention(c) (Pointer) -> Pointer?).self)
-        registerScriptMessageHandler = bind(webkit, "webkit_user_content_manager_register_script_message_handler",
-                                            (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32).self)
-        unregisterScriptMessageHandler = bind(webkit, "webkit_user_content_manager_unregister_script_message_handler",
-                                              (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void).self)
-        userScriptNew = bind(webkit, "webkit_user_script_new",
-                             (@convention(c) (UnsafePointer<CChar>, Int32, Int32, UnsafeRawPointer?, UnsafeRawPointer?) -> Pointer?).self)
-        userScriptUnref = bind(webkit, "webkit_user_script_unref", (@convention(c) (Pointer) -> Void).self)
-        userContentManagerAddScript = bind(webkit, "webkit_user_content_manager_add_script", (@convention(c) (Pointer, Pointer) -> Void).self)
-        userContentManagerRemoveAllScripts = bind(webkit, "webkit_user_content_manager_remove_all_scripts",
-                                                  (@convention(c) (Pointer) -> Void).self)
-        contextGetDefault = bind(webkit, "webkit_web_context_get_default", (@convention(c) () -> Pointer?).self)
-        contextRegisterURIScheme = bind(webkit, "webkit_web_context_register_uri_scheme",
-                                        (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void).self)
-        contextGetSecurityManager = bind(webkit, "webkit_web_context_get_security_manager", (@convention(c) (Pointer) -> Pointer?).self)
-        securityManagerRegisterSecure = bind(webkit, "webkit_security_manager_register_uri_scheme_as_secure",
-                                             (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
-        securityManagerRegisterCORSEnabled = bind(webkit, "webkit_security_manager_register_uri_scheme_as_cors_enabled",
-                                                  (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
-        uriSchemeRequestGetURI = bind(webkit, "webkit_uri_scheme_request_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        uriSchemeRequestGetHTTPMethod = bind(webkit, "webkit_uri_scheme_request_get_http_method",
-                                             (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        uriSchemeRequestFinishWithResponse = bind(webkit, "webkit_uri_scheme_request_finish_with_response",
-                                                  (@convention(c) (Pointer, Pointer) -> Void).self)
-        uriSchemeRequestFinishError = bind(webkit, "webkit_uri_scheme_request_finish_error", (@convention(c) (Pointer, Pointer) -> Void).self)
-        uriSchemeResponseNew = bind(webkit, "webkit_uri_scheme_response_new", (@convention(c) (Pointer, Int64) -> Pointer?).self)
-        uriSchemeResponseSetStatus = bind(webkit, "webkit_uri_scheme_response_set_status",
-                                          (@convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void).self)
-        uriSchemeResponseSetContentType = bind(webkit, "webkit_uri_scheme_response_set_content_type",
-                                               (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
-        bytesNew = bind(glib, "g_bytes_new", (@convention(c) (UnsafeRawPointer?, Int) -> Pointer?).self)
-        bytesUnref = bind(glib, "g_bytes_unref", (@convention(c) (Pointer) -> Void).self)
-        memoryInputStreamNewFromBytes = bind(gio, "g_memory_input_stream_new_from_bytes", (@convention(c) (Pointer) -> Pointer?).self)
-        idleAdd = bind(glib, "g_idle_add", (@convention(c) (UnsafeRawPointer, Pointer?) -> UInt32).self)
-        errorNewLiteral = bind(glib, "g_error_new_literal", (@convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?).self)
-        quarkFromString = bind(glib, "g_quark_from_string", (@convention(c) (UnsafePointer<CChar>) -> UInt32).self)
-        objectRef = bind(gobject, "g_object_ref", (@convention(c) (Pointer) -> Pointer?).self)
-        mainContextIteration = bind(glib, "g_main_context_iteration", (@convention(c) (Pointer?, Int32) -> Int32).self)
-        signalConnectData = bind(gobject, "g_signal_connect_data",
-                                 (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt).self)
-        signalHandlerDisconnect = bind(gobject, "g_signal_handler_disconnect", (@convention(c) (Pointer, UInt) -> Void).self)
-        objectUnref = bind(gobject, "g_object_unref", (@convention(c) (Pointer) -> Void).self)
-        free = bind(glib, "g_free", (@convention(c) (Pointer?) -> Void).self)
-        errorFree = bind(glib, "g_error_free", (@convention(c) (Pointer) -> Void).self)
-        quarkToString = bind(glib, "g_quark_to_string", (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
-        paramSpecGetName = bind(gobject, "g_param_spec_get_name", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
-        guard missing.isEmpty else {
-            WPE.log("WPE WebKit is incomplete (no \(missing.joined(separator: ", "))); web views load nothing")
-            return nil
-        }
-        guard loaderInit("libWPEBackend-fdo-1.0.so.1") != 0, initializeShm() != 0 else {
-            WPE.log("WPEBackend-fdo did not initialize; web views load nothing")
-            return nil
-        }
-    }
-
-    private static let missingFunction: @convention(c) () -> Void = {}
-
-    /// Runs what GLib's main context has ready: WPE's replies, signals and
-    /// frames.
-    func dispatch() {
-        var budget = 1000
-        while budget > 0, mainContextIteration(nil, 0) != 0 { budget -= 1 }
-    }
-
-    /// A GError's domain, code and message.
-    func error(_ error: Pointer) -> (domain: String, code: Int, message: String) {
-        let domain = quarkToString(error.load(as: UInt32.self)).map { String(cString: $0) } ?? ""
-        let code = Int(error.load(fromByteOffset: 4, as: Int32.self))
-        let message = error.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self).map { String(cString: $0) } ?? ""
-        return (domain, code, message)
-    }
+    static let loadStarted = WPELoadEvent.started.rawValue
+    static let loadCommitted = WPELoadEvent.committed.rawValue
+    static let loadFinished = WPELoadEvent.finished.rawValue
 
     static func log(_ message: String) {
         let line = "perry: WebKit: \(message)\n"
@@ -283,25 +27,20 @@ final class WPE: @unchecked Sendable {
     }
 }
 
-/// One web view's page: a WebKitWebView drawing into frames of the view's
-/// size, which `frame` shows.
-final class WebPage {
-    typealias Pointer = UnsafeMutableRawPointer
-
-    let wpe: WPE
-    private let exportable: Pointer
-    private let backend: Pointer
-    /// The exportable's client data: this page, until it goes.
-    private let slot: UnsafeMutablePointer<Pointer?>
-    let view: Pointer
-    private var handlers: [UInt] = []
+/// One web view's page: a WPE page drawing into frames of the view's size,
+/// which `frame` shows. Used on the main queue only, where GLib's context
+/// runs and frames are published.
+final class WebPage: @unchecked Sendable {
+    let content: WPEWebContent
+    /// Hears the page's state for this page, which it doesn't keep.
+    private let reporter: Reporter
     private(set) var size: (width: UInt32, height: UInt32)
     private(set) var scale: Float
 
     /// A frame: BGRA pixels, premultiplied, top row first, with the width,
     /// height and bytes per row. They are good only during the call.
     var frame: ((UnsafeRawPointer, Int, Int, Int) -> Void)?
-    /// WebKitLoadEvent: started, committed, finished.
+    /// WebKitLoadEvent: started, redirected, committed, finished.
     var loadChanged: ((Int32) -> Void)?
     /// A load failed: whether it had committed, then GError's domain, code
     /// and message.
@@ -311,169 +50,82 @@ final class WebPage {
     var propertyChanged: ((String) -> Void)?
     /// Whether a navigation to a URI goes ahead, with its
     /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
-    /// every navigation go ahead.
+    /// every navigation go ahead. The view's own loads are asked about too,
+    /// as UIWebView's delegate is about loadRequest:.
     var decideNavigation: ((String, Int32) -> Bool)?
     /// A script message: the handler's name and the message's body as JSON
     /// (nil for undefined).
     var scriptMessage: ((String, String?) -> Void)?
-    private var messageHandlers: [String: UInt] = [:]
 
-    /// The pages there are, which the main queue runs GLib's context for.
-    nonisolated(unsafe) static var count = 0
+    /// What the page last said of itself.
+    private(set) var title: String?
+    private(set) var uri: String?
+    private(set) var isLoading = false
+    private(set) var progress: Double = 0
+    private(set) var canGoBack = false
+    private(set) var canGoForward = false
+
     nonisolated(unsafe) private static var scheduled = false
 
     init?(width: UInt32, height: UInt32, scale: Float) {
-        guard let wpe = WPE.shared else { return nil }
+        let reporter = Reporter()
+        guard let content = WPEWebContent(delegate: reporter) else { return nil }
+        self.content = content
+        self.reporter = reporter
         let size = (max(width, 1), max(height, 1))
-        let slot = UnsafeMutablePointer<Pointer?>.allocate(capacity: 1)
-        slot.initialize(to: nil)
-        // WebKit destroys the exportable when it is done with the backend.
-        guard let exportable = wpe.exportableCreate(WebPage.client, slot, size.0, size.1),
-              let backend = wpe.exportableGetViewBackend(exportable),
-              let webBackend = wpe.webViewBackendNew(backend, unsafeBitCast(WebPage.onBackendDestroyed, to: Pointer.self), exportable),
-              let view = wpe.webViewNew(webBackend) else {
-            WPE.log("can't make a web view")
-            return nil
-        }
-        (self.wpe, self.exportable, self.backend, self.view, self.slot) = (wpe, exportable, backend, view, slot)
         (self.size, self.scale) = (size, scale)
-        slot.pointee = Unmanaged.passUnretained(self).toOpaque()
-        wpe.viewBackendDispatchSetDeviceScaleFactor(backend, scale)
-        wpe.viewBackendAddActivityState(backend, WPE.activityShown)
-        let data = Unmanaged.passUnretained(self).toOpaque()
-        handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
-        handlers.append(wpe.signalConnectData(view, "load-failed", unsafeBitCast(WebPage.onLoadFailed, to: UnsafeRawPointer.self), data, nil, 0))
-        handlers.append(wpe.signalConnectData(view, "decide-policy", unsafeBitCast(WebPage.onDecidePolicy, to: UnsafeRawPointer.self), data, nil, 0))
-        for property in ["title", "uri", "is-loading", "estimated-load-progress"] {
-            handlers.append(wpe.signalConnectData(view, "notify::\(property)", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self),
-                                                  data, nil, 0))
+        reporter.page = self
+        content.asksAboutOwnLoads = true
+        content.attach(width: size.0, height: size.1, scale: scale)
+        content.focus(true)
+        content.onLoadEvent = { [unowned self] event in loadChanged?(event.rawValue) }
+        content.onLoadError = { [unowned self] error, committed in
+            loadFailed?(committed, error.domain, error.code, error.message)
         }
-        if getenv("PERRY_UIKIT_WEB_CONSOLE") != nil, let settings = wpe.webViewGetSettings(view) {
-            wpe.settingsSetWriteConsoleToStdout?(settings, 1)
+        content.onNavigation = { [unowned self] navigation, decision in
+            // A new window has nowhere to go, as before: it goes ahead, to nothing.
+            guard !navigation.opensNewWindow, let decideNavigation else { return decision.allow() }
+            if decideNavigation(navigation.uri, navigation.kind.rawValue) { decision.allow() } else { decision.cancel() }
         }
-        WebPage.count += 1
+        content.onScriptMessage = { [unowned self] name, json in scriptMessage?(name, json) }
+        content.surface.onPublish = { [weak self] in
+            // On the main queue, where GLib's context runs.
+            self?.showNewFrame()
+        }
+        if getenv("PERRY_UIKIT_WEB_CONSOLE") != nil {
+            WPE.log("PERRY_UIKIT_WEB_CONSOLE: the shared engine doesn't write a page's console")
+        }
         WebPage.schedule()
     }
 
-    private var contentManager: Pointer? { wpe.webViewGetUserContentManager(view) }
+    /// The newest frame, to `frame`.
+    private func showNewFrame() {
+        guard let frame, let latest = content.surface.takeFrame(), latest.width > 0, latest.height > 0 else { return }
+        latest.pixels.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            frame(base, latest.width, latest.height, latest.bytesPerRow)
+        }
+    }
 
     /// Makes window.webkit.messageHandlers[name] post to `scriptMessage`.
-    func addMessageHandler(_ name: String) {
-        guard messageHandlers[name] == nil, let manager = contentManager, wpe.registerScriptMessageHandler(manager, name, nil) != 0 else { return }
-        let box = Unmanaged.passRetained(MessageSource(page: self, name: name)).toOpaque()
-        messageHandlers[name] = wpe.signalConnectData(manager, "script-message-received::\(name)",
-                                                      unsafeBitCast(WebPage.onScriptMessage, to: UnsafeRawPointer.self), box,
-                                                      unsafeBitCast(WebPage.onMessageSourceDestroyed, to: Pointer.self), 0)
-    }
+    func addMessageHandler(_ name: String) { content.addScriptMessageHandler(name) }
 
     /// A script the page runs on each load, at its start or end.
     func addUserScript(_ source: String, atStart: Bool, mainFrameOnly: Bool) {
-        guard let manager = contentManager,
-              let script = wpe.userScriptNew(source, mainFrameOnly ? 1 : 0, atStart ? 0 : 1, nil, nil) else { return }
-        wpe.userContentManagerAddScript(manager, script)
-        wpe.userScriptUnref(script)
+        content.addUserScript(source, atDocumentStart: atStart, mainFrameOnly: mainFrameOnly)
     }
 
-    private final class MessageSource {
-        unowned let page: WebPage
-        let name: String
-        init(page: WebPage, name: String) { (self.page, self.name) = (page, name) }
-    }
-
-    /// script-message-received: the content manager, the message's JSCValue
-    /// and the source.
-    private static let onScriptMessage: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, value, data in
-        guard let data else { return }
-        let source = Unmanaged<MessageSource>.fromOpaque(data).takeUnretainedValue()
-        let wpe = source.page.wpe
-        var json: String?
-        if let value, wpe.valueIsUndefined(value) == 0, let text = wpe.valueToJSON(value, 0) {
-            json = String(cString: text)
-            wpe.free(text)
-        }
-        source.page.scriptMessage?(source.name, json)
-    }
-
-    private static let onMessageSourceDestroyed: @convention(c) (Pointer?, Pointer?) -> Void = { data, _ in
-        if let data { Unmanaged<MessageSource>.fromOpaque(data).release() }
-    }
-
-    deinit {
-        if let manager = contentManager {
-            for (name, handler) in messageHandlers {
-                wpe.signalHandlerDisconnect(manager, handler)
-                wpe.unregisterScriptMessageHandler(manager, name, nil)
-            }
-        }
-        for handler in handlers { wpe.signalHandlerDisconnect(view, handler) }
-        // The slot stays, empty, for any frame still on its way.
-        slot.pointee = nil
-        wpe.objectUnref(view)
-        WebPage.count -= 1
-    }
-
-    func loadHTML(_ html: String, baseURI: String?) {
-        if let baseURI { wpe.webViewLoadHTML(view, html, baseURI) } else { wpe.webViewLoadHTML(view, html, nil) }
-    }
-
-    func loadURI(_ uri: String) { wpe.webViewLoadURI(view, uri) }
-
-    var title: String? { wpe.webViewGetTitle(view).map { String(cString: $0) } }
-    var uri: String? { wpe.webViewGetURI(view).map { String(cString: $0) } }
-    var isLoading: Bool { wpe.webViewIsLoading(view) != 0 }
-    var progress: Double { wpe.webViewGetEstimatedLoadProgress(view) }
-    var canGoBack: Bool { wpe.webViewCanGoBack(view) != 0 }
-    var canGoForward: Bool { wpe.webViewCanGoForward(view) != 0 }
-    func goBack() { wpe.webViewGoBack(view) }
-    func goForward() { wpe.webViewGoForward(view) }
-    func reload() { wpe.webViewReload(view) }
-    func stopLoading() { wpe.webViewStopLoading(view) }
+    func loadHTML(_ html: String, baseURI: String?) { content.loadHTML(html, baseURL: baseURI) }
+    func loadURI(_ uri: String) { content.load(uri) }
+    func goBack() { content.goBack() }
+    func goForward() { content.goForward() }
+    func reload() { content.reload() }
+    func stopLoading() { content.stopLoading() }
 
     // MARK: Input
 
-    /// libwpe's events (wpe/input.h), laid out as its structures.
-    private struct PointerEvent {
-        var type: Int32         // wpe_input_pointer_event_type: motion 1, button 2
-        var time: UInt32
-        var x: Int32
-        var y: Int32
-        var button: UInt32
-        var state: UInt32
-        var modifiers: UInt32
-    }
-
-    private struct AxisEvent2D {
-        var type: Int32         // wpe_input_axis_event_type: motion smooth 2, with mask 2D 1 << 16
-        var time: UInt32
-        var x: Int32
-        var y: Int32
-        var axis: UInt32
-        var value: Int32
-        var modifiers: UInt32
-        var xAxis: Double
-        var yAxis: Double
-    }
-
-    private struct KeyboardEvent {
-        var time: UInt32
-        var keyCode: UInt32
-        var hardwareKeyCode: UInt32
-        var pressed: Bool
-        var modifiers: UInt32
-    }
-
-    /// Milliseconds, as input events are stamped.
-    private static var now: UInt32 {
-        var time = timespec()
-        clock_gettime(CLOCK_MONOTONIC, &time)
-        return UInt32(truncatingIfNeeded: Int(time.tv_sec) * 1000 + Int(time.tv_nsec) / 1_000_000)
-    }
-
-    /// The first pointer button held: wpe_input_pointer_modifier_button1.
-    private static let button1: UInt32 = 1 << 20
-
     /// With PERRY_UIKIT_WEB_TRACE set, input sent to pages is written to
-    /// standard error, and after a click, the element the page focused.
+    /// standard error.
     nonisolated(unsafe) static let tracing = getenv("PERRY_UIKIT_WEB_TRACE") != nil
 
     static func trace(_ message: @autoclosure () -> String) {
@@ -486,85 +138,81 @@ final class WebPage {
     /// pointer moves there, presses and releases.
     func click(x: Int32, y: Int32) {
         WebPage.trace("click at \(x), \(y) of \(size.width)x\(size.height) at scale \(scale)")
-        if WebPage.tracing {
-            evaluate("(() => { const e = document.activeElement; const h = document.elementFromPoint(\(Float(x) / scale), \(Float(y) / scale)); return 'focused ' + (e ? e.tagName + '#' + e.id : 'none') + ', at point ' + (h ? h.tagName + '#' + h.id + '.' + h.className : 'none') })()") { result in
-                if case .success(let text) = result { WebPage.trace(text ?? "") }
-            }
-        }
-        var event = PointerEvent(type: 1, time: WebPage.now, x: x, y: y, button: 0, state: 0, modifiers: 0)
-        wpe.viewBackendDispatchPointerEvent(backend, &event)
-        event = PointerEvent(type: 2, time: WebPage.now, x: x, y: y, button: 1, state: 1, modifiers: WebPage.button1)
-        wpe.viewBackendDispatchPointerEvent(backend, &event)
-        event = PointerEvent(type: 2, time: WebPage.now, x: x, y: y, button: 1, state: 0, modifiers: 0)
-        wpe.viewBackendDispatchPointerEvent(backend, &event)
+        let (x, y) = (Double(x), Double(y))
+        content.pointerMoved(x: x, y: y)
+        content.pointerButton(pressed: true, x: x, y: y, modifiers: .button1)
+        content.pointerButton(pressed: false, x: x, y: y)
     }
 
     /// Scrolls what is under a point by a distance in pixels, as a
-    /// touchpad's smooth scrolling does: positive is toward the page's end.
+    /// touchpad's smooth scrolling does, passed to WPE as it is (the engine
+    /// takes points toward the page's end, and turns them to pixels toward
+    /// its start).
     func scroll(x: Int32, y: Int32, dx: Double, dy: Double) {
-        var event = AxisEvent2D(type: (1 << 16) | 2, time: WebPage.now, x: x, y: y, axis: 0, value: 0, modifiers: 0,
-                                xAxis: dx, yAxis: dy)
-        wpe.viewBackendDispatchAxisEvent(backend, &event)
+        let scale = Double(content.size?.scale ?? self.scale)
+        content.scroll(x: Double(x), y: Double(y), dx: -dx / scale, dy: -dy / scale)
     }
 
     /// Presses and releases a key, by its XKB keysym.
     func press(keysym: UInt32) {
-        for pressed in [true, false] {
-            var event = KeyboardEvent(time: WebPage.now, keyCode: keysym, hardwareKeyCode: 0, pressed: pressed, modifiers: 0)
-            wpe.viewBackendDispatchKeyboardEvent(backend, &event)
-        }
+        content.key(keysym: keysym, pressed: true)
+        content.key(keysym: keysym, pressed: false)
     }
 
     /// Types text, a key for each character; newlines press Return.
     func type(_ text: String) {
         WebPage.trace("type \(text.count) characters")
-        for scalar in text.unicodeScalars {
-            press(keysym: scalar == "\n" ? WebPage.returnKey : wpe.unicodeToKeyCode(scalar.value))
-        }
+        content.type(text)
     }
 
     /// XKB's keysyms for Return and BackSpace.
-    static let returnKey: UInt32 = 0xFF0D
-    static let backspaceKey: UInt32 = 0xFF08
+    static let returnKey = WPEKeysym.return
+    static let backspaceKey = WPEKeysym.backspace
 
-    func setUserAgent(_ agent: String?) {
-        guard let settings = wpe.webViewGetSettings(view) else { return }
-        if let agent { wpe.settingsSetUserAgent(settings, agent) } else { wpe.settingsSetUserAgent(settings, nil) }
-    }
+    func setUserAgent(_ agent: String?) { content.setUserAgent(agent) }
 
     /// The view's size in points and its scale, which the next frames have.
     func resize(width: UInt32, height: UInt32, scale: Float) {
         let size = (max(width, 1), max(height, 1))
-        if scale != self.scale {
-            self.scale = scale
-            wpe.viewBackendDispatchSetDeviceScaleFactor(backend, scale)
-        }
-        guard size != self.size else { return }
-        self.size = size
-        wpe.viewBackendDispatchSetSize(backend, size.0, size.1)
-        if WebPage.tracing {
-            WebPage.trace("resized to \(size.0)x\(size.1) at scale \(scale)")
-            Deferred.run(after: 3) { [weak self] in
-                self?.evaluate("innerWidth + 'x' + innerHeight + ' at ' + devicePixelRatio + ', document ' + document.documentElement.scrollWidth + ' wide, screen ' + screen.width + 'x' + screen.height + ', root font ' + getComputedStyle(document.documentElement).fontSize + ', body font ' + getComputedStyle(document.body).fontSize + ', visual viewport scale ' + (window.visualViewport ? visualViewport.scale : '?') + ', agent ' + navigator.userAgent") { result in
-                    if case .success(let text) = result { WebPage.trace("three seconds after resizing, page has \(text ?? "nothing")") }
-                }
-            }
-        }
+        guard size != self.size || scale != self.scale else { return }
+        (self.size, self.scale) = (size, scale)
+        content.attach(width: size.0, height: size.1, scale: scale)
+        WebPage.trace("resized to \(size.0)x\(size.1) at scale \(scale)")
+    }
+
+    // MARK: Scripts
+
+    struct EvaluationError: Error {
+        let domain: String, code: Int, message: String
     }
 
     /// Runs `script` in the page; `completion` hears its value as JSON (nil
     /// for undefined) or a GError's domain, code and message.
     func evaluate(_ script: String, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
-        let box = Unmanaged.passRetained(Evaluation(page: self, completion: completion)).toOpaque()
-        wpe.webViewEvaluateJavaScript(view, script, -1, nil, nil, nil, unsafeBitCast(WebPage.onEvaluated, to: Pointer.self), box)
+        content.evaluateJavaScript(script) { completion(WebPage.result($0)) }
+    }
+
+    /// Runs `body` as an async function's body, awaiting what it returns;
+    /// `completion` hears its value as `evaluate`'s does.
+    func callAsync(_ body: String, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
+        content.callAsyncJavaScript(body) { completion(WebPage.result($0)) }
+    }
+
+    private static func result(_ result: Result<String?, WPEError>) -> Result<String?, EvaluationError> {
+        result.mapError { EvaluationError(domain: $0.domain, code: $0.code, message: $0.message) }
     }
 
     /// Calls `body` once the page has drawn what it has now: after two of
     /// its animation frames, and a frame's time for that frame to arrive.
     func afterRendering(_ body: @escaping () -> Void) {
-        let box = Unmanaged.passRetained(Rendering(body)).toOpaque()
-        wpe.webViewCallAsyncJavaScriptFunction(view, "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
-                                               -1, nil, nil, nil, nil, unsafeBitCast(WebPage.onRendered, to: Pointer.self), box)
+        callAsync("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))") { _ in
+            guard let after = Display.dispatchAfter, let time = Display.dispatchTime else { return body() }
+            let box = Unmanaged.passRetained(Rendering(body)).toOpaque()
+            after(time(0, 50_000_000), Updates.mainQueue, box) { data in
+                guard let data else { return }
+                Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue().body()
+            }
+        }
     }
 
     private final class Rendering {
@@ -572,188 +220,32 @@ final class WebPage {
         init(_ body: @escaping () -> Void) { self.body = body }
     }
 
-    /// The function's result is not needed; the frame drawn after it is.
-    private static let onRendered: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
-        guard let data else { return }
-        let rendering = Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue()
-        if let wpe = WPE.shared, let source, let result {
-            var error: Pointer?
-            if let value = wpe.webViewCallAsyncJavaScriptFunctionFinish(source, result, &error) { wpe.objectUnref(value) }
-            if let error { wpe.errorFree(error) }
-        }
-        guard let after = Display.dispatchAfter, let time = Display.dispatchTime else { return rendering.body() }
-        after(time(0, 50_000_000), Updates.mainQueue, Unmanaged.passRetained(rendering).toOpaque()) { data in
-            guard let data else { return }
-            Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue().body()
-        }
-    }
-
     /// Runs `script` in the page and waits for it, running GLib's context
     /// meanwhile: a string, number or Boolean value as a string, as
     /// JavaScript's String() makes it; nil for other values and exceptions.
     func evaluateString(_ script: String) -> String? {
-        var outcome: String??
-        let box = Unmanaged.passRetained(StringEvaluation(page: self) { outcome = $0 }).toOpaque()
-        wpe.webViewEvaluateJavaScript(view, script, -1, nil, nil, nil, unsafeBitCast(WebPage.onEvaluatedString, to: Pointer.self), box)
-        while outcome == nil { _ = wpe.mainContextIteration(nil, 1) }
-        return outcome ?? nil
+        var outcome: Result<String?, WPEError>?
+        // The value's type comes with it, as UIWebView's scripts give only
+        // strings, numbers and Booleans. Evaluated indirectly, the script's
+        // declarations are the page's globals, as they were.
+        let wrapped = "(() => { const v = (0, eval)(\(WebPage.quoted(script))); "
+            + "return (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') ? [String(v)] : [] })()"
+        content.evaluateJavaScript(wrapped) { outcome = $0 }
+        WPEEngine.dispatch(for: 60) { outcome != nil }
+        guard case .success(let json)? = outcome, let json,
+              let array = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String] else { return nil }
+        return array.first
     }
 
-    private final class StringEvaluation {
-        let page: WebPage
-        let completion: (String?) -> Void
-        init(page: WebPage, completion: @escaping (String?) -> Void) { (self.page, self.completion) = (page, completion) }
-    }
-
-    private static let onEvaluatedString: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
-        guard let data else { return }
-        let evaluation = Unmanaged<StringEvaluation>.fromOpaque(data).takeRetainedValue()
-        let wpe = evaluation.page.wpe
-        var error: Pointer?
-        guard let source, let result, let value = wpe.webViewEvaluateJavaScriptFinish(source, result, &error) else {
-            if let error { wpe.errorFree(error) }
-            return evaluation.completion(nil)
+    /// A string as a JavaScript string literal.
+    private static func quoted(_ string: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [string]), let array = String(data: data, encoding: .utf8) else {
+            return "''"
         }
-        defer { wpe.objectUnref(value) }
-        guard wpe.valueIsString(value) != 0 || wpe.valueIsNumber(value) != 0 || wpe.valueIsBoolean(value) != 0 else {
-            return evaluation.completion(nil)
-        }
-        let string = wpe.valueToString(value)
-        defer { wpe.free(string) }
-        evaluation.completion(string.map { String(cString: $0) } ?? "")
+        return String(array.dropFirst().dropLast())
     }
 
-    /// decide-policy: navigations ask `decideNavigation`; the rest, and
-    /// navigations without it, take WebKit's default.
-    private static let onDecidePolicy: @convention(c) (Pointer?, Pointer?, Int32, Pointer?) -> Int32 = { _, decision, type, data in
-        guard let data, let decision, type == 0 else { return 0 }    // WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION
-        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
-        let wpe = page.wpe
-        guard let decide = page.decideNavigation, let action = wpe.navigationPolicyDecisionGetNavigationAction(decision) else { return 0 }
-        let uri = wpe.navigationActionGetRequest(action).flatMap(wpe.uriRequestGetURI).map { String(cString: $0) } ?? ""
-        if decide(uri, wpe.navigationActionGetNavigationType(action)) {
-            wpe.policyDecisionUse(decision)
-        } else {
-            wpe.policyDecisionIgnore(decision)
-        }
-        return 1
-    }
-
-    /// Runs `body` as an async function's body, awaiting what it returns;
-    /// `completion` hears its value as `evaluate`'s does.
-    func callAsync(_ body: String, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
-        let box = Unmanaged.passRetained(Evaluation(page: self, completion: completion)).toOpaque()
-        wpe.webViewCallAsyncJavaScriptFunction(view, body, -1, nil, nil, nil, nil, unsafeBitCast(WebPage.onCalled, to: Pointer.self), box)
-    }
-
-    struct EvaluationError: Error {
-        let domain: String, code: Int, message: String
-    }
-
-    private final class Evaluation {
-        let page: WebPage
-        let completion: (Result<String?, EvaluationError>) -> Void
-        init(page: WebPage, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
-            (self.page, self.completion) = (page, completion)
-        }
-    }
-
-    // MARK: Callbacks from C
-
-    /// wpe_view_backend_exportable_fdo_client: frames in shared memory only.
-    nonisolated(unsafe) private static let client: UnsafeRawPointer = {
-        let client = UnsafeMutablePointer<UnsafeRawPointer?>.allocate(capacity: 5)
-        client.initialize(repeating: nil, count: 5)
-        client[2] = unsafeBitCast(WebPage.onShmBuffer, to: UnsafeRawPointer.self)
-        return UnsafeRawPointer(client)
-    }()
-
-    /// A frame, to the page in the exportable's slot.
-    private static let onShmBuffer: @convention(c) (Pointer?, Pointer?) -> Void = { data, buffer in
-        guard let buffer, let page = data?.assumingMemoryBound(to: Pointer?.self).pointee else { return }
-        Unmanaged<WebPage>.fromOpaque(page).takeUnretainedValue().receive(buffer)
-    }
-
-    private static let onBackendDestroyed: @convention(c) (Pointer?) -> Void = { exportable in
-        if let exportable { WPE.shared?.exportableDestroy(exportable) }
-    }
-
-    private func receive(_ buffer: Pointer) {
-        defer {
-            wpe.exportableReleaseShmBuffer(exportable, buffer)
-            wpe.exportableFrameComplete(exportable)
-        }
-        guard let shm = wpe.shmExportedBufferGetShmBuffer(buffer) else { return }
-        wpe.shmBufferBeginAccess(shm)
-        defer { wpe.shmBufferEndAccess(shm) }
-        let width = Int(wpe.shmBufferGetWidth(shm)), height = Int(wpe.shmBufferGetHeight(shm))
-        let stride = Int(wpe.shmBufferGetStride(shm))
-        guard width > 0, height > 0, let data = wpe.shmBufferGetData(shm) else { return }
-        frame?(data, width, height, stride)
-    }
-
-    private static let onLoadChanged: @convention(c) (Pointer?, Int32, Pointer?) -> Void = { _, event, data in
-        guard let data else { return }
-        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
-        // Traced once loaded (WEBKIT_LOAD_FINISHED 3): the viewport the
-        // page laid out for, beside the size and scale it was given.
-        if WebPage.tracing, event == 3 {
-            let given = "\(page.size.width)x\(page.size.height) at scale \(page.scale)"
-            page.evaluate("innerWidth + 'x' + innerHeight + ' at ' + devicePixelRatio + ', document ' + document.documentElement.scrollWidth + ' wide, viewport ' + (document.querySelector('meta[name=viewport]') || {}).content") { result in
-                if case .success(let text) = result { WebPage.trace("loaded: given \(given), page has \(text ?? "nothing")") }
-            }
-        }
-        page.loadChanged?(event)
-    }
-
-    /// load-failed: the view, the WebKitLoadEvent it failed at, the URI and
-    /// the GError; true, as handled.
-    private static let onLoadFailed: @convention(c) (Pointer?, Int32, UnsafePointer<CChar>?, Pointer?, Pointer?) -> Int32 = {
-        _, event, _, error, data in
-        guard let data else { return 1 }
-        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
-        let described = error.map(page.wpe.error) ?? (domain: "", code: 0, message: "")
-        page.loadFailed?(event >= WPE.loadCommitted, described.domain, described.code, described.message)
-        return 1
-    }
-
-    private static let onNotify: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, spec, data in
-        guard let data, let spec else { return }
-        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
-        guard let name = page.wpe.paramSpecGetName(spec) else { return }
-        page.propertyChanged?(String(cString: name))
-    }
-
-    private static let onEvaluated: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
-        finish(source, result, data) { WPE.shared!.webViewEvaluateJavaScriptFinish($0, $1, $2) }
-    }
-
-    private static let onCalled: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
-        finish(source, result, data) { WPE.shared!.webViewCallAsyncJavaScriptFunctionFinish($0, $1, $2) }
-    }
-
-    /// A script's value as JSON (nil for undefined), or its error.
-    private static func finish(_ source: Pointer?, _ result: Pointer?, _ data: Pointer?,
-                               _ finish: (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?) {
-        guard let data else { return }
-        let evaluation = Unmanaged<Evaluation>.fromOpaque(data).takeRetainedValue()
-        let wpe = evaluation.page.wpe
-        var error: Pointer?
-        guard let source, let result, let value = finish(source, result, &error) else {
-            let described = error.map(wpe.error) ?? (domain: "", code: 0, message: "")
-            if let error { wpe.errorFree(error) }
-            evaluation.completion(.failure(EvaluationError(domain: described.domain, code: described.code, message: described.message)))
-            return
-        }
-        defer { wpe.objectUnref(value) }
-        if wpe.valueIsUndefined(value) != 0 {
-            evaluation.completion(.success(nil))
-            return
-        }
-        let json = wpe.valueToJSON(value, 0)
-        defer { wpe.free(json) }
-        evaluation.completion(.success(json.map { String(cString: $0) }))
-    }
+    // MARK: The loop
 
     /// Runs GLib's context on the main queue, a frame's time apart, while
     /// there are pages.
@@ -762,12 +254,52 @@ final class WebPage {
         scheduled = true
         after(time(0, 8_000_000), Updates.mainQueue, nil) { _ in
             WebPage.scheduled = false
-            WPE.shared?.dispatch()
+            WPEEngine.dispatch()
             WebPage.tick?()
-            if WebPage.count > 0 { WebPage.schedule() }
+            if WPEEngine.pageCount > 0 { WebPage.schedule() }
         }
     }
 
     /// Run after each pass of GLib's context: web views follow their sizes.
     nonisolated(unsafe) static var tick: (() -> Void)?
+
+    // MARK: The page's state
+
+    /// The page's reports, kept on its page and passed on by WebKit's
+    /// property names.
+    private final class Reporter: WPEWebContentDelegate {
+        weak var page: WebPage?
+
+        func shouldNavigate(_ content: WPEWebContent, url: String, kind: Int32, isMainFrame: Bool) -> Bool {
+            // onNavigation answers instead.
+            true
+        }
+
+        func didChangeURL(_ content: WPEWebContent, url: String?) {
+            page?.uri = url
+            page?.propertyChanged?("uri")
+        }
+
+        func didChangeTitle(_ content: WPEWebContent, title: String) {
+            page?.title = title
+            page?.propertyChanged?("title")
+        }
+
+        func didChangeLoading(_ content: WPEWebContent, isLoading: Bool, progress: Double) {
+            guard let page else { return }
+            let changed = page.isLoading != isLoading
+            (page.isLoading, page.progress) = (isLoading, progress)
+            page.propertyChanged?("estimated-load-progress")
+            if changed { page.propertyChanged?("is-loading") }
+        }
+
+        func didChangeHistory(_ content: WPEWebContent, canGoBack: Bool, canGoForward: Bool) {
+            guard let page else { return }
+            (page.canGoBack, page.canGoForward) = (canGoBack, canGoForward)
+        }
+
+        func didFinishNavigation(_ content: WPEWebContent) {}
+        func didFailNavigation(_ content: WPEWebContent, error: Int32, message: String) {}
+        func didEvaluateJavaScript(_ content: WPEWebContent, request: Int32, result: String?, error: String?) {}
+    }
 }

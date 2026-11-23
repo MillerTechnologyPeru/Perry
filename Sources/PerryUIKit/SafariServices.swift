@@ -22,7 +22,7 @@ enum WebSheets {
     /// back, forward, share and Safari. Each navigation asks `decide`
     /// whether to go ahead. Nil without WPE.
     static func page(url: NSObject, button: UIBarButtonItem, decide: @escaping (String) -> Bool) -> UIViewController? {
-        guard WPE.shared != nil else { return nil }
+        guard WPE.isAvailable else { return nil }
         let bounds = Screen.bounds
         let toolbarHeight: CGFloat = 44
         let container = UIView.objCClass.object.allocated().initializeView(frame: bounds).unsafeCast(to: UIView.self)

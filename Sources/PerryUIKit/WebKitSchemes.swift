@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import WPEWebKit
 
 // What a web view's configuration holds that its page uses: the script
 // message handlers and user scripts, which window.webkit.messageHandlers and
@@ -87,7 +88,7 @@ extension WKWebView {
             fclose(file)
             page.addUserScript(String(decoding: text, as: UTF8.self), atStart: false, mainFrameOnly: true)
         }
-        for (scheme, handler) in configuration.schemeHandlers { URLSchemes.register(scheme, handler: handler, view: object) }
+        for (scheme, handler) in configuration.schemeHandlers { URLSchemes.register(scheme, handler: handler, page: page, view: object) }
     }
 }
 
@@ -96,8 +97,8 @@ extension WKWebView {
 final class SchemeTaskState: ObjectState {
     let lock = Lock()
     required init() {}
-    /// The WebKitURISchemeRequest, referenced until the task is answered.
-    var request: UnsafeMutableRawPointer?
+    /// The engine's request, kept until the task is answered.
+    var request: WPEURLSchemeTask?
     var url = ""
     var method = "GET"
     var status = 200
@@ -154,47 +155,33 @@ open class WKURLSchemeTaskImpl: NSObject {
 // MARK: - Schemes
 
 enum URLSchemes {
-    /// The handler of each scheme and the web view it was given for, which
-    /// is not retained.
-    nonisolated(unsafe) static var handlers: [String: (handler: NSObject, view: UnsafeMutableRawPointer)] = [:]
-    nonisolated(unsafe) private static var registered: Set<String> = []
-
-    /// Has WPE's context hand `scheme`'s requests here, once; the handler is
-    /// the latest to be given.
-    static func register(_ scheme: String, handler: NSObject, view: UnsafeMutableRawPointer) {
+    /// Has the page hand `scheme`'s requests to its handler; the handler is
+    /// the latest to be given, and the web view, which is not retained,
+    /// the one it was given for.
+    static func register(_ scheme: String, handler: NSObject, page: WebPage, view: UnsafeMutableRawPointer) {
         handlers[scheme] = (handler, view)
-        guard let wpe = WPE.shared, !registered.contains(scheme), let context = wpe.contextGetDefault() else { return }
-        registered.insert(scheme)
-        if let manager = wpe.contextGetSecurityManager(context) {
-            wpe.securityManagerRegisterSecure(manager, scheme)
-            wpe.securityManagerRegisterCORSEnabled(manager, scheme)
-        }
-        wpe.contextRegisterURIScheme(context, scheme, unsafeBitCast(onRequest, to: UnsafeRawPointer.self), nil, nil)
+        guard page.content.registerURLScheme(scheme) else { return }
+        page.content.onURLSchemeRequest = { request in received(request) }
     }
 
-    /// WebKitURISchemeRequestCallback: a request, which is the task's until
-    /// it is answered.
-    private static let onRequest: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void = { request, _ in
-        guard let request, let wpe = WPE.shared, let uri = wpe.uriSchemeRequestGetURI(request).map({ String(cString: $0) }) else { return }
-        let scheme = String(uri.prefix { $0 != ":" })
+    /// The handler of each scheme and its web view.
+    nonisolated(unsafe) static var handlers: [String: (handler: NSObject, view: UnsafeMutableRawPointer)] = [:]
+
+    /// A request, which is the task's until it is answered.
+    private static func received(_ request: WPEURLSchemeTask) {
+        let scheme = String(request.url.prefix { $0 != ":" }).lowercased()
         guard let (handler, view) = handlers[scheme], handler.responds(to: "webView:startURLSchemeTask:") else {
-            fail(request, "No handler for \(scheme)")
+            request.fail(.badURL, message: "No handler for \(scheme)")
             return
         }
         let task = NSObject(WKURLSchemeTaskImpl.objCClass.pointer).newInstance()
         let state = WKURLSchemeTaskImpl.states[task.objcObject]
-        state.request = wpe.objectRef(request)
-        state.url = uri
-        state.method = wpe.uriSchemeRequestGetHTTPMethod(request).map { String(cString: $0) } ?? "GET"
+        state.request = request
+        state.url = request.url
+        state.method = request.method
         // The task is kept until it is answered.
         _ = ObjCRuntime.retain(task.objcObject)
         handler.sendStartURLSchemeTask(NSObject(view), task)
-    }
-
-    private static func fail(_ request: UnsafeMutableRawPointer, _ message: String) {
-        guard let wpe = WPE.shared, let error = wpe.errorNewLiteral(wpe.quarkFromString("perry-uri-scheme"), 1, message) else { return }
-        wpe.uriSchemeRequestFinishError(request, error)
-        wpe.errorFree(error)
     }
 
     /// The task answered, from any thread: the response is given to WebKit
@@ -207,7 +194,12 @@ enum URLSchemes {
         }
         guard first else { return }
         let box = Unmanaged.passRetained(Answer(task: task, failing: failing)).toOpaque()
-        _ = WPE.shared?.idleAdd(unsafeBitCast(onIdle, to: UnsafeRawPointer.self), box)
+        guard let after = Display.dispatchAfter, let time = Display.dispatchTime else {
+            return deliver(box)
+        }
+        after(time(0, 0), Updates.mainQueue, box) { data in
+            if let data { URLSchemes.deliver(data) }
+        }
     }
 
     private final class Answer {
@@ -216,34 +208,16 @@ enum URLSchemes {
         init(task: UnsafeMutableRawPointer, failing: Bool) { (self.task, self.failing) = (task, failing) }
     }
 
-    /// GSourceFunc: false, to run once.
-    private static let onIdle: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { data in
-        guard let data else { return 0 }
+    static func deliver(_ data: UnsafeMutableRawPointer) {
         let answer = Unmanaged<Answer>.fromOpaque(data).takeRetainedValue()
         defer { ObjCRuntime.release(answer.task) }
-        guard let wpe = WPE.shared, let state = WKURLSchemeTaskImpl.states.existing(answer.task),
-              let request = state.request else { return 0 }
+        guard let state = WKURLSchemeTaskImpl.states.existing(answer.task), let request = state.request else { return }
         state.request = nil
-        defer { wpe.objectUnref(request) }
         if answer.failing {
-            fail(request, "The handler failed")
-            return 0
+            request.fail(.unknown, message: "The handler failed")
+            return
         }
         let (status, type, body) = state.lock.withLock { (state.status, state.contentType, state.data) }
-        guard let bytes = body.withUnsafeBytes({ wpe.bytesNew($0.baseAddress, body.count) }) else {
-            fail(request, "Out of memory")
-            return 0
-        }
-        defer { wpe.bytesUnref(bytes) }
-        guard let stream = wpe.memoryInputStreamNewFromBytes(bytes), let response = wpe.uriSchemeResponseNew(stream, Int64(body.count)) else {
-            fail(request, "No response")
-            return 0
-        }
-        wpe.uriSchemeResponseSetStatus(response, UInt32(status), nil)
-        if let type { type.withCString { wpe.uriSchemeResponseSetContentType(response, $0) } }
-        wpe.uriSchemeRequestFinishWithResponse(request, response)
-        wpe.objectUnref(response)
-        wpe.objectUnref(stream)
-        return 0
+        request.finish(status: status, contentType: type, body: body)
     }
 }
