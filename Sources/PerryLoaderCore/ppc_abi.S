@@ -67,12 +67,11 @@ perry_ppc_darwin_trampoline:
     .size perry_ppc_darwin_trampoline, . - perry_ppc_darwin_trampoline
 
 // void perry_ppc_invoke_sysv(void *function, const uint32_t gprs[8],
-//                            const uint32_t *stack, uint32_t stack_words,
-//                            perry_ppc_registers *result)
+//                            const double fprs[8], const uint32_t *stack,
+//                            uint32_t stack_words, perry_ppc_registers *result)
 //
 // The stack words go at 8(r1), where SysV's callee finds its arguments past
-// r10. No floating-point registers: ppc_abi.c passes everything to Linux
-// code as words.
+// r10 and f8.
     .globl perry_ppc_invoke_sysv
     .hidden perry_ppc_invoke_sysv
     .type perry_ppc_invoke_sysv, @function
@@ -84,19 +83,27 @@ perry_ppc_invoke_sysv:
     stw %r31, 28(%r1)
     stw %r30, 24(%r1)
     mr %r31, %r1
-    mr %r30, %r7
+    mr %r30, %r8
     mr %r11, %r3                    // the function
     mr %r12, %r4                    // the registers
-    slwi %r9, %r6, 2
+    lfd %f1, 0(%r5)
+    lfd %f2, 8(%r5)
+    lfd %f3, 16(%r5)
+    lfd %f4, 24(%r5)
+    lfd %f5, 32(%r5)
+    lfd %f6, 40(%r5)
+    lfd %f7, 48(%r5)
+    lfd %f8, 56(%r5)
+    slwi %r9, %r7, 2
     addi %r9, %r9, 8 + 15
     rlwinm %r9, %r9, 0, 0, 27
     neg %r9, %r9
     stwux %r1, %r1, %r9             // room for the stack words, with the back chain
-    cmpwi %r6, 0
+    cmpwi %r7, 0
     beq 2f
-    mtctr %r6
+    mtctr %r7
     addi %r9, %r1, 8 - 4
-    addi %r10, %r5, -4
+    addi %r10, %r6, -4
 1:  lwzu %r0, 4(%r10)
     stwu %r0, 4(%r9)
     bdnz 1b
@@ -210,7 +217,7 @@ perry_ppc_invoke_darwin:
 \name:
     mflr %r0
     stw %r0, 4(%r1)
-    stwu %r1, -64(%r1)
+    stwu %r1, -128(%r1)
     stw %r3, 16(%r1)
     stw %r4, 20(%r1)
     stw %r5, 24(%r1)
@@ -219,15 +226,24 @@ perry_ppc_invoke_darwin:
     stw %r8, 36(%r1)
     stw %r9, 40(%r1)
     stw %r10, 44(%r1)
+    stfd %f1, 48(%r1)
+    stfd %f2, 56(%r1)
+    stfd %f3, 64(%r1)
+    stfd %f4, 72(%r1)
+    stfd %f5, 80(%r1)
+    stfd %f6, 88(%r1)
+    stfd %f7, 96(%r1)
+    stfd %f8, 104(%r1)
     li %r3, \kind
     addi %r4, %r1, 16
-    addi %r5, %r1, 64               // the caller's stack: its arguments past r10 are at 8
-    addi %r6, %r1, 48
+    addi %r5, %r1, 48
+    addi %r6, %r1, 128              // the caller's stack: its arguments past r10 are at 8
+    addi %r7, %r1, 112
     bl perry_ppc_send_from_linux
-    lwz %r3, 48(%r1)
-    lwz %r4, 52(%r1)
-    lfd %f1, 56(%r1)
-    addi %r1, %r1, 64
+    lwz %r3, 112(%r1)
+    lwz %r4, 116(%r1)
+    lfd %f1, 120(%r1)
+    addi %r1, %r1, 128
     lwz %r0, 4(%r1)
     mtlr %r0
     blr
