@@ -19,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
@@ -1671,4 +1672,35 @@ darwin_sysdir_state darwin_sysdir_get_next_search_path_enumeration(darwin_sysdir
     strncpy(path, found, 1023);
     path[1023] = '\0';
     return (state & ~0xffu) | 2;
+}
+
+// MARK: - Shared memory
+
+/// A shared memory object's name for glibc: one slash, then the rest
+/// without any (glibc's names are files in /dev/shm).
+static void shared_memory_name(const char *name, char *out, size_t size) {
+    while (*name == '/') name++;
+    snprintf(out, size, "/%s", name);
+    for (char *c = out + 1; *c; c++)
+        if (*c == '/') *c = '_';
+}
+
+// shm_open(name, flags, mode): glibc's, with Darwin's open flags. Its mode,
+// passed variadically, is an int in the third argument's place on every
+// architecture Perry runs.
+int darwin_shm_open(const char *name, int flags, int mode) DARWIN_SYMBOL(shm_open);
+int darwin_shm_open(const char *name, int flags, int mode) {
+    if (!name) { errno = EINVAL; return -1; }
+    char path[256];
+    shared_memory_name(name, path, sizeof path);
+    int linux_flags = open_flags_to_linux(flags);
+    return shm_open(path, linux_flags, linux_flags & O_CREAT ? (mode_t)mode : 0);
+}
+
+int darwin_shm_unlink(const char *name) DARWIN_SYMBOL(shm_unlink);
+int darwin_shm_unlink(const char *name) {
+    if (!name) { errno = EINVAL; return -1; }
+    char path[256];
+    shared_memory_name(name, path, sizeof path);
+    return shm_unlink(path);
 }
