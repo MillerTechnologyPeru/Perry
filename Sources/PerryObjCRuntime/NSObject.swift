@@ -66,12 +66,29 @@ public enum RootClasses {
     private static var fpretSend: UnsafeRawPointer? { nil }
     #endif
 
+    // On ppc providers send through the loader's sends, which move their
+    // arguments to Darwin's places by the method's type encoding (PPCABI).
+    #if arch(powerpc)
+    private static var send: UnsafeRawPointer { PPCABI.send ?? perry_objc_msgSend_address()! }
+    private static var superSend: UnsafeRawPointer { PPCABI.sendSuper2 ?? perry_objc_msgSendSuper2_address()! }
+    private static var sendStret: UnsafeRawPointer? { PPCABI.sendStret ?? stretSend }
+    private static var superSendStret: UnsafeRawPointer? { PPCABI.sendSuper2Stret ?? stretSuperSend }
+    #else
+    private static var send: UnsafeRawPointer { perry_objc_msgSend_address()! }
+    private static var superSend: UnsafeRawPointer { perry_objc_msgSendSuper2_address()! }
+    private static var sendStret: UnsafeRawPointer? { stretSend }
+    private static var superSendStret: UnsafeRawPointer? { stretSuperSend }
+    #endif
+
     /// Points the interop layer at this runtime's functions.
     private static func installInterop() {
+        #if arch(powerpc)
+        PPCABI.install()
+        #endif
         ObjCRuntime.install(ObjCRuntimeFunctions(
-            msgSend: perry_objc_msgSend_address(),
-            msgSendSuper2: perry_objc_msgSendSuper2_address(),
-            msgSendStret: stretSend, msgSendSuper2Stret: stretSuperSend, msgSendFpret: fpretSend,
+            msgSend: send,
+            msgSendSuper2: superSend,
+            msgSendStret: sendStret, msgSendSuper2Stret: superSendStret, msgSendFpret: fpretSend,
             retain: { $0.map(Objects.retain) },
             release: { if let object = $0 { Objects.release(object) } },
             autorelease: { $0.map(Objects.autorelease) },
