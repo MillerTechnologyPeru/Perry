@@ -1,3 +1,7 @@
+#if arch(powerpc)
+import Glibc
+#endif
+
 // The Objective-C runtime functions the interop layer calls.
 //
 // This library is linked into each provider that defines or uses
@@ -108,10 +112,23 @@ public enum ObjCRuntime {
             return false
         }
         ObjCPeers.load(lookup)
+        #if arch(powerpc)
+        // On ppc this provider sends through the loader's sends, which move
+        // the arguments to Darwin's places by the method's type encoding, as
+        // libobjc's own sends do (PPCABI in PerryObjCRuntime).
+        func send(_ name: String, _ fallback: String) -> UnsafeRawPointer? {
+            dlsym(nil, name).map(UnsafeRawPointer.init) ?? lookup(fallback).map(UnsafeRawPointer.init)
+        }
+        #else
+        func send(_ name: String, _ fallback: String) -> UnsafeRawPointer? {
+            lookup(fallback).map(UnsafeRawPointer.init)
+        }
+        #endif
         install(ObjCRuntimeFunctions(
-            msgSend: UnsafeRawPointer(msgSend), msgSendSuper2: UnsafeRawPointer(msgSendSuper2),
-            msgSendStret: lookup("_objc_msgSend_stret").map(UnsafeRawPointer.init),
-            msgSendSuper2Stret: lookup("_objc_msgSendSuper2_stret").map(UnsafeRawPointer.init),
+            msgSend: send("perry_ppc_send", "_objc_msgSend") ?? UnsafeRawPointer(msgSend),
+            msgSendSuper2: send("perry_ppc_send_super2", "_objc_msgSendSuper2") ?? UnsafeRawPointer(msgSendSuper2),
+            msgSendStret: send("perry_ppc_send_stret", "_objc_msgSend_stret"),
+            msgSendSuper2Stret: send("perry_ppc_send_super2_stret", "_objc_msgSendSuper2_stret"),
             msgSendFpret: lookup("_objc_msgSend_fpret").map(UnsafeRawPointer.init),
             retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
             getClass: getClass, objectGetClass: objectGetClass, registerSelector: registerSelector,
