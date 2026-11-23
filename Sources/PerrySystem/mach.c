@@ -608,7 +608,7 @@ static void release_stopped(suspension *entry) {
 static void install_suspend_handler(void) {
     struct sigaction action;
     memset(&action, 0, sizeof(action));
-    action.sa_sigaction = stop_here;
+    action.sa_sigaction = PERRY_SIGNAL_ENTRY(stop_here);
     action.sa_flags = SA_SIGINFO | SA_RESTART;
     sigfillset(&action.sa_mask);
     suspend_signal = SIGRTMIN + 4;
