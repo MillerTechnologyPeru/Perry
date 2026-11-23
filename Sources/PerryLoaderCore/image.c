@@ -140,8 +140,15 @@ typedef struct macho_file {
     size_t size;
 } macho_file;
 
+// Universal headers are big-endian, as ppc is: they swap only on a
+// little-endian loader.
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+static uint32_t be32(uint32_t v) { return v; }
+static uint64_t be64(uint64_t v) { return v; }
+#else
 static uint32_t be32(uint32_t v) { return __builtin_bswap32(v); }
 static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
+#endif
 
 #if defined(__x86_64__)
 #define NATIVE_CPU_TYPE CPU_TYPE_X86_64
@@ -149,6 +156,9 @@ static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 #elif defined(__i386__)
 #define NATIVE_CPU_TYPE CPU_TYPE_I386
 #define NATIVE_CPU_NAME "i386"
+#elif defined(__powerpc__)
+#define NATIVE_CPU_TYPE CPU_TYPE_POWERPC
+#define NATIVE_CPU_NAME "ppc"
 #elif defined(__LP64__)
 #define NATIVE_CPU_TYPE CPU_TYPE_ARM64
 #define NATIVE_CPU_NAME "arm64"
@@ -159,12 +169,13 @@ static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 
 // Whether this loader can run a slice of the architecture given. A 64-bit
 // loader runs arm64 (not arm64e); a 32-bit one runs armv7 and its variants
-// and armv6, whose code the armv7 cores run.
+// and armv6, whose code the armv7 cores run. A ppc one runs every 32-bit
+// PowerPC slice, the G5's (970) included, though a G4 cannot run that.
 static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
     uint32_t sub = (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK;
     if (cputype != NATIVE_CPU_TYPE)
         return false;
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__) || defined(__powerpc__)
     (void)sub;
     return true;
 #elif defined(__LP64__)
@@ -175,11 +186,14 @@ static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
 #endif
 }
 
-// How much a slice is preferred: later ARM generations over earlier ones.
+// How much a slice is preferred: later ARM generations over earlier ones,
+// and any PowerPC slice over the G5's, whose code a G4 cannot run.
 static int cpu_rank(int32_t cpusubtype) {
 #if defined(__LP64__) || defined(__i386__)
     (void)cpusubtype;
     return 0;
+#elif defined(__powerpc__)
+    return ((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_POWERPC_970 ? 0 : 1;
 #else
     switch ((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) {
     case CPU_SUBTYPE_ARM_V7S: return 4;
@@ -201,6 +215,10 @@ static void check_cpu(const char *path, int32_t cputype, int32_t cpusubtype) {
     (void)cpusubtype;
     if (cputype != CPU_TYPE_I386)
         perry_fatal("%s: not an i386 binary (cputype 0x%x)", path, cputype);
+#elif defined(__powerpc__)
+    (void)cpusubtype;
+    if (cputype != CPU_TYPE_POWERPC)
+        perry_fatal("%s: not a ppc binary (cputype 0x%x)", path, cputype);
 #elif defined(__LP64__)
     if (cputype != CPU_TYPE_ARM64)
         perry_fatal("%s: not an arm64 binary (cputype 0x%x)", path, cputype);
@@ -235,6 +253,8 @@ unsigned perry_macho_architectures(const char *path) {
                 archs |= PERRY_ARCH_X86_64;
             else if (head.mh.cputype == CPU_TYPE_I386)
                 archs |= PERRY_ARCH_I386;
+            else if (head.mh.cputype == CPU_TYPE_POWERPC)
+                archs |= PERRY_ARCH_PPC;
         } else if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
             bool is64 = magic == be32(FAT_MAGIC_64);
             size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
@@ -250,6 +270,8 @@ unsigned perry_macho_architectures(const char *path) {
                     archs |= PERRY_ARCH_X86_64;
                 else if (cputype == CPU_TYPE_I386)
                     archs |= PERRY_ARCH_I386;
+                else if (cputype == CPU_TYPE_POWERPC)
+                    archs |= PERRY_ARCH_PPC;
             }
         }
     }
@@ -433,6 +455,9 @@ static void parse_load_commands(perry_image *image) {
 #if defined(__i386__)
                 if (thread->flavor == X86_THREAD_STATE32 && thread->count > X86_THREAD_STATE32_EIP)
                     image->thread_pc = thread->state[X86_THREAD_STATE32_EIP];
+#elif defined(__powerpc__)
+                if (thread->flavor == PPC_THREAD_STATE && thread->count > PPC_THREAD_STATE_SRR0)
+                    image->thread_pc = thread->state[PPC_THREAD_STATE_SRR0];
 #else
                 if (thread->flavor == ARM_THREAD_STATE && thread->count > ARM_THREAD_STATE_PC)
                     image->thread_pc = thread->state[ARM_THREAD_STATE_PC];
@@ -1488,6 +1513,29 @@ static void run_start(void *start, int argc, char **argv, char **envp, char **ap
     __asm__ volatile("mov %0, %%esp\n xor %%ebp, %%ebp\n jmp *%1" : : "r"(stack), "r"(start));
     __builtin_unreachable();
 }
+#elif defined(__powerpc__)
+// Starts a program at crt1's `start` as the kernel does: r1 at argc, then
+// argv, the environment and the apple strings, each ended by a NULL, and lr
+// zero, which ends a back trace.
+__attribute__((noreturn))
+static void run_start(void *start, int argc, char **argv, char **envp, char **apple) {
+    size_t envc = 0, applec = 0;
+    while (envp && envp[envc]) envc++;
+    while (apple && apple[applec]) applec++;
+    size_t words = 1 + (size_t)argc + 1 + envc + 1 + applec + 1;
+    uintptr_t *stack = __builtin_alloca(words * sizeof(uintptr_t) + 16);
+    stack = (uintptr_t *)(((uintptr_t)stack + 15) & ~(uintptr_t)15);
+    size_t n = 0;
+    stack[n++] = (uintptr_t)argc;
+    for (int i = 0; i < argc; i++) stack[n++] = (uintptr_t)argv[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < envc; i++) stack[n++] = (uintptr_t)envp[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < applec; i++) stack[n++] = (uintptr_t)apple[i];
+    stack[n++] = 0;
+    __asm__ volatile("mr 1, %0\n li 0, 0\n mtlr 0\n mtctr %1\n bctr" : : "r"(stack), "r"(start) : "r0");
+    __builtin_unreachable();
+}
 #elif defined(__x86_64__)
 // Starts a program at crt1's `start` as the kernel does: rsp at argc, then
 // argv, the environment and the apple strings, each ended by a NULL.
@@ -1577,7 +1625,7 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
         perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
         run_start((void *)((uintptr_t)start | (image->thread_pc & 1)), argc, argv, envp, apple);
     }
-#elif defined(__i386__)
+#elif defined(__i386__) || defined(__powerpc__)
     if (!image->has_entry && !image->legacy_main && image->thread_pc) {
         void *start = perry_image_vmaddr(image, image->thread_pc);
         perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
