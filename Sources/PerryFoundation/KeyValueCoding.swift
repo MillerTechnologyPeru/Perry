@@ -97,16 +97,20 @@ enum KeyValueCoding {
         if ObjC.isKind(object, of: Dictionaries.dictionaryClass) {
             return Dictionaries.value(object, for: Strings.autoreleased(key))
         }
+        // A collection's elements are each sent -valueForKey:, as a class
+        // may answer it itself (Xcode 4's DVTExtensionParameter does).
+        let keyObject = Strings.autoreleased(key)
+        func element(_ member: id) -> id? { ObjC.send(member, ObjC.selector("valueForKey:"), keyObject) }
         if ObjC.isKind(object, of: Arrays.arrayClass) {
-            return Arrays.autoreleased(Arrays.elements(object).map { value($0, key) ?? Nulls.null })
+            return Arrays.autoreleased(Arrays.elements(object).map { element($0) ?? Nulls.null })
         }
         // A set's values of the key, as a set: a member with none adds nothing.
         if ObjC.isKind(object, of: Sets.setClass) {
-            return Sets.autoreleased(Sets.elements(object).compactMap { value($0, key) })
+            return Sets.autoreleased(Sets.elements(object).compactMap(element))
         }
         // An ordered set's, as an ordered set, by the same rule.
         if ObjC.isKind(object, of: OrderedSets.setClass) {
-            return OrderedSets.make(OrderedSets.setClass, OrderedSets.storage(object).members.compactMap { value($0, key) })
+            return OrderedSets.make(OrderedSets.setClass, OrderedSets.storage(object).members.compactMap(element))
         }
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
         // get<Key>, <key>, is<Key>, then _<key>, as Foundation looks.
