@@ -23,8 +23,11 @@
 #include "log.h"
 
 // armv7's code has no unwind tables: it unwinds with setjmp and longjmp,
-// through contexts it registers with libSystem as it runs.
-#if defined(__arm__)
+// through contexts it registers with libSystem as it runs. ppc's
+// Objective-C exceptions do the same (objc_exception_try_enter), and its
+// images, from before 10.6, have no __unwind_info; C++ exceptions through
+// their __eh_frame are not registered yet.
+#if defined(__arm__) || defined(__powerpc__)
 void perry_register_unwind_info(perry_image *image) { (void)image; }
 #else
 

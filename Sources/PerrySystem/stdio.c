@@ -46,6 +46,38 @@ _Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list l
 // fixed arguments, and read them alike.
 #define DARWIN_VA(name, darwin_ap) \
     va_list name = (va_list)(darwin_ap)
+#elif defined(__powerpc__)
+// A Darwin ppc va_list is a pointer to the 4-byte words of the parameter area
+// after the fixed arguments. glibc ppc's is a one-element array of a structure
+// counting the argument registers used and pointing at their save area and at
+// the stack's overflow area. With both register counts at 8, every register
+// is taken, and va_arg reads only the overflow area.
+typedef struct sysv_ppc_va_list {
+    unsigned char gpr;
+    unsigned char fpr;
+    unsigned short reserved;
+    void *overflow_arg_area;
+    void *reg_save_area;
+} sysv_ppc_va_list;
+
+_Static_assert(sizeof(sysv_ppc_va_list) == sizeof(va_list), "unexpected va_list layout");
+
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name; \
+    do { \
+        sysv_ppc_va_list tmp_ = { 8, 8, 0, (darwin_ap), NULL }; \
+        memcpy(&name, &tmp_, sizeof(name)); \
+    } while (0)
+
+// The overflow area aligns 64-bit values to 8 bytes, where Darwin's
+// parameter area does not, so a format's arguments are copied into glibc's
+// layout as on armv7.
+#define DARWIN_VA_FORMAT(name, format, darwin_ap) \
+    size_t size_##name = perry_repack_arguments((format), (darwin_ap), NULL); \
+    uintptr_t raw_##name = (uintptr_t)__builtin_alloca(size_##name + 8); \
+    void *repacked_##name = (void *)((raw_##name + 7) & ~(uintptr_t)7); \
+    perry_repack_arguments((format), (darwin_ap), repacked_##name); \
+    DARWIN_VA(name, repacked_##name)
 #else
 // A Darwin armv7 va_list is a pointer to the 4-byte slots after the fixed
 // arguments, and glibc armhf's is a struct holding such a pointer. Slots read
@@ -70,7 +102,7 @@ _Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
 #endif
 
 #if defined(__aarch64__) || defined(__x86_64__) || defined(__i386__)
-// Arguments need no repacking but on armv7.
+// Arguments need no repacking but on armv7 and ppc.
 #define DARWIN_VA_FORMAT(name, format, darwin_ap) DARWIN_VA(name, darwin_ap)
 #endif
 
@@ -252,9 +284,9 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
-#if defined(__arm__) || defined(__i386__)
-// The same, and asl_log's, for armv7's variadic thunks, which pass a Darwin
-// va_list that the format's arguments are repacked from.
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
+// The same, and asl_log's, for the 32-bit variadic thunks, which pass a
+// Darwin va_list that the format's arguments are repacked from.
 int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
     (void)locale;
     return darwin_vsnprintf(buf, size, fmt, ap);

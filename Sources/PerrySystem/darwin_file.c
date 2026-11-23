@@ -219,7 +219,19 @@ char *darwin_fgetln(FILE *stream, size_t *length) {
 
 STREAM_FUNCTION(int, fseek, (FILE *stream, long offset, int whence), fseek(REAL(stream), offset, whence))
 STREAM_FUNCTION(long, ftell, (FILE *stream), ftell(REAL(stream)))
+#if defined(__powerpc__) && !defined(__powerpc64__)
+// Darwin's ppc passes the offset in r4:r5 and glibc's in r5:r6, so _fseeko is
+// an adapter (thunks_ppc.S) that calls this.
+int perry_fseeko(FILE *stream, off_t offset, int whence) __asm__("perry_fseeko")
+    __attribute__((visibility("hidden"), used));
+int perry_fseeko(FILE *stream, off_t offset, int whence) {
+    int result = fseeko(REAL(stream), offset, whence);
+    sync_flags(stream);
+    return result;
+}
+#else
 STREAM_FUNCTION(int, fseeko, (FILE *stream, off_t offset, int whence), fseeko(REAL(stream), offset, whence))
+#endif
 STREAM_FUNCTION(off_t, ftello, (FILE *stream), ftello(REAL(stream)))
 STREAM_FUNCTION(int, feof, (FILE *stream), feof(REAL(stream)))
 STREAM_FUNCTION(int, ferror, (FILE *stream), ferror(REAL(stream)))

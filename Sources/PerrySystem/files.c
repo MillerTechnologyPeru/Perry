@@ -313,7 +313,7 @@ int perry_vopen(const char *path, int flags, va_list arguments) {
 
 /// fopen, finding a file to read in any case.
 FILE *perry_fopen(const char *path, const char *mode) {
-#if defined(__arm__) || defined(__i386__)
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
     // Large files, as Darwin's fopen opens them.
     FILE *(*open_file)(const char *, const char *) = fopen64;
 #else
@@ -461,17 +461,19 @@ int perry_vfcntl(int fd, int command, va_list arguments) {
 
 // MARK: - stat
 
-// On i386, programs for 10.6 and later call the 64-bit-inode functions by a
-// suffixed name; the plain names have the layouts programs for earlier
+// On i386 and ppc, programs built for 64-bit inodes (the default from 10.6,
+// an option on 10.5) call the functions by a suffixed name; the plain names have the layouts programs for earlier
 // systems were built with, at the end of this file.
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 #define INODE64_SYMBOL(name) __asm__("_" #name "$INODE64") __attribute__((visibility("default"), used))
 #else
 #define INODE64_SYMBOL(name) DARWIN_SYMBOL(name)
 #endif
 
 // Darwin's armv7 aligns 64-bit members to 4 bytes, so st_size is at offset 60
-// and the structure is 108 bytes; arm64's is 144.
+// and the structure is 108 bytes; arm64's is 144. ppc's aligns them to 8, as
+// Linux's does, but its timespecs are 8 bytes, so st_size is at 64 and the
+// structure is 112.
 #if defined(__arm__) || defined(__i386__)
 #pragma pack(push, 4)
 #endif
@@ -499,6 +501,9 @@ struct darwin_stat {
 #pragma pack(pop)
 _Static_assert(sizeof(struct darwin_stat) == 108, "struct stat is 108 bytes on Darwin armv7");
 _Static_assert(offsetof(struct darwin_stat, st_size) == 60, "st_size is at 60 on Darwin armv7");
+#elif defined(__powerpc__)
+_Static_assert(sizeof(struct darwin_stat) == 112, "struct stat is 112 bytes on Darwin ppc");
+_Static_assert(offsetof(struct darwin_stat, st_size) == 64, "st_size is at 64 on Darwin ppc");
 #else
 _Static_assert(sizeof(struct darwin_stat) == 144, "struct stat is 144 bytes on Darwin");
 #endif
@@ -845,7 +850,7 @@ int darwin_fgetattrlist(int fd, struct darwin_attrlist *list, void *buffer, size
 
 // MARK: - File systems
 
-#if !(defined(__arm__) || defined(__i386__))
+#if !(defined(__arm__) || defined(__i386__) || defined(__powerpc__))
 // Darwin's struct statvfs: its block and file counts are 32-bit
 // (fsblkcnt_t, fsfilcnt_t), so a large file system's are given in larger
 // fragments, as Darwin's libc scales them.
@@ -950,7 +955,7 @@ static void statfs_to_darwin(const struct statfs *info, struct darwin_statfs *ou
     strcpy(out->f_mntfromname, "/dev/disk1s1");
 }
 
-#if defined(__arm__) || defined(__i386__)
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
 // struct statvfs on 32-bit Darwin: eleven 32-bit words, where glibc's
 // has 64-bit counts.
 struct darwin_statvfs {
@@ -1147,7 +1152,7 @@ struct darwin_dirent {
 
 _Static_assert(offsetof(struct darwin_dirent, d_name) == 21, "d_name is at 21 on Darwin");
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 // struct dirent before 64-bit inodes.
 struct darwin_dirent32 {
     uint32_t d_ino;
@@ -1163,7 +1168,7 @@ _Static_assert(sizeof(struct darwin_dirent32) == 264, "struct dirent is 264 byte
 typedef struct darwin_dir {
     DIR *dir;
     struct darwin_dirent entry;
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
     struct darwin_dirent32 entry32;
 #endif
 } darwin_dir;
@@ -1389,9 +1394,9 @@ int darwin_copyfile(const char *from, const char *to, void *state, uint32_t flag
     return result;
 }
 
-// MARK: - i386's layouts from before 64-bit inodes
+// MARK: - i386's and ppc's layouts from before 64-bit inodes
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 struct darwin_stat32 {
     int32_t st_dev;
     uint32_t st_ino;

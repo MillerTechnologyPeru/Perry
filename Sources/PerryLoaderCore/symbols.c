@@ -216,7 +216,7 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
     return false;
 }
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 // Images linked before export tries list their exports in the symbol table,
 // sorted by name by Apple's linker; others' (RAD's Bink) are in any order,
 // and are looked through.
@@ -304,7 +304,7 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
             return true;
         }
     }
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
     if (!image->exports_trie && image->symtab && image->dysymtab && symbol_table_lookup(image, name, out))
         return true;
 #endif
@@ -357,7 +357,7 @@ static const struct {
 // calls (CarbonCore's) and QuickDraw's are the Carbon provider's here, which
 // older programs bind to CoreServices and ApplicationServices.
 static void reexport_for_install_name(perry_provider *provider, const char *install_name) {
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc__)
     bool application_services = strstr(install_name, "/ApplicationServices.framework/") != NULL;
     bool core_services = strstr(install_name, "/CoreServices.framework/") != NULL;
     bool carbon = strstr(install_name, "/Carbon.framework/") != NULL;
@@ -473,7 +473,7 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "System");
         return true;
     }
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc__)
     if (strstr(install_name, "/ApplicationServices.framework/")) {
         snprintf(out, out_size, "CoreGraphics");
         return true;
@@ -775,9 +775,10 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
         }
     }
     provider->searching = false;
-#if defined(__i386__)
-    // size_t is unsigned long on i386 Darwin and unsigned int on Linux, which
-    // C++ mangles differently: an 'm' parameter here is a 'j' in libstdc++.
+#if defined(__i386__) || defined(__powerpc__)
+    // size_t is unsigned long on i386 and ppc Darwin and unsigned int on
+    // Linux, which C++ mangles differently: an 'm' parameter here is a 'j'
+    // in libstdc++.
     if (!sym && strncmp(name, "__Z", 3) == 0 && strchr(name, 'm')) {
         char linux_name[1024];
         snprintf(linux_name, sizeof(linux_name), "%s", name);
@@ -792,7 +793,7 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
     }
 #endif
     // Darwin's libc names variants of functions after their ABI ($INODE64,
-    // $DARWIN_EXTSN, $UNIX2003, $1050) on x86, and the cancellation-free
+    // $DARWIN_EXTSN, $UNIX2003, $1050) on x86 and ppc, and the cancellation-free
     // ones ($NOCANCEL) everywhere. Providers have the current ABI, under the
     // plain name.
     const char *variant = sym ? NULL : strchr(name, '$');
@@ -800,6 +801,10 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
         static const char *const suffixes[] = {
 #if defined(__x86_64__) || defined(__i386__)
             "$INODE64", "$DARWIN_EXTSN", "$UNIX2003", "$1050",
+#elif defined(__powerpc__)
+            // $LDBL128: the 128-bit long double of Mac OS X 10.4's GCC 4,
+            // which libSystem's formatting functions take.
+            "$DARWIN_EXTSN", "$UNIX2003", "$1050", "$LDBL128",
 #endif
             "$NOCANCEL"
         };
@@ -876,7 +881,11 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     if (*slot)
         return *slot;
 
+#if defined(__powerpc__)
+    enum { STUB_SIZE = 64 };    // with the instructions that set r2
+#else
     enum { STUB_SIZE = 32 };
+#endif
     if (!current_page.base || current_page.used + STUB_SIZE > current_page.size) {
         current_page.size = 0x4000;
         current_page.base = mmap(NULL, current_page.size, PROT_READ | PROT_WRITE | PROT_EXEC,
@@ -911,6 +920,18 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     bytes[10] = 0xff; bytes[11] = 0xd0;                 // call eax
     bytes[12] = 0x83; bytes[13] = 0xc4; bytes[14] = 0x04;   // add esp, 4
     bytes[15] = 0xc3;                                   // ret
+#elif defined(__powerpc__)
+    // r2 is set for the handler, which is Linux code. The description goes
+    // in r3, the first argument; lr still holds the caller's return address.
+    uint32_t text = (uint32_t)(uintptr_t)strdup(description);
+    uint32_t handler = (uint32_t)(uintptr_t)&perry_unimplemented;
+    int n = perry_ppc_emit_thread_pointer(code);
+    code[n++] = 0x3c600000u | (text >> 16);         // lis r3, description@h
+    code[n++] = 0x60630000u | (text & 0xffff);      // ori r3, r3, description@l
+    code[n++] = 0x3d800000u | (handler >> 16);      // lis r12, handler@h
+    code[n++] = 0x618c0000u | (handler & 0xffff);   // ori r12, r12, handler@l
+    code[n++] = 0x7d8903a6u;                        // mtctr r12
+    code[n++] = 0x4e800420u;                        // bctr
 #elif defined(__x86_64__)
     code[0] = 0x093d8b48;   // mov rdi, [rip + 9]    (description)
     code[1] = 0xff000000;   // jmp [rip + 11]        (handler)

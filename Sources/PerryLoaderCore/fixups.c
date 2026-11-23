@@ -8,6 +8,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
 
 // MARK: - Binding
 
@@ -18,7 +23,12 @@ static uint64_t bind_target(perry_loader *loader, perry_image *image, int ordina
     if (image->header->filetype == MH_EXECUTE && image != loader->main_image && strcmp(name, "_exit") == 0)
         return (uint64_t)(uintptr_t)perry_extension_exit;
     perry_symbol sym = perry_resolve(loader, image, ordinal, name, weak_import);
+#if defined(__powerpc__)
+    // Darwin code reaches a Linux function through a stub that sets r2.
+    return (uint64_t)(uintptr_t)perry_ppc_linux_entry(sym.address);
+#else
     return (uint64_t)(uintptr_t)sym.address;
+#endif
 }
 
 // A pointer-sized slot in the image, which Darwin's ARM ABIs size as the
@@ -374,7 +384,7 @@ typedef struct classic_symbols {
     uint32_t strings_size;
 } classic_symbols;
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 // What `__dyld_func_lookup` gives crt1 of programs from before Mac OS X 10.5,
 // for the startup functions it looks up and calls with no arguments: there
 // is nothing left for them to do.
@@ -382,7 +392,11 @@ static void dyld_nothing(void) {}
 
 static int dyld_func_lookup(const char *name, void **address) {
     (void)name;
+#if defined(__powerpc__)
+    *address = perry_ppc_thread_stub((void *)dyld_nothing);
+#else
     *address = (void *)dyld_nothing;
+#endif
     return 1;
 }
 
@@ -397,8 +411,13 @@ static void fill_dyld_section(perry_image *image) {
             if (strncmp(section->sectname, "__dyld", 16) != 0 || section->size < 2 * sizeof(slot_t))
                 continue;
             slot_t *slots = perry_image_vmaddr(image, section->addr);
+#if defined(__powerpc__)
+            slots[0] = (slot_t)(uintptr_t)perry_ppc_thread_stub((void *)dyld_nothing);
+            slots[1] = (slot_t)(uintptr_t)perry_ppc_thread_stub((void *)dyld_func_lookup);
+#else
             slots[0] = (slot_t)(uintptr_t)dyld_nothing;
             slots[1] = (slot_t)(uintptr_t)dyld_func_lookup;
+#endif
         }
     }
 }
@@ -511,9 +530,11 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
     const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
     for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
         const struct relocation_info *relocation = &local[i];
-#if defined(__i386__)
-        // On i386 scattered entries are also pointers to a local symbol with
-        // an offset: r_address is their low 24 bits, then r_type and r_length.
+#if defined(__i386__) || defined(__powerpc__)
+        // On i386 and ppc scattered entries are also pointers to a local
+        // symbol with an offset: r_address is their low 24 bits, then r_type
+        // and r_length. ppc's others are parts of instructions' immediates,
+        // which code built to be slid (PIC) has none of.
         if ((uint32_t)relocation->r_address & R_SCATTERED) {
             uint32_t bits = (uint32_t)relocation->r_address;
             if (((bits >> 24) & 0xf) == GENERIC_RELOC_VANILLA && ((bits >> 28) & 3) == 2 && !((bits >> 30) & 1))
@@ -533,6 +554,68 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
 }
 #endif
 
+#if defined(__powerpc__)
+// MARK: - The commpage
+
+// Apple's GCC sends Objective-C messages on ppc (Mac OS X 10.4 and later) with
+// an absolute branch to the commpage's copy of objc_msgSend, `bla 0xfffeff00`,
+// or `ba` for a tail call. On 32-bit Linux that address is the kernel's. So
+// each such branch becomes a relative one to an island near the image, which
+// jumps to libobjc's objc_msgSend. Branches reach 32 MB either way.
+enum { COMMPAGE_MSGSEND = 0xfffeff00u, BRANCH_REACH = 32u << 20 };
+
+static uint32_t *commpage_island(perry_loader *loader, perry_image *image) {
+    perry_symbol send = perry_resolve(loader, image, BIND_SPECIAL_DYLIB_FLAT_LOOKUP, "_objc_msgSend", false);
+    if (!send.address)
+        perry_fatal("%s: sends messages through the commpage, and no library has objc_msgSend", image->path);
+    uint32_t target = (uint32_t)(uintptr_t)perry_ppc_linux_entry(send.address);
+    // Right after the image, or failing that anywhere in reach of it.
+    uintptr_t end = (uintptr_t)perry_image_vmaddr(image, image->vm_start) + image->vm_size;
+    uint32_t *island = MAP_FAILED;
+    for (uintptr_t hint = end; island == MAP_FAILED && hint < end + BRANCH_REACH / 2; hint += 0x10000)
+        island = mmap((void *)hint, 0x1000, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (island == MAP_FAILED)
+        perry_fatal("%s: no room near the image for the commpage's objc_msgSend", image->path);
+    island[0] = 0x3d800000u | (target >> 16);       // lis r12, objc_msgSend@h
+    island[1] = 0x618c0000u | (target & 0xffff);    // ori r12, r12, objc_msgSend@l
+    island[2] = 0x7d8903a6u;                        // mtctr r12
+    island[3] = 0x4e800420u;                        // bctr
+    __builtin___clear_cache((char *)island, (char *)(island + 4));
+    mprotect(island, 0x1000, PROT_READ | PROT_EXEC);
+    return island;
+}
+
+static void patch_commpage_branches(perry_loader *loader, perry_image *image) {
+    const uint32_t absolute = 0x48000000u | (COMMPAGE_MSGSEND & 0x03fffffcu) | 2;    // ba
+    uint32_t *island = NULL;
+    unsigned patched = 0;
+    for (uint32_t s = 0; s < image->segment_count; s++) {
+        const perry_segment *segment = &image->segments[s];
+        for (uint32_t i = 0; segment->mapped && i < segment->nsects; i++) {
+            const section_t *section = &segment->sections[i];
+            // S_ATTR_PURE_INSTRUCTIONS or S_ATTR_SOME_INSTRUCTIONS.
+            if (!(section->flags & 0x80000400u))
+                continue;
+            uint32_t *words = perry_image_vmaddr(image, section->addr);
+            for (uint32_t k = 0; k < section->size / 4; k++) {
+                if ((words[k] & ~1u) != absolute)
+                    continue;
+                if (!island)
+                    island = commpage_island(loader, image);
+                intptr_t offset = (intptr_t)island - (intptr_t)&words[k];
+                if (offset < -(intptr_t)BRANCH_REACH || offset >= (intptr_t)BRANCH_REACH)
+                    perry_fatal("%s: the commpage's objc_msgSend is out of a branch's reach", image->path);
+                words[k] = 0x48000000u | ((uint32_t)offset & 0x03fffffcu) | (words[k] & 1);   // b or bl
+                patched++;
+            }
+        }
+    }
+    if (patched)
+        perry_trace(PERRY_TRACE_BIND, "%s: %u commpage objc_msgSend branches to %p", image->path, patched, (void *)island);
+}
+#endif
+
 void perry_apply_fixups(perry_loader *loader, perry_image *image) {
     if (image->fixed_up)
         return;
@@ -547,7 +630,10 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
 #endif
     else if (image->slide != 0 && image->header->filetype != MH_EXECUTE)
         perry_warn("%s: no fixup information; image may not work when slid", image->path);
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
     fill_dyld_section(image);
+#endif
+#if defined(__powerpc__)
+    patch_commpage_branches(loader, image);
 #endif
 }

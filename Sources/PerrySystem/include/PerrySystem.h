@@ -38,6 +38,15 @@
         call; \
         __asm__ volatile("mov r9, %0" : : "r"(perry_r9) : "memory"); \
     } while (0)
+#elif defined(__powerpc__) && !defined(__powerpc64__)
+// On ppc Darwin's code may change r2, Linux's thread pointer, which Linux's
+// code never reloads.
+#define PERRY_KEEP_R9(call) do { \
+        unsigned long perry_r2; \
+        __asm__ volatile("mr %0, 2" : "=r"(perry_r2)); \
+        call; \
+        __asm__ volatile("mr 2, %0" : : "r"(perry_r2) : "memory"); \
+    } while (0)
 #else
 #define PERRY_KEEP_R9(call) do { call; } while (0)
 #endif
@@ -152,11 +161,12 @@ extern const void *perry_system_main_header;
 typedef struct { int darwin, minor; } perry_macos_release;
 perry_macos_release perry_system_macos_release(void);
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__powerpc__)
 #include <stddef.h>
-// Darwin armv7's varargs for a printf-style format, in glibc armhf's layout:
-// the bytes `format`'s arguments take, and, when `out` is not NULL (8-byte
-// aligned, that big), the arguments copied there from the Darwin va_list.
+// Darwin armv7's or ppc's varargs for a printf-style format, in glibc's
+// layout (armhf's va_list, ppc's overflow area): the bytes `format`'s
+// arguments take, and, when `out` is not NULL (8-byte aligned, that big), the
+// arguments copied there from the Darwin va_list.
 size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *out);
 #endif
 

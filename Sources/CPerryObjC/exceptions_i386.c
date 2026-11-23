@@ -1,22 +1,30 @@
-// Objective-C exceptions on i386, whose old ABI has no unwind tables: each
-// @try sets a jmp_buf with Darwin's setjmp, registers it with
+// Objective-C exceptions on i386 and ppc, whose old ABI has no unwind tables:
+// each @try sets a jmp_buf with Darwin's setjmp, registers it with
 // objc_exception_try_enter, and a throw longjmps to the innermost one.
 
-#if defined(__i386__) && defined(__ELF__)
+#if (defined(__i386__) || (defined(__powerpc__) && !defined(__powerpc64__))) && defined(__ELF__)
 
 #include "CPerryObjC.h"
 
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 
-// What the compiler reserves in a function with @try: a jmp_buf, then
-// words for the runtime. The exception is in pointers[0], the next outer
-// handler in pointers[1].
+// What the compiler reserves in a function with @try: a jmp_buf (Darwin's
+// _JBLEN words), then words for the runtime. The exception is in
+// pointers[0], the next outer handler in pointers[1].
+#if defined(__i386__)
+#define JMP_BUF_WORDS 18
+_Noreturn void perry_objc_i386_longjmp(int *buffer);
+#define exception_longjmp perry_objc_i386_longjmp
+#else
+#define JMP_BUF_WORDS 192
+_Noreturn void perry_objc_ppc_longjmp(int *buffer);
+#define exception_longjmp perry_objc_ppc_longjmp
+#endif
+
 struct exception_data {
-    int buffer[18];
+    int buffer[JMP_BUF_WORDS];
     void *pointers[4];
 };
-
-_Noreturn void perry_objc_i386_longjmp(int *buffer);
 
 static __thread struct exception_data *innermost;
 
@@ -46,7 +54,7 @@ _Noreturn void objc_exception_throw(void *object) {
         perry_objc_uncaught_exception(object);
     innermost = handler->pointers[1];
     handler->pointers[0] = object;
-    perry_objc_i386_longjmp(handler->buffer);
+    exception_longjmp(handler->buffer);
 }
 
 _Noreturn void objc_exception_rethrow(void) DARWIN_SYMBOL("_objc_exception_rethrow");

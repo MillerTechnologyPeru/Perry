@@ -319,9 +319,10 @@ void *perry_map_pages(size_t length, int protection, int flags, int fd, off_t of
     return aligned;
 }
 
-#if defined(__arm__)
-// Darwin's armv7 passes mmap's 64-bit offset differently from glibc's ABI,
-// so the exported _mmap is an adapter (thunks_arm.S) that calls this.
+#if defined(__arm__) || (defined(__powerpc__) && !defined(__powerpc64__))
+// Darwin's armv7 and ppc pass mmap's 64-bit offset differently from glibc's
+// ABI, so the exported _mmap is an adapter (thunks_arm.S, thunks_ppc.S) that
+// calls this.
 #define MMAP_SYMBOL __asm__("perry_mmap") __attribute__((visibility("hidden"), used))
 #else
 #define MMAP_SYMBOL DARWIN_SYMBOL(mmap)

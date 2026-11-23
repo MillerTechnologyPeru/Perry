@@ -38,6 +38,10 @@ void perry_loader_init(perry_loader *loader) {
     if (host_page_size > 0x4000)
         perry_fatal("host page size %zu is larger than the 16 KB Mach-O segment alignment", host_page_size);
 
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    perry_ppc_note_thread();
+#endif
+
     const char *env = getenv("PERRY_LIBRARY_PATH");
     if (env) {
         char *copy = strdup(env);
@@ -140,8 +144,15 @@ typedef struct macho_file {
     size_t size;
 } macho_file;
 
+// Universal headers are big-endian, as ppc is: they swap only on a
+// little-endian loader.
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+static uint32_t be32(uint32_t v) { return v; }
+static uint64_t be64(uint64_t v) { return v; }
+#else
 static uint32_t be32(uint32_t v) { return __builtin_bswap32(v); }
 static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
+#endif
 
 #if defined(__x86_64__)
 #define NATIVE_CPU_TYPE CPU_TYPE_X86_64
@@ -149,6 +160,9 @@ static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 #elif defined(__i386__)
 #define NATIVE_CPU_TYPE CPU_TYPE_I386
 #define NATIVE_CPU_NAME "i386"
+#elif defined(__powerpc__)
+#define NATIVE_CPU_TYPE CPU_TYPE_POWERPC
+#define NATIVE_CPU_NAME "ppc"
 #elif defined(__LP64__)
 #define NATIVE_CPU_TYPE CPU_TYPE_ARM64
 #define NATIVE_CPU_NAME "arm64"
@@ -159,12 +173,13 @@ static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 
 // Whether this loader can run a slice of the architecture given. A 64-bit
 // loader runs arm64 (not arm64e); a 32-bit one runs armv7 and its variants
-// and armv6, whose code the armv7 cores run.
+// and armv6, whose code the armv7 cores run. A ppc one runs every 32-bit
+// PowerPC slice, the G5's (970) included, though a G4 cannot run that.
 static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
     uint32_t sub = (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK;
     if (cputype != NATIVE_CPU_TYPE)
         return false;
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__) || defined(__powerpc__)
     (void)sub;
     return true;
 #elif defined(__LP64__)
@@ -175,11 +190,14 @@ static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
 #endif
 }
 
-// How much a slice is preferred: later ARM generations over earlier ones.
+// How much a slice is preferred: later ARM generations over earlier ones,
+// and any PowerPC slice over the G5's, whose code a G4 cannot run.
 static int cpu_rank(int32_t cpusubtype) {
 #if defined(__LP64__) || defined(__i386__)
     (void)cpusubtype;
     return 0;
+#elif defined(__powerpc__)
+    return ((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_POWERPC_970 ? 0 : 1;
 #else
     switch ((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) {
     case CPU_SUBTYPE_ARM_V7S: return 4;
@@ -201,6 +219,10 @@ static void check_cpu(const char *path, int32_t cputype, int32_t cpusubtype) {
     (void)cpusubtype;
     if (cputype != CPU_TYPE_I386)
         perry_fatal("%s: not an i386 binary (cputype 0x%x)", path, cputype);
+#elif defined(__powerpc__)
+    (void)cpusubtype;
+    if (cputype != CPU_TYPE_POWERPC)
+        perry_fatal("%s: not a ppc binary (cputype 0x%x)", path, cputype);
 #elif defined(__LP64__)
     if (cputype != CPU_TYPE_ARM64)
         perry_fatal("%s: not an arm64 binary (cputype 0x%x)", path, cputype);
@@ -235,6 +257,8 @@ unsigned perry_macho_architectures(const char *path) {
                 archs |= PERRY_ARCH_X86_64;
             else if (head.mh.cputype == CPU_TYPE_I386)
                 archs |= PERRY_ARCH_I386;
+            else if (head.mh.cputype == CPU_TYPE_POWERPC)
+                archs |= PERRY_ARCH_PPC;
         } else if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
             bool is64 = magic == be32(FAT_MAGIC_64);
             size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
@@ -250,6 +274,8 @@ unsigned perry_macho_architectures(const char *path) {
                     archs |= PERRY_ARCH_X86_64;
                 else if (cputype == CPU_TYPE_I386)
                     archs |= PERRY_ARCH_I386;
+                else if (cputype == CPU_TYPE_POWERPC)
+                    archs |= PERRY_ARCH_PPC;
             }
         }
     }
@@ -433,6 +459,9 @@ static void parse_load_commands(perry_image *image) {
 #if defined(__i386__)
                 if (thread->flavor == X86_THREAD_STATE32 && thread->count > X86_THREAD_STATE32_EIP)
                     image->thread_pc = thread->state[X86_THREAD_STATE32_EIP];
+#elif defined(__powerpc__)
+                if (thread->flavor == PPC_THREAD_STATE && thread->count > PPC_THREAD_STATE_SRR0)
+                    image->thread_pc = thread->state[PPC_THREAD_STATE_SRR0];
 #else
                 if (thread->flavor == ARM_THREAD_STATE && thread->count > ARM_THREAD_STATE_PC)
                     image->thread_pc = thread->state[ARM_THREAD_STATE_PC];
@@ -1212,14 +1241,14 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
                 initializer_fn *fns = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(void *); k++) {
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fns[k], image->path);
-                    fns[k](argc, argv, envp, apple, &vars);
+                    PERRY_DARWIN_CALL(fns[k](argc, argv, envp, apple, &vars));
                 }
             } else if (type == S_INIT_FUNC_OFFSETS) {
                 const uint32_t *offsets = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(uint32_t); k++) {
                     initializer_fn fn = (initializer_fn)(void *)(image->base + offsets[k]);
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fn, image->path);
-                    fn(argc, argv, envp, apple, &vars);
+                    PERRY_DARWIN_CALL(fn(argc, argv, envp, apple, &vars));
                 }
             }
         }
@@ -1230,7 +1259,7 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
 
 static perry_loader *startup_loader;
 
-static void *lookup_symbol(const char *install_name, const char *name) {
+static void *find_symbol(const char *install_name, const char *name) {
     perry_loader *loader = startup_loader;
     for (perry_image *image = loader->images; image; image = image->next) {
         // By install name, or by path: the main program's, and a library's
@@ -1268,7 +1297,7 @@ static void *lookup_symbol(const char *install_name, const char *name) {
 // As dlsym(RTLD_NEXT) looks for code at `caller`: in the images loaded
 // after the one it is in, then in the providers. A library that defines a
 // function of the system's, to wrap it, finds the system's so.
-static void *lookup_symbol_after(const void *caller, const char *name) {
+static void *find_symbol_after(const void *caller, const char *name) {
     perry_loader *loader = startup_loader;
     perry_image *from = NULL;
     for (perry_image *image = loader->images; image && !from; image = image->next) {
@@ -1290,6 +1319,24 @@ static void *lookup_symbol_after(const void *caller, const char *name) {
             return address;
     }
     return NULL;
+}
+
+// What dlsym and the like give Darwin code, which may call it: on ppc a Linux
+// function's stub that sets r2.
+static void *darwin_callable(void *address) {
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    return perry_ppc_linux_entry(address);
+#else
+    return address;
+#endif
+}
+
+static void *lookup_symbol(const char *install_name, const char *name) {
+    return darwin_callable(find_symbol(install_name, name));
+}
+
+static void *lookup_symbol_after(const void *caller, const char *name) {
+    return darwin_callable(find_symbol_after(caller, name));
 }
 
 // Darwin's layering: libSystem, then libobjc, then libdispatch (whose
@@ -1488,6 +1535,29 @@ static void run_start(void *start, int argc, char **argv, char **envp, char **ap
     __asm__ volatile("mov %0, %%esp\n xor %%ebp, %%ebp\n jmp *%1" : : "r"(stack), "r"(start));
     __builtin_unreachable();
 }
+#elif defined(__powerpc__)
+// Starts a program at crt1's `start` as the kernel does: r1 at argc, then
+// argv, the environment and the apple strings, each ended by a NULL, and lr
+// zero, which ends a back trace.
+__attribute__((noreturn))
+static void run_start(void *start, int argc, char **argv, char **envp, char **apple) {
+    size_t envc = 0, applec = 0;
+    while (envp && envp[envc]) envc++;
+    while (apple && apple[applec]) applec++;
+    size_t words = 1 + (size_t)argc + 1 + envc + 1 + applec + 1;
+    uintptr_t *stack = __builtin_alloca(words * sizeof(uintptr_t) + 16);
+    stack = (uintptr_t *)(((uintptr_t)stack + 15) & ~(uintptr_t)15);
+    size_t n = 0;
+    stack[n++] = (uintptr_t)argc;
+    for (int i = 0; i < argc; i++) stack[n++] = (uintptr_t)argv[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < envc; i++) stack[n++] = (uintptr_t)envp[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < applec; i++) stack[n++] = (uintptr_t)apple[i];
+    stack[n++] = 0;
+    __asm__ volatile("mr 1, %0\n li 0, 0\n mtlr 0\n mtctr %1\n bctr" : : "r"(stack), "r"(start) : "r0");
+    __builtin_unreachable();
+}
 #elif defined(__x86_64__)
 // Starts a program at crt1's `start` as the kernel does: rsp at argc, then
 // argv, the environment and the apple strings, each ended by a NULL.
@@ -1577,7 +1647,7 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
         perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
         run_start((void *)((uintptr_t)start | (image->thread_pc & 1)), argc, argv, envp, apple);
     }
-#elif defined(__i386__)
+#elif defined(__i386__) || defined(__powerpc__)
     if (!image->has_entry && !image->legacy_main && image->thread_pc) {
         void *start = perry_image_vmaddr(image, image->thread_pc);
         perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
@@ -1603,5 +1673,7 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
     main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
                                      : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
-    exit(entry(argc, argv, envp, apple));
+    int status;
+    PERRY_DARWIN_CALL(status = entry(argc, argv, envp, apple));
+    exit(status);
 }

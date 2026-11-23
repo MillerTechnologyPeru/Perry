@@ -20,6 +20,8 @@
 #define CPU_TYPE_ARM64          (CPU_TYPE_ARM | CPU_ARCH_ABI64)
 #define CPU_TYPE_I386           7
 #define CPU_TYPE_X86_64         (CPU_TYPE_I386 | CPU_ARCH_ABI64)
+#define CPU_TYPE_POWERPC        18
+#define CPU_SUBTYPE_POWERPC_970 100
 #define CPU_SUBTYPE_MASK        0xff000000u
 #define CPU_SUBTYPE_ARM64_ALL   0
 #define CPU_SUBTYPE_ARM64_V8    1
@@ -128,6 +130,8 @@ struct thread_command {
 #define ARM_THREAD_STATE_PC     15      // r15, in the 17 words of r0-r12, sp, lr, pc, cpsr
 #define X86_THREAD_STATE32      1
 #define X86_THREAD_STATE32_EIP  10      // of eax ebx ecx edx edi esi ebp esp ss eflags eip cs ds es fs gs
+#define PPC_THREAD_STATE        1
+#define PPC_THREAD_STATE_SRR0   0       // of srr0 srr1 r0-r31 cr xer lr ctr mq vrsave
 #define X86_THREAD_STATE64      4
 #define X86_THREAD_STATE64_RIP  16      // of rax rbx rcx rdx rdi rsi rbp rsp r8-r15 rip, each two words
 
@@ -339,6 +343,8 @@ struct dysymtab_command {
 
 // r_address is from the image's first segment; a scattered entry has its
 // high bit set.
+// Big-endian compilers give bit-fields from the most significant bit, as
+// ppc's files have them, so the one declaration reads both.
 struct relocation_info {
     int32_t r_address;
     uint32_t r_symbolnum : 24, r_pcrel : 1, r_length : 2, r_extern : 1, r_type : 4;

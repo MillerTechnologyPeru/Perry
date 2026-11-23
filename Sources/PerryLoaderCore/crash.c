@@ -106,6 +106,24 @@ static void print_registers(const mcontext_t *machine) {
         crash_print("  %-3s %016lx %-3s %016lx\n", registers[i].name, (unsigned long)machine->gregs[registers[i].index],
                     registers[i + 1].name, (unsigned long)machine->gregs[registers[i + 1].index]);
 }
+#elif defined(__powerpc__)
+// ppc has no frame pointer: r1, the stack pointer, heads a chain of frames,
+// each starting with the caller's r1. The return address is in the caller's
+// frame, in the third word on Darwin (the second on Linux, whose frames are
+// Perry's and not the program's).
+#define FRAME_POINTER(machine) ((uintptr_t)(machine)->gregs[1])
+#define FRAME_ALIGNMENT 3
+enum { PPC_GREG_NIP = 32, PPC_GREG_MSR = 33, PPC_GREG_CTR = 35, PPC_GREG_LNK = 36, PPC_GREG_CCR = 38 };
+
+static void print_registers(const mcontext_t *machine) {
+    describe("pc", machine->gregs[PPC_GREG_NIP]);
+    describe("lr", machine->gregs[PPC_GREG_LNK]);
+    crash_print("  ctr %08lx cr %08lx msr %08lx\n", machine->gregs[PPC_GREG_CTR], machine->gregs[PPC_GREG_CCR],
+                machine->gregs[PPC_GREG_MSR]);
+    for (int i = 0; i < 32; i += 4)
+        crash_print("  r%-2d %08lx r%-2d %08lx r%-2d %08lx r%-2d %08lx\n", i, machine->gregs[i], i + 1,
+                    machine->gregs[i + 1], i + 2, machine->gregs[i + 2], i + 3, machine->gregs[i + 3]);
+}
 #else
 #define FRAME_POINTER(machine) ((machine)->regs[29])
 #define FRAME_ALIGNMENT 7
@@ -123,23 +141,37 @@ static void print_registers(const mcontext_t *machine) {
 
 static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
     ucontext_t *context = raw_context;
+#if defined(__powerpc__)
+    mcontext_t *machine = context->uc_mcontext.uc_regs;
+#else
     mcontext_t *machine = &context->uc_mcontext;
+#endif
     crash_print("perry: crash: signal %d (%s) at 0x%lx, thread %ld\n", signal, strsignal(signal),
                 (unsigned long)(uintptr_t)info->si_addr, (long)gettid());
     print_registers(machine);
-    // Frame records are {previous fp, return address}, ascending the stack.
+    // Frame records are {previous fp, return address}, ascending the stack
+    // (on ppc, {previous sp, ...}, see FRAME_POINTER).
 #if defined(__arm__)
     uintptr_t fp = FRAME_POINTER(machine), low = machine->arm_sp;
 #elif defined(__i386__)
     uintptr_t fp = FRAME_POINTER(machine), low = (uintptr_t)machine->gregs[REG_ESP];
 #elif defined(__x86_64__)
     uintptr_t fp = FRAME_POINTER(machine), low = (uintptr_t)machine->gregs[REG_RSP];
+#elif defined(__powerpc__)
+    uintptr_t fp = FRAME_POINTER(machine), low = fp;
 #else
     uintptr_t fp = FRAME_POINTER(machine), low = machine->sp;
 #endif
     for (int frame = 0; frame < 48 && fp && (fp & FRAME_ALIGNMENT) == 0 && fp >= low && fp - low < (64 << 20); frame++) {
         uintptr_t *record = (uintptr_t *)fp;
+#if defined(__powerpc__)
+        uintptr_t next = record[0];
+        if (next <= fp || (next & FRAME_ALIGNMENT) || next - fp >= (64 << 20))
+            break;
+        uintptr_t ret = ((uintptr_t *)next)[2];
+#else
         uintptr_t next = record[0], ret = record[1];
+#endif
         if (!ret)
             break;
         char label[16];

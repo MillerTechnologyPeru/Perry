@@ -6,8 +6,13 @@
 // value follows an odd number of words, so the arguments are copied into a
 // buffer in glibc's layout, which needs the format to know which are 64 bits
 // wide: long long, intmax_t and every floating-point conversion.
+//
+// Darwin ppc's parameter area is the same run of 4-byte words, and glibc
+// ppc's overflow area aligns 64-bit values to 8 bytes the same way. The one
+// difference is long double: 16 bytes on both (two doubles), aligned to 8 by
+// glibc, where armv7's is a double.
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__powerpc__)
 
 #include "PerrySystem.h"
 
@@ -27,12 +32,16 @@ static void copy_word(repacker *r) {
     r->size += 4;
 }
 
-static void copy_double_word(repacker *r) {
+static void copy_words_aligned(repacker *r, size_t words) {
     r->size = (r->size + 7) & ~(size_t)7;
     if (r->out)
-        memcpy(r->out + r->size, r->source, 8);
-    r->source += 2;
-    r->size += 8;
+        memcpy(r->out + r->size, r->source, 4 * words);
+    r->source += words;
+    r->size += 4 * words;
+}
+
+static void copy_double_word(repacker *r) {
+    copy_words_aligned(r, 2);
 }
 
 size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *out) {
@@ -70,9 +79,11 @@ size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *o
             }
         }
         // Length modifiers.
-        int wide = 0;
+        int wide = 0, long_double = 0;
         for (;; p++) {
-            if (*p == 'l' && p[1] == 'l') {
+            if (*p == 'L') {
+                long_double = 1;
+            } else if (*p == 'l' && p[1] == 'l') {
                 wide = 1;
                 p++;
             } else if (*p == 'q' || *p == 'j') {
@@ -81,6 +92,7 @@ size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *o
                 break;
             }
         }
+        (void)long_double;         // read only on ppc
         switch (*p) {
         case 'd': case 'i': case 'o': case 'u': case 'x': case 'X': case 'D': case 'O': case 'U':
             if (wide)
@@ -89,6 +101,12 @@ size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *o
                 copy_word(&r);
             break;
         case 'e': case 'E': case 'f': case 'F': case 'g': case 'G': case 'a': case 'A':
+#if defined(__powerpc__)
+            if (long_double) {
+                copy_words_aligned(&r, 4);
+                break;
+            }
+#endif
             copy_double_word(&r);       // a long double is a double on armv7
             break;
         case 'c': case 'C': case 's': case 'S': case 'p': case 'n':

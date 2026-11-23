@@ -7,7 +7,9 @@
 // NEON registers; the fault address. armv7: r0-r12, sp, lr, pc and cpsr; the
 // VFP registers; the exception, the fault status and address. x86_64: the
 // general registers, rip, rflags and segments; the FXSAVE area; the trap,
-// its error code and the fault address.
+// its error code and the fault address. ppc: srr0, srr1, r0-r31 and the
+// special registers; the FPRs and fpscr; the fault address, its status and
+// the exception.
 
 #include <signal.h>
 #include <stdint.h>
@@ -169,6 +171,86 @@ static inline void perry_context_get_exception(const ucontext_t *context, darwin
     out->exception = (uint32_t)context->uc_mcontext.trap_no;
     out->fsr = (uint32_t)context->uc_mcontext.error_code;
     out->far = (uint32_t)context->uc_mcontext.fault_address;
+}
+
+#elif defined(__powerpc__)
+
+// ppc_thread_state: srr0 (the pc), srr1 (the msr), r0-r31, cr, xer, lr, ctr,
+// mq and vrsave.
+typedef struct { uint32_t srr0, srr1, r[32], cr, xer, lr, ctr, mq, vrsave; } darwin_thread_state;
+// ppc_float_state: the 32 FPRs, then the fpscr after a pad word.
+typedef struct { double fpregs[32]; uint32_t fpscr_pad, fpscr; } darwin_float_state;
+// ppc_exception_state: the fault address, its status and the exception.
+typedef struct { uint32_t dar, dsisr, exception, pad0, pad1[4]; } darwin_exception_state;
+
+// PPC_THREAD_STATE, PPC_FLOAT_STATE and PPC_EXCEPTION_STATE. Darwin's ppc
+// mcontext goes on with the AltiVec registers (ppc_vector_state), which are
+// not converted.
+enum { DARWIN_THREAD_FLAVOR = 1, DARWIN_FLOAT_FLAVOR = 2, DARWIN_EXCEPTION_FLAVOR = 3 };
+
+// Linux's ppc32 ucontext points at its machine context (uc_regs) rather than
+// holding it; gregs past r31 are numbered as asm/ptrace.h's PT_ constants.
+enum {
+    PERRY_PPC_NIP = 32, PERRY_PPC_MSR = 33, PERRY_PPC_CTR = 35, PERRY_PPC_LNK = 36, PERRY_PPC_XER = 37,
+    PERRY_PPC_CCR = 38, PERRY_PPC_MQ = 39, PERRY_PPC_TRAP = 40, PERRY_PPC_DAR = 41, PERRY_PPC_DSISR = 42,
+};
+
+static inline void perry_context_get_thread(const ucontext_t *context, darwin_thread_state *out) {
+    const mcontext_t *machine = context->uc_mcontext.uc_regs;
+    const unsigned long *r = machine->gregs;
+    for (int i = 0; i < 32; i++)
+        out->r[i] = (uint32_t)r[i];
+    out->srr0 = (uint32_t)r[PERRY_PPC_NIP];
+    out->srr1 = (uint32_t)r[PERRY_PPC_MSR];
+    out->cr = (uint32_t)r[PERRY_PPC_CCR];
+    out->xer = (uint32_t)r[PERRY_PPC_XER];
+    out->lr = (uint32_t)r[PERRY_PPC_LNK];
+    out->ctr = (uint32_t)r[PERRY_PPC_CTR];
+    out->mq = (uint32_t)r[PERRY_PPC_MQ];
+    out->vrsave = machine->vrregs.vrsave;
+}
+
+static inline void perry_context_set_thread(ucontext_t *context, const darwin_thread_state *in) {
+    mcontext_t *machine = context->uc_mcontext.uc_regs;
+    unsigned long *r = machine->gregs;
+    for (int i = 0; i < 32; i++)
+        r[i] = in->r[i];
+    // The msr is the kernel's to keep.
+    r[PERRY_PPC_NIP] = in->srr0;
+    r[PERRY_PPC_CCR] = in->cr;
+    r[PERRY_PPC_XER] = in->xer;
+    r[PERRY_PPC_LNK] = in->lr;
+    r[PERRY_PPC_CTR] = in->ctr;
+    r[PERRY_PPC_MQ] = in->mq;
+    machine->vrregs.vrsave = in->vrsave;
+}
+
+static inline void perry_context_get_float(ucontext_t *context, darwin_float_state *out) {
+    const mcontext_t *machine = context->uc_mcontext.uc_regs;
+    memcpy(out->fpregs, machine->fpregs.fpregs, sizeof(out->fpregs));
+    // Linux keeps the fpscr in the low word of a double, as the mffs
+    // instruction stores it, which on big-endian ppc is the second.
+    uint32_t words[2];
+    memcpy(words, &machine->fpregs.fpscr, sizeof(words));
+    out->fpscr_pad = 0;
+    out->fpscr = words[1];
+}
+
+static inline void perry_context_set_float(ucontext_t *context, const darwin_float_state *in) {
+    mcontext_t *machine = context->uc_mcontext.uc_regs;
+    memcpy(machine->fpregs.fpregs, in->fpregs, sizeof(in->fpregs));
+    uint32_t words[2] = { 0, in->fpscr };
+    memcpy(&machine->fpregs.fpscr, words, sizeof(words));
+}
+
+static inline void perry_context_get_exception(const ucontext_t *context, darwin_exception_state *out) {
+    const unsigned long *r = context->uc_mcontext.uc_regs->gregs;
+    memset(out, 0, sizeof(*out));
+    out->dar = (uint32_t)r[PERRY_PPC_DAR];
+    out->dsisr = (uint32_t)r[PERRY_PPC_DSISR];
+    // Linux's trap is the vector's address (0x300 for a data storage
+    // fault); Darwin numbers the exception by the vector over 0x100.
+    out->exception = (uint32_t)r[PERRY_PPC_TRAP] >> 8;
 }
 
 #elif defined(__i386__)
