@@ -1,4 +1,5 @@
 import Glibc
+import PerryObjCInterop
 
 // Mac apps' alone: armv7 runs only iOS apps, so it has none of this.
 #if !arch(arm)
@@ -121,6 +122,20 @@ public func GetProcessInformation(_ psn: UnsafeRawPointer?, _ info: UnsafeMutabl
     info.storeBytes(of: UInt32(0), toByteOffset: number + 24 + word, as: UInt32.self)
     info.storeBytes(of: UInt64(0), toByteOffset: number + 28 + word, as: UInt64.self)
     return noErr
+}
+
+/// OSStatus CopyProcessName(const ProcessSerialNumber *, CFStringRef *):
+/// the app's name, as its bundle gives it (CFBundleName), else its
+/// executable's; the caller releases it.
+@c(_CopyProcessName)
+public func CopyProcessName(_ psn: UnsafeRawPointer?, _ name: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let name else { return Int32(paramErr) }
+    name.pointee = nil
+    guard Processes.isOwn(psn) else { return Int32(procNotFound) }
+    let executable = programExecutablePath.map { String($0.split(separator: "/").last ?? "") } ?? ""
+    let title = Processes.infoString("CFBundleName").flatMap { $0.isEmpty ? nil : $0 } ?? executable
+    name.pointee = title.objCOwnedReturnValue()
+    return Int32(noErr)
 }
 
 /// OSStatus GetProcessBundleLocation(const ProcessSerialNumber *, FSRef *):
