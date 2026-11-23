@@ -140,6 +140,30 @@ _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc
 #define PERRY_ARCH_PPC      16u
 unsigned perry_macho_architectures(const char *path);
 
+#if defined(__powerpc__) && !defined(__powerpc64__)
+// ppc's thread pointer, r2, which Darwin's code uses as a scratch register
+// (ppc_thread.c). Notes this thread's stack, so that stubs can find its r2.
+void perry_ppc_note_thread(void);
+void perry_ppc_note_stack(void *low, size_t size);
+// Writes the instructions that set r2 from the stack pointer, using r0, r11,
+// r12 and cr0; returns how many words they take.
+int perry_ppc_emit_thread_pointer(uint32_t *code);
+// What Darwin code calls for a Linux function: a stub that sets r2 and jumps
+// to it. Data, and addresses outside Linux libraries, are returned as they are.
+void *perry_ppc_linux_entry(void *address);
+// The same stub for any Linux code, such as a function with no symbol.
+void *perry_ppc_thread_stub(void *address);
+// Calls Darwin code from Linux code, which needs r2 as it was afterwards.
+#define PERRY_DARWIN_CALL(call) do { \
+        unsigned long perry_r2; \
+        __asm__ volatile("mr %0, 2" : "=r"(perry_r2)); \
+        call; \
+        __asm__ volatile("mr 2, %0" : : "r"(perry_r2) : "memory"); \
+    } while (0)
+#else
+#define PERRY_DARWIN_CALL(call) do { call; } while (0)
+#endif
+
 // Address helpers
 void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
 
