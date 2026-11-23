@@ -153,16 +153,20 @@ int perry_ppc_emit_thread_pointer(uint32_t *code);
 void *perry_ppc_linux_entry(void *address);
 // The same stub for any Linux code, such as a function with no symbol.
 void *perry_ppc_thread_stub(void *address);
-// Darwin code's entry to a Linux function whose arguments or result are not
-// all words (ppc_abi.c): a stub that sets r2 and moves Darwin's arguments to
-// where the function's C signature, as ObjCValue types it on 32-bit, has
-// them. `types` is its Objective-C type encoding, result first.
+// Darwin code's entry to a Linux function whose arguments are not all words
+// (ppc_abi.c): a stub that sets r2 and moves Darwin's arguments to where
+// Linux's ABI has them for the same C signature. `types` is its Objective-C
+// type encoding, result first.
 void *perry_ppc_darwin_entry(void *function, const char *types);
-// Calls a Darwin function from Linux code, with the arguments as words the
-// way ObjCValue passes them (an ObjCWordPair or structure as a pointer to
-// it), and returns its result as the C signature has it: r3 and r4.
-void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *words, uint32_t count,
-                           uint32_t result[2]);
+// A call's result registers, which are the same in both ABIs.
+typedef struct perry_ppc_registers {
+    uint32_t r3, r4;
+    double f1;
+} perry_ppc_registers;
+// Calls a Darwin function with the arguments of a call Linux code made (its
+// r3-r10, f1-f8 and stack from 8(r1)), laid out for Darwin by `types`.
+void perry_ppc_call_darwin(void *function, const char *types, const uint32_t linux_gprs[8], const double linux_fprs[8],
+                           const uint32_t *linux_stack, perry_ppc_registers *result);
 // Where perry_ppc_send and its forms find a message's method and its type
 // encoding: libobjc's lookup, which it sets at startup. start_class is the
 // class to start at, for a super send, or NULL.
