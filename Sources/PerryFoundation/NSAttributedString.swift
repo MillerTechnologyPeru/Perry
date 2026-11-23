@@ -245,6 +245,48 @@ public class NSAttributedString: NSObject {
         return self
     }
 
+    // MARK: Documents
+
+    /// The string of a document's bytes: RTF's text, or plain text. There
+    /// are no document attributes to give back.
+    private func initialize(document bytes: [UInt8]?, attributes: UnsafeMutablePointer<id?>?) -> Self? {
+        attributes?.pointee = nil
+        guard let bytes else { return nil }
+        Storage.set(objcObject, AttributedStorage(units: Array(RTF.documentText(bytes).utf16), attributes: nil))
+        return self
+    }
+
+    private static func fileBytes(_ path: String?) -> [UInt8]? {
+        path.flatMap { FileManager.default.contents(atPath: $0) }.map(Array.init)
+    }
+
+    @ObjCMethod("initWithPath:documentAttributes:")
+    func initialize(path: String?, documentAttributes: UnsafeMutablePointer<id?>?) -> Self? {
+        initialize(document: Self.fileBytes(path), attributes: documentAttributes)
+    }
+
+    @ObjCMethod("initWithURL:documentAttributes:")
+    func initialize(url: ObjCObject?, documentAttributes: UnsafeMutablePointer<id?>?) -> Self? {
+        initialize(document: Self.fileBytes(URLs.url(url?.id)?.path), attributes: documentAttributes)
+    }
+
+    @ObjCMethod("initWithURL:options:documentAttributes:error:")
+    func initialize(url: ObjCObject?, options: ObjCObject?, documentAttributes: UnsafeMutablePointer<id?>?,
+                    error: UnsafeMutablePointer<id?>?) -> Self? {
+        initialize(document: Self.fileBytes(URLs.url(url?.id)?.path), attributes: documentAttributes)
+    }
+
+    @ObjCMethod("initWithRTF:documentAttributes:")
+    func initialize(rtf data: ObjCObject?, documentAttributes: UnsafeMutablePointer<id?>?) -> Self? {
+        initialize(document: data.map { Array(DataObjects.data($0.id)) }, attributes: documentAttributes)
+    }
+
+    @ObjCMethod("initWithData:options:documentAttributes:error:")
+    func initialize(data: ObjCObject?, options: ObjCObject?, documentAttributes: UnsafeMutablePointer<id?>?,
+                    error: UnsafeMutablePointer<id?>?) -> Self? {
+        initialize(document: data.map { Array(DataObjects.data($0.id)) }, attributes: documentAttributes)
+    }
+
     @ObjCMethod("initWithAttributedString:")
     func initialize(attributedString other: ObjCObject) -> Self {
         let source = AttributedStrings.storage(other.id) ?? AttributedStorage(units: [], attributes: nil)
