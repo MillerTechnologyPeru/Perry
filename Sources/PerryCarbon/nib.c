@@ -295,6 +295,21 @@ static void identify(ControlRef control, xml_node *node) {
     if (signature || identifier) carbon_control_set_id(control, signature, (int32_t)identifier);
 }
 
+static MenuRef make_menu(xml_node *node, bool plain);
+
+/// The radio titles of a group: an array of one-string arrays.
+static int radio_titles(xml_node *node, id *titles, int capacity) {
+    xml_node *array = child(node, "radioTitles");
+    int count = 0;
+    for (xml_node *entry = array ? array->children : NULL; entry && count < capacity; entry = entry->next) {
+        xml_node *text = entry->children;
+        titles[count++] = string_object(text && text->text ? text->text : "");
+    }
+    return count;
+}
+
+/// The controls of a view's subviews, and of theirs: a group box's are
+/// over it, in the window's coordinates as theirs are.
 static void make_controls(WindowRef window, xml_node *root) {
     xml_node *subviews = child(root, "subviews");
     for (xml_node *node = subviews ? subviews->children : NULL; node; node = node->next) {
@@ -302,22 +317,42 @@ static void make_controls(WindowRef window, xml_node *root) {
         Rect bounds;
         if (!rect_of(node, "bounds", &bounds)) continue;
         const char *title = string_of(node, "title");
+        bool small = bool_of(node, "small", false);
+        uint32_t command = ostype_of(node, "command");
         ControlRef control = NULL;
-        if (strcmp(node->class, "IBCarbonButton") == 0) {
-            uint32_t command = ostype_of(node, "command");
+        if (strcmp(node->class, "IBCarbonButton") == 0 || strcmp(node->class, "IBCarbonBevelButton") == 0 ||
+            strcmp(node->class, "IBCarbonRoundButton") == 0) {
             id view = carbon_button_view(string_object(title), command, window, (int)int_of(node, "buttonType", 0));
             control = carbon_control_new(window, NULL, view, &bounds, FOUR('b', 'u', 't', 'n'));
             extern void set_command(ControlRef, uint32_t) __asm__("_SetControlCommandID");
             if (control) set_command(control, command);
-        } else if (strcmp(node->class, "IBCarbonStaticText") == 0 || strcmp(node->class, "IBCarbonEditText") == 0) {
-            id view = carbon_label_view(string_object(title), bool_of(node, "small", false));
+        } else if (strcmp(node->class, "IBCarbonStaticText") == 0) {
+            id view = carbon_label_view(string_object(title), small);
             control = carbon_control_new(window, NULL, view, &bounds, FOUR('s', 't', 'x', 't'));
+        } else if (strcmp(node->class, "IBCarbonEditText") == 0) {
+            control = carbon_edit_text_control(window, &bounds, string_object(title), small);
+        } else if (strcmp(node->class, "IBCarbonPopupButton") == 0) {
+            xml_node *menu = child(node, "menu");
+            MenuRef items = menu ? make_menu(menu, true) : carbon_menu_new(0, NULL);
+            control = carbon_popup_control(window, &bounds, items, (int32_t)int_of(node, "selectedItem", 1), command);
+        } else if (strcmp(node->class, "IBCarbonCheckBox") == 0) {
+            control = carbon_checkbox_control(window, &bounds, string_object(title), (int32_t)int_of(node, "initialValue", 0),
+                                              command, small);
+        } else if (strcmp(node->class, "IBCarbonRadioGroup") == 0) {
+            id titles[32];
+            int count = radio_titles(node, titles, 32);
+            control = carbon_radio_group_control(window, &bounds, titles, count, (int)int_of(node, "numRows", count),
+                                                 (int)int_of(node, "intercellHeight", 0), (int32_t)int_of(node, "selectedItem", 1),
+                                                 command, small);
+        } else if (strcmp(node->class, "IBCarbonGroupBox") == 0) {
+            control = carbon_group_box_control(window, &bounds, string_object(title), small);
         } else {
             // Images, icons, panes: an empty view where they are.
             id view = SEND(SEND(CLASS("NSView"), "alloc"), "init");
             control = carbon_control_new(window, NULL, view, &bounds, ostype_of(node, "controlSignature"));
         }
         if (control) identify(control, node);
+        make_controls(window, node);
     }
 }
 
@@ -348,8 +383,9 @@ OSStatus carbon_CreateWindowFromNib(carbon_nib *nib, id name, WindowRef *out) {
 
 // MARK: - Menus
 
-static MenuRef make_menu(xml_node *node) {
+static MenuRef make_menu(xml_node *node, bool plain) {
     MenuRef menu = carbon_menu_new((int16_t)int_of(node, "menuID", 0), string_object(string_of(node, "title")));
+    if (plain) carbon_menu_set_plain(menu);
     xml_node *items = child(node, "items");
     for (xml_node *item = items ? items->children : NULL; item; item = item->next) {
         if (!item->class || strcmp(item->class, "IBCarbonMenuItem") != 0) continue;
@@ -367,7 +403,7 @@ static MenuRef make_menu(xml_node *node) {
                                     ostype_of(item, "command"), key ? lower : NULL, (uint32_t)int_of(item, "keyEquivalentModifier", 0));
         xml_node *submenu = child(item, "submenu");
         if (submenu && submenu->class && strcmp(submenu->class, "IBCarbonMenu") == 0)
-            carbon_menu_set_submenu(menu, object, make_menu(submenu));
+            carbon_menu_set_submenu(menu, object, make_menu(submenu, false));
     }
     // The application menu ends with Quit, as Carbon's.
     const char *name = string_of(node, "name");
@@ -388,7 +424,7 @@ OSStatus carbon_SetMenuBarFromNib(carbon_nib *nib, id name) {
     if (!(nib = nib_from(nib))) return paramErr;
     xml_node *node = named(nib, name);
     if (!node || strcmp(node->class, "IBCarbonMenu") != 0) return -2452;
-    carbon_menu_bar_set(make_menu(node));
+    carbon_menu_bar_set(make_menu(node, false));
     return noErr;
 }
 
@@ -397,6 +433,6 @@ OSStatus carbon_CreateMenuFromNib(carbon_nib *nib, id name, MenuRef *out) {
     if (!(nib = nib_from(nib)) || !out) return paramErr;
     xml_node *node = named(nib, name);
     if (!node || strcmp(node->class, "IBCarbonMenu") != 0) return -2452;
-    *out = make_menu(node);
+    *out = make_menu(node, false);
     return noErr;
 }
