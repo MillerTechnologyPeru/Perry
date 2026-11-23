@@ -12,6 +12,7 @@ enum CFTypeIDs {
     static let string: UInt = 7, null: UInt = 16, set: UInt = 17, dictionary: UInt = 18, array: UInt = 19, data: UInt = 20
     static let boolean: UInt = 21, number: UInt = 22, characterSet: UInt = 25, error: UInt = 27, url: UInt = 29
     static let bundle: UInt = 31, uuid: UInt = 34, date: UInt = 42, runLoop: UInt = 43, timeZone: UInt = 48, locale: UInt = 55
+    static let dateFormatter: UInt = 56, numberFormatter: UInt = 57
 
     /// The type ID of a bridged object, by its class.
     static func of(_ object: id) -> UInt? {
@@ -20,7 +21,8 @@ enum CFTypeIDs {
             (Arrays.arrayClass, array), (Dictionaries.dictionaryClass, dictionary), (Sets.setClass, set),
             (DataObjects.dataClass, data), (Dates.dateClass, date), (URLs.urlClass, url), (Errors.errorClass, error),
             (CharacterSets.setClass, characterSet), (TimeZones.zoneClass, timeZone), (Locales.localeClass, locale),
-            (Bundles.bundleClass, bundle),
+            (Bundles.bundleClass, bundle), (DateFormatters.formatterClass, dateFormatter),
+            (NumberFormatters.formatterClass, numberFormatter),
         ]
         if object == Nulls.null { return null }
         return checks.first { cls, _ in cls.map { ObjC.isKind(object, of: $0) } ?? false }?.1
@@ -43,7 +45,8 @@ public func CFCopyTypeIDDescription(_ type: UInt) -> id? {
         CFTypeIDs.array: "CFArray", CFTypeIDs.data: "CFData", CFTypeIDs.boolean: "CFBoolean", CFTypeIDs.number: "CFNumber",
         CFTypeIDs.characterSet: "CFCharacterSet", CFTypeIDs.error: "CFError", CFTypeIDs.url: "CFURL", CFTypeIDs.bundle: "CFBundle",
         CFTypeIDs.uuid: "CFUUID", CFTypeIDs.date: "CFDate", CFTypeIDs.runLoop: "CFRunLoop", CFTypeIDs.timeZone: "CFTimeZone",
-        CFTypeIDs.locale: "CFLocale",
+        CFTypeIDs.locale: "CFLocale", CFTypeIDs.dateFormatter: "CFDateFormatter",
+        CFTypeIDs.numberFormatter: "CFNumberFormatter",
     ]
     if let name = CFRuntimeClasses.runtimeClass(type)?.pointee.className {
         return Strings.make(String(cString: name))
@@ -1047,17 +1050,6 @@ public func CFURLCreateDataAndPropertiesFromResource(_ allocator: UnsafeRawPoint
     }
     data?.pointee = ObjC.retain(DataObjects.autoreleased(bytes))
     return true
-}
-
-/// CFNumberFormatter's property keys, with Darwin's values.
-@ObjCConstants
-enum NumberFormatterKeys {
-    static let kCFNumberFormatterCurrencyCode = "kCFNumberFormatterCurrencyCodeKey"
-    static let kCFNumberFormatterMaxFractionDigits = "kCFNumberFormatterMaxFractionDigitsKey"
-    static let kCFNumberFormatterMinFractionDigits = "kCFNumberFormatterMinFractionDigitsKey"
-    static let kCFNumberFormatterCurrencySymbol = "kCFNumberFormatterCurrencySymbolKey"
-    static let kCFNumberFormatterDecimalSeparator = "kCFNumberFormatterDecimalSeparatorKey"
-    static let kCFNumberFormatterGroupingSeparator = "kCFNumberFormatterGroupingSeparatorKey"
 }
 
 // MARK: - Gregorian dates and more of CFBundle and CFTimeZone
