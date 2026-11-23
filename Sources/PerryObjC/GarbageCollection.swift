@@ -10,13 +10,17 @@ import PerryObjCRuntime
 // are plain stores. As such code was only ever run with the collector, its
 // counts aren't balanced, so its objects are never freed
 // (RetainCounts.keepsObjects). Weak references don't zero.
+//
+// A program one of whose images requires the collector (Xcode 4, whose
+// DVTKit asserts it) is told the collector is on, as Darwin runs only it
+// so; its objects are kept all the same.
 
-/// Whether the collector runs: never.
+/// Whether the collector runs: as if it did when an image requires it.
 @c(_objc_collectingEnabled)
-public func objc_collectingEnabled() -> Bool { false }
+public func objc_collectingEnabled() -> Bool { GarbageCollector.required }
 
 @c(_objc_collecting_enabled)
-public func objc_collecting_enabled() -> Bool { false }
+public func objc_collecting_enabled() -> Bool { GarbageCollector.required }
 
 /// A store of an object pointer into memory the collector would scan.
 @c(_objc_assign_strongCast)
@@ -145,3 +149,66 @@ public func objc_setCollectionRatio(_ ratio: Int) {}
 /// Whether the collector has finalized an object: never.
 @c(_objc_is_finalized)
 public func objc_is_finalized(_ pointer: UnsafeMutableRawPointer?) -> Bool { false }
+
+// MARK: - The collector's zone
+
+// Code that runs only with the collector on (Xcode 4, which requires it)
+// allocates from its zone and asks it to collect. Its zone is a placeholder:
+// memory comes from calloc, and, as every object is kept, is never freed.
+
+/// Stands for auto_zone_t, and for the malloc zone it is.
+nonisolated(unsafe) private let collectableZone = UnsafeMutableRawPointer.allocate(byteCount: 256, alignment: 16)
+
+@c(_objc_collectableZone)
+public func objc_collectableZone() -> UnsafeMutableRawPointer? { collectableZone }
+
+
+
+
+
+
+/// void *auto_zone_allocate_object(auto_zone_t *, size_t, auto_memory_type_t,
+/// boolean_t initial_refcount_to_one, boolean_t clear): zeroed memory.
+@c(_auto_zone_allocate_object)
+public func auto_zone_allocate_object(_ zone: UnsafeMutableRawPointer?, _ size: Int, _ type: UInt32, _ retained: Bool,
+                                      _ clear: Bool) -> UnsafeMutableRawPointer? {
+    calloc(1, max(size, 1))
+}
+
+/// glibc's size of a block malloc gave (malloc.h, which Glibc's module
+/// leaves out).
+@_silgen_name("malloc_usable_size")
+private func mallocUsableSize(_ pointer: UnsafeMutableRawPointer?) -> Int
+
+/// A copy of memory the zone allocated, of its size.
+@c(_auto_zone_create_copy)
+public func auto_zone_create_copy(_ zone: UnsafeMutableRawPointer?, _ pointer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let pointer else { return nil }
+    let size = mallocUsableSize(pointer)
+    let copy = malloc(max(size, 1))
+    if let copy { memcpy(copy, pointer, size) }
+    return copy
+}
+
+@c(_auto_zone_collect_and_notify)
+public func auto_zone_collect_and_notify(_ zone: UnsafeMutableRawPointer?, _ mode: UInt32, _ queue: UnsafeRawPointer?,
+                                         _ block: UnsafeRawPointer?) {}
+
+@c(_auto_zone_track_pointer)
+public func auto_zone_track_pointer(_ zone: UnsafeMutableRawPointer?, _ pointer: UnsafeRawPointer?) {}
+
+@c(_auto_zone_enumerate_uncollected)
+public func auto_zone_enumerate_uncollected(_ zone: UnsafeMutableRawPointer?, _ block: UnsafeRawPointer?) -> Bool { false }
+
+@c(_auto_zone_enable_collection_checking)
+public func auto_zone_enable_collection_checking(_ zone: UnsafeMutableRawPointer?) {}
+
+@c(_auto_zone_disable_collection_checking)
+public func auto_zone_disable_collection_checking(_ zone: UnsafeMutableRawPointer?) {}
+
+/// A store into a __weak reference, which doesn't zero here.
+@c(_auto_assign_weak_reference)
+public func auto_assign_weak_reference(_ zone: UnsafeMutableRawPointer?, _ value: UnsafeRawPointer?,
+                                       _ location: UnsafeMutablePointer<UnsafeRawPointer?>?, _ block: UnsafeRawPointer?) {
+    location?.pointee = value
+}

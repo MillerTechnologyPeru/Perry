@@ -484,6 +484,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "AudioToolbox");
         return true;
     }
+    // libauto, the garbage collector of Mac OS X 10.5 to 10.7, has no
+    // collector here: libobjc's provider answers its functions.
+    if (strcmp(install_name, "/usr/lib/libauto.dylib") == 0) {
+        snprintf(out, out_size, "objc");
+        return true;
+    }
     // libc++ and libc++abi are one provider.
     if (strncmp(install_name, "/usr/lib/libc++", 15) == 0) {
         snprintf(out, out_size, "CXX");
