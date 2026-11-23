@@ -1,5 +1,6 @@
 import CPerryFoundation
 import Glibc
+import PerryObjCInterop
 
 /// An object as a Swift dictionary key, compared with -isEqual: and hashed
 /// with -hash, as NSDictionary and NSSet compare their members.
