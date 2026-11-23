@@ -16,14 +16,14 @@ class DisplayNameURL: NSObject {
 
 // MARK: - Math
 
-@c(_exp2) public func darwinExp2(_ x: Double) -> Double { exp2(x) }
-@c(_exp2f) public func darwinExp2f(_ x: Float) -> Float { exp2f(x) }
-@c(_fmax) public func darwinFmax(_ x: Double, _ y: Double) -> Double { fmax(x, y) }
-@c(_fmin) public func darwinFmin(_ x: Double, _ y: Double) -> Double { fmin(x, y) }
-@c(_fmaxf) public func darwinFmaxf(_ x: Float, _ y: Float) -> Float { fmaxf(x, y) }
-@c(_fminf) public func darwinFminf(_ x: Float, _ y: Float) -> Float { fminf(x, y) }
-@c(_nextafterf) public func darwinNextafterf(_ x: Float, _ y: Float) -> Float { nextafterf(x, y) }
-@c(_nextafter) public func darwinNextafter(_ x: Double, _ y: Double) -> Double { nextafter(x, y) }
+@DarwinC("_exp2") public func darwinExp2(_ x: Double) -> Double { exp2(x) }
+@DarwinC("_exp2f") public func darwinExp2f(_ x: Float) -> Float { exp2f(x) }
+@DarwinC("_fmax") public func darwinFmax(_ x: Double, _ y: Double) -> Double { fmax(x, y) }
+@DarwinC("_fmin") public func darwinFmin(_ x: Double, _ y: Double) -> Double { fmin(x, y) }
+@DarwinC("_fmaxf") public func darwinFmaxf(_ x: Float, _ y: Float) -> Float { fmaxf(x, y) }
+@DarwinC("_fminf") public func darwinFminf(_ x: Float, _ y: Float) -> Float { fminf(x, y) }
+@DarwinC("_nextafterf") public func darwinNextafterf(_ x: Float, _ y: Float) -> Float { nextafterf(x, y) }
+@DarwinC("_nextafter") public func darwinNextafter(_ x: Double, _ y: Double) -> Double { nextafter(x, y) }
 
 // MARK: - Memory Manager
 
@@ -257,10 +257,10 @@ public func UpTime() -> UInt64 {
 }
 
 /// AbsoluteTime and Nanoseconds are both nanoseconds here.
-@c(_AbsoluteToNanoseconds) public func AbsoluteToNanoseconds(_ time: UInt64) -> UInt64 { time }
-@c(_NanosecondsToAbsolute) public func NanosecondsToAbsolute(_ time: UInt64) -> UInt64 { time }
+@DarwinC("_AbsoluteToNanoseconds") public func AbsoluteToNanoseconds(_ time: UInt64) -> UInt64 { time }
+@DarwinC("_NanosecondsToAbsolute") public func NanosecondsToAbsolute(_ time: UInt64) -> UInt64 { time }
 
-@c(_AbsoluteToDuration)
+@DarwinC("_AbsoluteToDuration")
 public func AbsoluteToDuration(_ time: UInt64) -> Int32 {
     if time >= 1_000_000 { return Int32(clamping: time / 1_000_000) }
     return -Int32(clamping: time / 1_000)
