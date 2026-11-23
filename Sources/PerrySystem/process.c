@@ -189,7 +189,7 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
         if (perry_signal_to_linux(candidate) == linux_signal)
             darwin_signal = candidate;
     if (!(action.flags & DARWIN_SA_SIGINFO)) {
-        ((void (*)(int))action.handler)(darwin_signal);
+        PERRY_DARWIN_FUNCTION((void (*)(int))action.handler)(darwin_signal);
         return;
     }
     ucontext_t *context = raw_context;
@@ -210,7 +210,8 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
     memset(&darwin_context, 0, sizeof(darwin_context));
     darwin_context.uc_mcsize = sizeof(darwin_machine);
     darwin_context.uc_mcontext = &darwin_machine;
-    ((void (*)(int, darwin_siginfo *, darwin_ucontext *))action.handler)(darwin_signal, &darwin_info, &darwin_context);
+    PERRY_DARWIN_FUNCTION((void (*)(int, darwin_siginfo *, darwin_ucontext *))action.handler)(darwin_signal, &darwin_info,
+                                                                                              &darwin_context);
     perry_context_set_thread(context, &darwin_machine.ss);
     perry_context_set_float(context, &darwin_machine.fs);
 }
@@ -328,7 +329,7 @@ int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin
     if (action->handler == (void *)SIG_IGN || action->handler == (void *)SIG_DFL) {
         linux_action.sa_handler = (void (*)(int))action->handler;
     } else {
-        linux_action.sa_sigaction = deliver;
+        linux_action.sa_sigaction = PERRY_SIGNAL_ENTRY(deliver);
         linux_action.sa_flags = SA_SIGINFO;
     }
     if (action->flags & DARWIN_SA_ONSTACK) linux_action.sa_flags |= SA_ONSTACK;
