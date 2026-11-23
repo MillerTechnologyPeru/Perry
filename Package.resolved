@@ -1,5 +1,5 @@
 {
-  "originHash" : "1d5db9e399e14127b0b4b791a205c4436f5c2aa1fdf122676222ee1d4ed03bb6",
+  "originHash" : "1bd256974971bc4263f655702355a617b3abdaf411bbca1f0bce4f921561b06d",
   "pins" : [
     {
       "identity" : "android",
@@ -260,6 +260,15 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "webkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/PureSwift/WebKit.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "49f644d50df80165dcb1dfc9947175743d0bd600"
       }
     }
   ],
