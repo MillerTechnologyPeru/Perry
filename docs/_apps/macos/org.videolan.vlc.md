@@ -4,7 +4,7 @@ bundle_id: "org.videolan.vlc"
 platform: macos
 kind: app
 developer: VideoLAN
-tags: [C, ObjC]
+tags: [ObjC]
 reports:
   - pr: 299
     date: 2026-11-23
