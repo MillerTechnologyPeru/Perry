@@ -526,14 +526,15 @@ open class NSFont: NSObject {
         NSFont(name: weight >= 0.3 ? ".AppleSystemUIFontBold" : ".AppleSystemUIFont", size: size > 0 ? size : 13)
     }
 
-    /// The font CoreGraphics draws for it: DejaVu for the system's fonts,
-    /// which Linux doesn't have, and the font's own name otherwise.
+    /// The font CoreGraphics draws for it: the system family (Inter or
+    /// DejaVu Sans) or DejaVu Sans Mono for the system's fonts, which Linux
+    /// doesn't have, and the font's own name otherwise.
     var drawingName: String {
         let monospaced = name.contains("Monospaced") || name.hasPrefix("Menlo") || name.hasPrefix("Monaco") || name.hasPrefix("Courier")
             || name.hasPrefix("SFMono")
         guard name.hasPrefix(".") || name.hasPrefix("SF") || name.hasPrefix("Helvetica") || name.hasPrefix("LucidaGrande") || monospaced else { return name }
-        let family = monospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
-        let style = (bold ? "Bold" : "") + (italic ? "Oblique" : "")
+        let family = monospaced ? "DejaVu Sans Mono" : CoreText.systemFamily
+        let style = (bold ? "Bold" : "") + (italic ? (family == "Inter" ? "Italic" : "Oblique") : "")
         return style.isEmpty ? family : family + "-" + style
     }
 
