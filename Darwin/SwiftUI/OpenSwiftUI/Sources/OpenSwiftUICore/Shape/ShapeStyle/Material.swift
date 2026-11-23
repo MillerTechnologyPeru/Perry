@@ -182,18 +182,65 @@ public struct Material: Sendable {
     }
 }
 
-// TODO
-
 extension Material: ShapeStyle {
-    // FIXME
+    /// A material that's somewhat translucent.
+    public static let regular = Material(id: .regular)
 
-    package static let ultraThin = Material(id: .ultraThin)
+    /// A material that's more opaque than translucent.
+    public static let thick = Material(id: .thick)
 
-    package static let thin = Material(id: .thin)
+    /// A material that's more translucent than opaque.
+    public static let thin = Material(id: .thin)
 
-    package static let regular = Material(id: .regular)
+    /// A mostly translucent material.
+    public static let ultraThin = Material(id: .ultraThin)
 
-    package static let thick = Material(id: .thick)
+    /// A mostly opaque material.
+    public static let ultraThick = Material(id: .ultraThick)
+
+    /// Fills the shape with the material as it resolves where the shape
+    /// is: what is behind the shape, blurred, under the material's tint.
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        switch shape.operation {
+        case let .resolveStyle(name, levels):
+            guard levels.lowerBound != levels.upperBound else {
+                break
+            }
+            shape.stylePack[name, levels.lowerBound] = .init(.backgroundMaterial(resolve(in: shape.environment)))
+        case .fallbackColor:
+            // Where only a color can be drawn: the material's own, with
+            // nothing showing through.
+            shape.result = .color(shape.environment.colorScheme == .dark
+                ? Color(red: 0.17, green: 0.17, blue: 0.18)
+                : Color(red: 0.95, green: 0.95, blue: 0.97))
+        default:
+            break
+        }
+    }
+
+    public typealias Resolved = Never
+}
+
+extension ShapeStyle where Self == Material {
+    /// A material that's somewhat translucent.
+    @_alwaysEmitIntoClient
+    public static var regularMaterial: Material { .regular }
+
+    /// A material that's more opaque than translucent.
+    @_alwaysEmitIntoClient
+    public static var thickMaterial: Material { .thick }
+
+    /// A material that's more translucent than opaque.
+    @_alwaysEmitIntoClient
+    public static var thinMaterial: Material { .thin }
+
+    /// A mostly translucent material.
+    @_alwaysEmitIntoClient
+    public static var ultraThinMaterial: Material { .ultraThin }
+
+    /// A mostly opaque material.
+    @_alwaysEmitIntoClient
+    public static var ultraThickMaterial: Material { .ultraThick }
 }
 
 package struct ForegroundMaterialStyle: ShapeStyle, PrimitiveShapeStyle {
