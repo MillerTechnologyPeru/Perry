@@ -288,10 +288,10 @@ static bool perry_path_hidden(const char *path) {
 // MARK: - Discs
 
 // Optical discs and disc images mounted on this machine are volumes of
-// their own, as a Mac shows them: at /Volumes/<name>, from /dev/disk2 and
-// on, which getmntinfo lists after the volume at / and IOKit's IOCDMedia
-// names (Sources/PerryIOKit/Discs.swift finds the same discs in the same
-// order). A disc is a file system mounted from an optical drive (/dev/sr0),
+// their own, as a Mac shows them: at /Volumes/<name>, from a partition of
+// /dev/disk2 and on (/dev/disk2s1), which getmntinfo lists after the volume
+// at / and IOKit names under its IOCDMedia (Sources/PerryIOKit/Discs.swift
+// finds the same discs in the same order). A disc is a file system mounted from an optical drive (/dev/sr0),
 // or from a loop device with a disc's file system (ISO 9660, UDF, HFS,
 // HFS+), which is how a desktop mounts a disc image; PERRY_DISCS names
 // others, as paths or Name=path pairs, colon-separated.
@@ -336,6 +336,15 @@ static int add_disc(struct perry_disc *discs, int count, const char *name, size_
     snprintf(discs[count].mount, sizeof(discs[count].mount), "%s", mount);
     return count + 1;
 }
+
+/// PERRY_DISC_TRACE says what a program asks about discs and volumes.
+static bool disc_tracing(void) {
+    static int enabled = -1;
+    if (enabled < 0) enabled = getenv("PERRY_DISC_TRACE") != NULL;
+    return enabled;
+}
+
+#define DISC_TRACE(...) do { if (disc_tracing()) { fprintf(stderr, "perry: discs: " __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
 /// The discs mounted now, at most PERRY_MAX_DISCS.
 static int perry_discs(struct perry_disc *discs) {
@@ -389,6 +398,22 @@ static int perry_discs(struct perry_disc *discs) {
     return count;
 }
 
+/// For Perry's other providers (CoreServices' and Carbon's File Managers),
+/// which find it in this library by name: how many discs are mounted, and
+/// the name and mount point of the one at `index`, from 0, if there is one.
+/// The disc at `index` is /dev/disk<index + 2>, its volume on its s1.
+int perry_disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size)
+    __attribute__((visibility("default"), used));
+int perry_disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size) {
+    struct perry_disc discs[PERRY_MAX_DISCS];
+    int count = perry_discs(discs);
+    if (index >= 0 && index < count) {
+        if (name && name_size) snprintf(name, name_size, "%s", discs[index].name);
+        if (mount && mount_size) snprintf(mount, mount_size, "%s", discs[index].mount);
+    }
+    return count;
+}
+
 /// Where a path under /Volumes/<a disc's name> is on this machine.
 static bool disc_path(const char *path, char *out, size_t size) {
     if (!path || strncmp(path, "/Volumes/", 9) != 0) return false;
@@ -398,8 +423,11 @@ static bool disc_path(const char *path, char *out, size_t size) {
         size_t length = strlen(discs[i].name);
         const char *rest = path + 9 + length;
         if (strncmp(path + 9, discs[i].name, length) != 0 || (*rest != '\0' && *rest != '/')) continue;
-        return (size_t)snprintf(out, size, "%s%s", discs[i].mount, rest) < size;
+        bool fits = (size_t)snprintf(out, size, "%s%s", discs[i].mount, rest) < size;
+        DISC_TRACE("%s is %s", path, fits ? out : "too long");
+        return fits;
     }
+    DISC_TRACE("%s is on no disc", path);
     return false;
 }
 
@@ -1119,8 +1147,8 @@ int darwin_fstatvfs(int fd, struct darwin_statvfs *out) {
 // the next call reuses. There is the volume at /, as statfs reports every
 // file system of this machine's own, with the sizes of the one the
 // program's home is on, where it keeps what it writes; and after it the
-// discs mounted, each read-only at /Volumes/<its name> from /dev/disk2 and
-// on.
+// discs mounted, each read-only at /Volumes/<its name> from /dev/disk2s1
+// and on.
 static int mounted(struct darwin_statfs *out) {
     struct statfs info;
     const char *home = getenv("HOME");
@@ -1136,8 +1164,8 @@ static int mounted(struct darwin_statfs *out) {
         strcpy(volume->f_fstypename, "cd9660");
         snprintf(volume->f_mntonname, sizeof(volume->f_mntonname), "/Volumes/%s", discs[i].name);
         // The device is numbered by the disc's place among them all, as
-        // IOKit's media are.
-        snprintf(volume->f_mntfromname, sizeof(volume->f_mntfromname), "/dev/disk%d", i + 2);
+        // IOKit's media are: the partition under the disc's.
+        snprintf(volume->f_mntfromname, sizeof(volume->f_mntfromname), "/dev/disk%ds1", i + 2);
         volumes++;
     }
     return volumes;
@@ -1150,6 +1178,8 @@ int darwin_getmntinfo(struct darwin_statfs **out, int flags) {
     if (!out) return 0;
     int count = mounted(volumes);
     *out = volumes;
+    for (int i = 0; i < count; i++)
+        DISC_TRACE("getmntinfo: %s on %s", volumes[i].f_mntfromname, volumes[i].f_mntonname);
     return count;
 }
 
@@ -1173,7 +1203,7 @@ int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
         out->f_flags |= DARWIN_MNT_RDONLY;
         strcpy(out->f_fstypename, "cd9660");
         snprintf(out->f_mntonname, sizeof(out->f_mntonname), "/Volumes/%s", discs[i].name);
-        snprintf(out->f_mntfromname, sizeof(out->f_mntfromname), "/dev/disk%d", i + 2);
+        snprintf(out->f_mntfromname, sizeof(out->f_mntfromname), "/dev/disk%ds1", i + 2);
         break;
     }
     return 0;
@@ -1707,6 +1737,7 @@ int darwin_getmntinfo32(struct darwin_statfs32 **out, int flags) {
     for (int i = 0; i < count; i++) {
         statfs_to_32(0, &info[i], &volumes[i]);
         if (i > 0) strcpy(volumes[i].f_fstypename, "cd9660");
+        DISC_TRACE("getmntinfo: %s on %s", volumes[i].f_mntfromname, volumes[i].f_mntonname);
     }
     *out = volumes;
     return count;
