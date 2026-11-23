@@ -206,6 +206,16 @@ static GDHandle current_device;
 GDHandle carbon_GetMainDevice(void) CARBON_SYMBOL(GetMainDevice);
 GDHandle carbon_GetMainDevice(void) { return carbon_main_device(); }
 
+/// The Display Manager's device of a display: the main device, the one
+/// display there is.
+OSErr carbon_DMGetGDeviceByDisplayID(uint32_t display, GDHandle *device, Boolean failToMain) CARBON_SYMBOL(DMGetGDeviceByDisplayID);
+OSErr carbon_DMGetGDeviceByDisplayID(uint32_t display, GDHandle *device, Boolean failToMain) {
+    (void)display; (void)failToMain;
+    if (!device) return paramErr;
+    *device = carbon_main_device();
+    return noErr;
+}
+
 GDHandle carbon_GetGDevice(void) CARBON_SYMBOL(GetGDevice);
 GDHandle carbon_GetGDevice(void) { return current_device ? current_device : carbon_main_device(); }
 

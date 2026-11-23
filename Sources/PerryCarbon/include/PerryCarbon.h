@@ -238,6 +238,15 @@ MenuRef carbon_menu_new(int16_t identifier, id title);
 /// An item, or a separator for no title: its NSMenuItem.
 id carbon_menu_add(MenuRef menu, id title, uint32_t command, const char *key, uint32_t modifiers);
 void carbon_menu_set_submenu(MenuRef menu, id item, MenuRef submenu);
+void carbon_menu_set_plain(MenuRef menu);
+id carbon_menu_object(MenuRef menu);
+id carbon_pascal_string(const unsigned char *text);
+ControlRef carbon_popup_control(WindowRef window, const Rect *bounds, MenuRef menu, int32_t value, uint32_t command);
+ControlRef carbon_checkbox_control(WindowRef window, const Rect *bounds, id title, int32_t value, uint32_t command, bool small);
+ControlRef carbon_radio_group_control(WindowRef window, const Rect *bounds, id *titles, int count, int rows, int spacing,
+                                      int32_t value, uint32_t command, bool small);
+ControlRef carbon_group_box_control(WindowRef window, const Rect *bounds, id title, bool small);
+ControlRef carbon_edit_text_control(WindowRef window, const Rect *bounds, id text, bool small);
 void carbon_menu_bar_set(MenuRef bar);
 
 // MARK: - Event targets

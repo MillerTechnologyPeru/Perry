@@ -285,6 +285,36 @@ int16_t carbon_IdenticalString(ConstStr255Param a, ConstStr255Param b, void *tab
 }
 
 /// A 16.16 fixed-point number rounded to an integer.
+/// A number's decimal digits, as a Pascal string.
+void carbon_NumToString(long number, unsigned char *text) CARBON_SYMBOL(NumToString);
+void carbon_NumToString(long number, unsigned char *text) {
+    if (!text) return;
+    text[0] = (unsigned char)snprintf((char *)text + 1, 255, "%ld", number);
+}
+
+/// A Pascal string's number: its sign and the digits that follow it.
+void carbon_StringToNum(ConstStr255Param text, long *number) CARBON_SYMBOL(StringToNum);
+void carbon_StringToNum(ConstStr255Param text, long *number) {
+    if (!number) return;
+    char digits[256] = "";
+    if (text) {
+        memcpy(digits, text + 1, text[0]);
+        digits[text[0]] = 0;
+    }
+    *number = strtol(digits, NULL, 10);
+}
+
+// MARK: - Memory
+
+/// The Memory Manager's copies, which overlap as memmove's may.
+void carbon_BlockMove(const void *source, void *destination, long size) CARBON_SYMBOL(BlockMove);
+void carbon_BlockMove(const void *source, void *destination, long size) {
+    if (source && destination && size > 0) memmove(destination, source, (size_t)size);
+}
+
+void carbon_BlockMoveData(const void *source, void *destination, long size) CARBON_SYMBOL(BlockMoveData);
+void carbon_BlockMoveData(const void *source, void *destination, long size) { carbon_BlockMove(source, destination, size); }
+
 int32_t carbon_Fix2Long(int32_t value) CARBON_SYMBOL(Fix2Long);
 int32_t carbon_Fix2Long(int32_t value) { return (value + 0x8000) >> 16; }
 

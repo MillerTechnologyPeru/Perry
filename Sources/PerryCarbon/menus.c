@@ -22,6 +22,7 @@ typedef struct carbon_menu {
     int16_t identifier;
     menu_item *items;
     size_t count;
+    bool plain;   // a pop-up button's: its items choose, they don't send commands
     struct carbon_menu *next;
 } carbon_menu;
 
@@ -59,8 +60,9 @@ id carbon_menu_add(MenuRef menu, id title, uint32_t command, const char *key, ui
     } else {
         item = SEND(CLASS("NSMenuItem"), "alloc");
         item = ((id (*)(id, SEL, id, SEL, id))objc_send)(item, SELECTOR("initWithTitle:action:keyEquivalent:"), title,
-                                                         SELECTOR("perryCarbonPerform:"), carbon_string(key && !(modifiers & 8) ? key : ""));
-        SEND1(item, "setTarget:", carbon_action_target());
+                                                         menu->plain ? NULL : SELECTOR("perryCarbonPerform:"),
+                                                         carbon_string(key && !(modifiers & 8) ? key : ""));
+        if (!menu->plain) SEND1(item, "setTarget:", carbon_action_target());
         unsigned long mask = 1ul << 20;   // NSEventModifierFlagCommand
         if (modifiers & 1) mask |= 1ul << 17;   // kMenuShiftModifier
         if (modifiers & 2) mask |= 1ul << 19;   // kMenuOptionModifier
@@ -70,9 +72,11 @@ id carbon_menu_add(MenuRef menu, id title, uint32_t command, const char *key, ui
     SEND1(menu->menu, "addItem:", item);
     menu->items[menu->count] = (menu_item){item, command, true};
     menu->count++;
-    if (!separator) carbon_action_register(item, command, NULL, menu, (uint16_t)menu->count);
+    if (!separator && !menu->plain) carbon_action_register(item, command, NULL, menu, (uint16_t)menu->count);
     return item;
 }
+
+void carbon_menu_set_plain(MenuRef menu) { if ((menu = menu_from(menu))) menu->plain = true; }
 
 void carbon_menu_set_submenu(MenuRef menu, id item, MenuRef submenu) {
     if (!(menu = menu_from(menu)) || !(submenu = menu_from(submenu)) || !item) return;
@@ -244,3 +248,97 @@ int32_t carbon_MenuEvent(const EventRecord *event) {
 
 void carbon_HiliteMenu(int16_t identifier) CARBON_SYMBOL(HiliteMenu);
 void carbon_HiliteMenu(int16_t identifier) { (void)identifier; }
+
+// MARK: - Items by number
+
+/// A Pascal string's text, MacRoman's ASCII as it is and its other
+/// characters as Latin-1's (a close enough reading for menus).
+id carbon_pascal_string(const unsigned char *text) {
+    char utf8[512];
+    size_t out = 0;
+    for (size_t index = 1; text && index <= text[0] && out + 3 < sizeof utf8; index++) {
+        unsigned char c = text[index];
+        if (c < 0x80) utf8[out++] = (char)c;
+        else {
+            utf8[out++] = (char)(0xC0 | c >> 6);
+            utf8[out++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    utf8[out] = 0;
+    return carbon_string(utf8);
+}
+
+uint16_t carbon_CountMenuItems(MenuRef menu) CARBON_SYMBOL(CountMenuItems);
+uint16_t carbon_CountMenuItems(MenuRef menu) { return (menu = menu_from(menu)) ? (uint16_t)menu->count : 0; }
+
+uint16_t carbon_CountMItems(MenuRef menu) CARBON_SYMBOL(CountMItems);
+uint16_t carbon_CountMItems(MenuRef menu) { return carbon_CountMenuItems(menu); }
+
+/// Removes `count` items from the 1-based `first` on.
+OSStatus carbon_DeleteMenuItems(MenuRef menu, uint16_t first, uint32_t count) CARBON_SYMBOL(DeleteMenuItems);
+OSStatus carbon_DeleteMenuItems(MenuRef menu, uint16_t first, uint32_t count) {
+    if (!(menu = menu_from(menu))) return paramErr;
+    if (first == 0 || first > menu->count) return count ? -5620 : noErr;   // menuItemNotFoundErr
+    size_t start = first - 1u, end = start + count > menu->count ? menu->count : start + count;
+    for (size_t index = end; index-- > start;)
+        ((void (*)(id, SEL, long))objc_send)(menu->menu, SELECTOR("removeItemAtIndex:"), (long)index);
+    memmove(menu->items + start, menu->items + end, (menu->count - end) * sizeof *menu->items);
+    menu->count -= end - start;
+    return noErr;
+}
+
+void carbon_DeleteMenuItem(MenuRef menu, uint16_t item) CARBON_SYMBOL(DeleteMenuItem);
+void carbon_DeleteMenuItem(MenuRef menu, uint16_t item) { carbon_DeleteMenuItems(menu, item, 1); }
+
+/// The Menu Manager's first way to add items: `data` holds items parted by
+/// ';' or return, each with its metacharacters: '(' before disables it,
+/// "-" alone is a separator, "/x" is its Command key, and '^', '!' and '<'
+/// give it an icon, a mark and a style, each with the character after.
+void carbon_AppendMenu(MenuRef menu, ConstStr255Param data) CARBON_SYMBOL(AppendMenu);
+void carbon_AppendMenu(MenuRef menu, ConstStr255Param data) {
+    if (!(menu = menu_from(menu)) || !data) return;
+    size_t length = data[0], start = 1;
+    while (start <= length) {
+        size_t end = start;
+        while (end <= length && data[end] != ';' && data[end] != '\r') end++;
+        unsigned char title[256] = {0};
+        char key[2] = {0, 0};
+        bool disabled = false;
+        for (size_t index = start; index < end; index++) {
+            unsigned char c = data[index];
+            if (c == '(' && title[0] == 0) disabled = true;
+            else if ((c == '/' || c == '^' || c == '!' || c == '<') && index + 1 < end) {
+                if (c == '/') key[0] = (char)(data[index + 1] | 0x20);
+                index++;
+            } else title[++title[0]] = c;
+        }
+        bool separator = title[0] == 1 && title[1] == '-';
+        id item = carbon_menu_add(menu, separator ? NULL : carbon_pascal_string(title), 0, key[0] ? key : NULL, 0);
+        if (item && disabled && !separator) {
+            menu->items[menu->count - 1].enabled = false;
+            ((void (*)(id, SEL, signed char))objc_send)(item, SELECTOR("setEnabled:"), 0);
+        }
+        start = end + 1;
+    }
+}
+
+/// An item of the text, metacharacters and all.
+void carbon_AppendMenuItemText(MenuRef menu, ConstStr255Param text) CARBON_SYMBOL(AppendMenuItemText);
+void carbon_AppendMenuItemText(MenuRef menu, ConstStr255Param text) {
+    if ((menu = menu_from(menu)) && text) carbon_menu_add(menu, carbon_pascal_string(text), 0, NULL, 0);
+}
+
+void carbon_GetMenuItemText(MenuRef menu, uint16_t item, unsigned char *text) CARBON_SYMBOL(GetMenuItemText);
+void carbon_GetMenuItemText(MenuRef menu, uint16_t item, unsigned char *text) {
+    if (!text) return;
+    text[0] = 0;
+    if (!(menu = menu_from(menu)) || item == 0 || item > menu->count) return;
+    const char *utf8 = ((const char *(*)(id, SEL))objc_send)(SEND(menu->items[item - 1].item, "title"), SELECTOR("UTF8String"));
+    for (size_t index = 0; utf8 && utf8[index] && text[0] < 255; index++) text[++text[0]] = (unsigned char)utf8[index];
+}
+
+void carbon_SetMenuItemText(MenuRef menu, uint16_t item, ConstStr255Param text) CARBON_SYMBOL(SetMenuItemText);
+void carbon_SetMenuItemText(MenuRef menu, uint16_t item, ConstStr255Param text) {
+    if (!(menu = menu_from(menu)) || item == 0 || item > menu->count || !text) return;
+    SEND1(menu->items[item - 1].item, "setTitle:", carbon_pascal_string(text));
+}
