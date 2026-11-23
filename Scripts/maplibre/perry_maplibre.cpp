@@ -1,10 +1,12 @@
-// A C interface to MapLibre Native for Perry's MapKit: one map per thread,
-// rendered offscreen through MapLibre's headless frontend (EGL and OpenGL
-// ES), its newest frame kept for the map view to show.
+// A C interface to MapLibre Native for Perry's MapKit: maps rendered
+// offscreen through MapLibre's headless frontend (EGL and OpenGL ES), each
+// one's newest frame kept for its map view to show.
 //
-// Each map has a thread of its own running MapLibre's run loop, on which
-// the map, its renderer and its GL context live. The caller's thread only
-// posts changes (size, camera) to that loop and copies finished frames out.
+// Every map lives on one thread, started with the first map, which runs
+// MapLibre's run loop: the maps, their renderers and their GL contexts are
+// made, used and let go there, as MapLibre expects of maps that are alive
+// together. The caller's thread only posts changes (size, camera) to that
+// loop and copies finished frames out.
 // After each frame MapLibre renders, its pixels are read back and kept;
 // the callback then tells the caller a newer frame is ready.
 //
@@ -26,10 +28,12 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -46,10 +50,54 @@ private:
     pml_map *map;
 };
 
+/// The thread every map lives on, and its run loop; it lasts as long as the
+/// program.
+struct Host {
+    std::mutex lock;
+    std::condition_variable started;
+    mln::util::RunLoop *loop = nullptr;
+
+    // On the host's thread: the maps that are open, by their numbers. A
+    // frame's read is posted to the loop and may come up after its map has
+    // closed, so it finds its map here.
+    std::unordered_map<uint64_t, pml_map *> maps;
+    uint64_t lastNumber = 0;
+
+    static Host &shared() {
+        static Host *host = new Host();
+        return *host;
+    }
+
+    Host() {
+        std::thread([this] {
+            mln::util::RunLoop runLoop;
+            {
+                std::lock_guard<std::mutex> guard(lock);
+                loop = &runLoop;
+            }
+            started.notify_all();
+            runLoop.run();
+        }).detach();
+        std::unique_lock<std::mutex> guard(lock);
+        started.wait(guard, [this] { return loop != nullptr; });
+    }
+
+    /// Runs `work` on the host's thread and waits for it.
+    template <typename Work>
+    void perform(Work work) {
+        std::promise<void> done;
+        loop->invoke([&] {
+            work();
+            done.set_value();
+        });
+        done.get_future().wait();
+    }
+};
+
 } // namespace
 
 struct pml_map {
-    // Set at creation, read on the map's thread.
+    // Set at creation, read on the host's thread.
     std::string style;
     std::string cache;
     float pixelRatio = 1;
@@ -57,12 +105,10 @@ struct pml_map {
     pml_frame_callback callback = nullptr;
     void *context = nullptr;
 
-    std::thread thread;
     std::mutex lock;
-    std::condition_variable started;
-    mln::util::RunLoop *loop = nullptr;
 
-    // On the map's thread.
+    // On the host's thread.
+    uint64_t number = 0;
     std::unique_ptr<mln::HeadlessFrontend> frontend;
     std::unique_ptr<mln::Map> map;
     std::unique_ptr<FrameObserver> observer;
@@ -73,14 +119,19 @@ struct pml_map {
     int frameWidth = 0, frameHeight = 0;
     uint64_t generation = 0;
 
-    void run();
+    void open();
+    void close();
     void readFrame();
 };
 
 void FrameObserver::onDidFinishRenderingFrame(const RenderFrameStatus &) {
     if (map->readPending) return;
     map->readPending = true;
-    map->loop->invoke([map = map] { map->readFrame(); });
+    Host &host = Host::shared();
+    host.loop->invoke([&host, number = map->number] {
+        auto found = host.maps.find(number);
+        if (found != host.maps.end()) found->second->readFrame();
+    });
 }
 
 void FrameObserver::onDidFailLoadingMap(mln::MapLoadError, const std::string &message) {
@@ -103,8 +154,10 @@ void pml_map::readFrame() {
     if (callback) callback(context);
 }
 
-void pml_map::run() {
-    mln::util::RunLoop runLoop;
+void pml_map::open() {
+    Host &host = Host::shared();
+    number = ++host.lastNumber;
+    host.maps[number] = this;
     frontend = std::make_unique<mln::HeadlessFrontend>(
         mln::Size{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, pixelRatio);
     observer = std::make_unique<FrameObserver>(this);
@@ -117,12 +170,10 @@ void pml_map::run() {
                                          .withPixelRatio(pixelRatio),
                                      resources);
     map->getStyle().loadURL(style);
-    {
-        std::lock_guard<std::mutex> guard(lock);
-        loop = &runLoop;
-    }
-    started.notify_all();
-    runLoop.run();
+}
+
+void pml_map::close() {
+    Host::shared().maps.erase(number);
     map.reset();
     observer.reset();
     frontend.reset();
@@ -147,22 +198,20 @@ pml_map *pml_map_create(int width, int height, float pixel_ratio, const char *st
     map->pixelRatio = pixel_ratio > 0 ? pixel_ratio : 1;
     map->callback = callback;
     map->context = context;
-    map->thread = std::thread([map] { map->run(); });
-    std::unique_lock<std::mutex> guard(map->lock);
-    map->started.wait(guard, [map] { return map->loop != nullptr; });
+    Host::shared().perform([map] { map->open(); });
     return map;
 }
 
 void pml_map_destroy(pml_map *map) {
     if (!map) return;
-    map->loop->invoke([loop = map->loop] { loop->stop(); });
-    map->thread.join();
+    // Changes posted before this run first, and find the map still open.
+    Host::shared().perform([map] { map->close(); });
     delete map;
 }
 
 void pml_map_set_size(pml_map *map, int width, int height) {
     if (!map || width <= 0 || height <= 0) return;
-    map->loop->invoke([map, width, height] {
+    Host::shared().loop->invoke([map, width, height] {
         mln::Size size{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
         map->frontend->setSize(size);
         map->map->setSize(size);
@@ -171,7 +220,7 @@ void pml_map_set_size(pml_map *map, int width, int height) {
 
 void pml_map_set_camera(pml_map *map, double latitude, double longitude, double zoom, double bearing, double pitch) {
     if (!map) return;
-    map->loop->invoke([map, latitude, longitude, zoom, bearing, pitch] {
+    Host::shared().loop->invoke([map, latitude, longitude, zoom, bearing, pitch] {
         map->map->jumpTo(mln::CameraOptions()
                              .withCenter(mln::LatLng(latitude, longitude))
                              .withZoom(zoom)
