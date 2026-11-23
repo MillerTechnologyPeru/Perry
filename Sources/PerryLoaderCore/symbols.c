@@ -881,7 +881,11 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     if (*slot)
         return *slot;
 
+#if defined(__powerpc__)
+    enum { STUB_SIZE = 64 };    // with the instructions that set r2
+#else
     enum { STUB_SIZE = 32 };
+#endif
     if (!current_page.base || current_page.used + STUB_SIZE > current_page.size) {
         current_page.size = 0x4000;
         current_page.base = mmap(NULL, current_page.size, PROT_READ | PROT_WRITE | PROT_EXEC,
@@ -917,16 +921,17 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     bytes[12] = 0x83; bytes[13] = 0xc4; bytes[14] = 0x04;   // add esp, 4
     bytes[15] = 0xc3;                                   // ret
 #elif defined(__powerpc__)
-    // The description goes in r3, the first argument; lr still holds the
-    // caller's return address.
+    // r2 is set for the handler, which is Linux code. The description goes
+    // in r3, the first argument; lr still holds the caller's return address.
     uint32_t text = (uint32_t)(uintptr_t)strdup(description);
     uint32_t handler = (uint32_t)(uintptr_t)&perry_unimplemented;
-    code[0] = 0x3c600000u | (text >> 16);           // lis r3, description@h
-    code[1] = 0x60630000u | (text & 0xffff);        // ori r3, r3, description@l
-    code[2] = 0x3d800000u | (handler >> 16);        // lis r12, handler@h
-    code[3] = 0x618c0000u | (handler & 0xffff);     // ori r12, r12, handler@l
-    code[4] = 0x7d8903a6u;                          // mtctr r12
-    code[5] = 0x4e800420u;                          // bctr
+    int n = perry_ppc_emit_thread_pointer(code);
+    code[n++] = 0x3c600000u | (text >> 16);         // lis r3, description@h
+    code[n++] = 0x60630000u | (text & 0xffff);      // ori r3, r3, description@l
+    code[n++] = 0x3d800000u | (handler >> 16);      // lis r12, handler@h
+    code[n++] = 0x618c0000u | (handler & 0xffff);   // ori r12, r12, handler@l
+    code[n++] = 0x7d8903a6u;                        // mtctr r12
+    code[n++] = 0x4e800420u;                        // bctr
 #elif defined(__x86_64__)
     code[0] = 0x093d8b48;   // mov rdi, [rip + 9]    (description)
     code[1] = 0xff000000;   // jmp [rip + 11]        (handler)
