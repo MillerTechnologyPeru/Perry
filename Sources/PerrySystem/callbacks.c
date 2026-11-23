@@ -1,12 +1,13 @@
 // Functions whose Darwin callbacks glibc calls: qsort's comparator, a
 // thread's start routine and exit handlers. On armv7 Darwin's code may change
-// r9, which glibc's keeps across calls, so each callback is called through a
-// function that keeps it. Elsewhere they pass straight through (thunks.S).
+// r9, and on ppc r2, which glibc's keeps across calls, so each callback is
+// called through a function that keeps it. Elsewhere they pass straight
+// through (thunks.S).
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
-#if defined(__arm__) || defined(__i386__)
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
 
 #include <errno.h>
 #include <pthread.h>
