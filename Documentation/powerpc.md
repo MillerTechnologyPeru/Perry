@@ -116,17 +116,45 @@ r12 and cr0, which are scratch at a call in both ABIs:
 
 A method or function whose arguments are words, pointers and objects passes
 the same on both, and most do. One that takes a `double`, a `float` (a
-`CGFloat`), a `long long` or a structure (`NSRect`) does not, and the 32-bit
-ObjCValue types armv7 uses can't make it pass: Linux's ppc passes every
-structure, `ObjCWordPair` and `ObjCWords4` included, through a pointer, and
-one parameter cannot stand for the GPRs Darwin skips after a floating-point
-argument. The plan is to translate by the method's type encoding, which the
-macros already emit: an assembly entry takes Darwin's r3-r10, f1-f13 and
-parameter area, and calls the Swift implementation with the arguments where
-Linux's ABI puts them (libffi's `ffi_call`, or a small encoding-driven
-shuffle of its own), and the reverse for sends from providers to the
-program's methods. C entry points with such parameters (`ldexp`, `modf`,
-CoreGraphics' functions) get the same moves as thunks.
+`CGFloat`), a `long long` or a structure (`NSRect`) does not: Darwin passes
+a double or float in an FPR and skips the GPRs it would have taken, a
+structure in its words, and a long long in the next two words; Linux skips
+no GPRs, passes every structure through a pointer, and aligns a long long to
+an even register pair.
+
+**C functions** (`@DarwinC`) take Darwin's arguments where Darwin leaves
+them. On ppc the macro gives `__darwin_<name>` a parameter list that puts,
+under Linux's rules, each argument in Darwin's register: a double or float as
+itself (an FPR on both), followed by `UInt32` words standing for the GPRs
+Darwin skips; a long long and a structure as their words, which the body
+reassembles (`PPCWords`). Results pass the same on both (r3, r3:r4, f1, or
+a structure through a pointer in r3). This costs nothing at run time. It
+holds while the arguments fit in r3-r10 and f1-f8; past them the two stack
+areas differ (Darwin's has room for the register arguments, at 24(r1);
+Linux's starts at 8(r1)), so such a function is exported instead as
+`perry_ppc_moved_<name>` with its 32-bit ObjCType signature, and
+`perry_ppc_types_<name>` gives its type encoding: the loader binds it
+through a stub that moves the arguments by that encoding. `libSystem`'s math
+functions use the same padding by hand (`math.c`). Providers call each
+other's such functions by their `perry_native_` names, with Swift's types.
+
+**Methods** carry their type encodings in the Objective-C runtime already, so
+they are moved by encoding at run time (`ppc_abi.c`, `ppc_abi.S`). On ppc,
+as on i386 and 64-bit, ObjCValue's types are the types themselves (a
+`Double` is a `Double`, a `CGRect` a `CGRect`), and the loader moves
+arguments between Darwin's places and where Linux's ABI puts those types:
+doubles and floats in f1-f8, a long long in an even register pair, a
+structure through a pointer to a copy. A provider's method is added as its
+Darwin entry, a stub that takes Darwin's arguments and calls the Swift
+implementation with them where Linux has them. A provider's sends go through
+the loader's sends (`perry_ppc_send` and its forms), which call the method
+as Darwin code would. Both are driven by the method's encoding, so a
+provider's send to another provider's method arrives as it left, and Swift's
+sends and methods, the macros' and those written by hand, are right as they
+are.
+
+`Scripts/test-ppc-abi.sh` checks the moves against code Apple's own GCC
+compiled.
 
 ## Status
 
