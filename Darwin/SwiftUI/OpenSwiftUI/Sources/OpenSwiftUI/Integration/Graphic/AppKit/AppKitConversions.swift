@@ -5,7 +5,7 @@
 //  Audited for 6.5.4
 //  Status: WIP
 
-#if canImport(AppKit)
+#if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import OpenSwiftUICore
 
 // MARK: - ControlSize Conversions
