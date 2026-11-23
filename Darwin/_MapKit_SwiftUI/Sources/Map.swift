@@ -251,7 +251,9 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
                 .allowsHitTesting(visibleRegion != nil)
             }
             .clipped()
-            .ignoresSafeArea(edges: .top)
+            // The map runs under the bars above and below it, as MapKit's
+            // does: under a floating tab bar it shows through the glass.
+            .ignoresSafeArea(edges: [.top, .bottom])
         }
     }
 }
