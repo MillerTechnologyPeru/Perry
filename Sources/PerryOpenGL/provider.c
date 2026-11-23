@@ -7,6 +7,7 @@
 #include "perry_wrapped.h"
 
 #include <dlfcn.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,27 +19,45 @@ static perry_wrapped_library gl = PERRY_WRAPPED_SONAME("libGL.so.1");
 /// programs that put that in their shaders' #version line get the core
 /// language, which has none of the built-in variables (gl_TexCoord) their
 /// shaders were written to use.
-#if defined(__i386__)
-/// GL_EXTENSIONS no longer than a 32-bit Mac's drivers made it, a few
-/// thousand bytes: programs of their time copy it into a buffer of about
-/// that size (Age of Empires III's is 4 KB), which Linux's list, many times
-/// longer, runs past. It's cut at a name's end; Mesa lists the oldest
+static void *gl_function(const char *name);
+
+/// GL_EXTENSIONS as a Mac's: with GL_APPLE_vertex_array_object, which every
+/// Mac's driver has and Linux's lack, made of ARB_vertex_array_object's
+/// functions (perry_provider_symbol), when the host has those; Age of
+/// Empires III uses vertex array objects without checking further. For a
+/// 32-bit program it's also no longer than a 32-bit Mac's drivers made it,
+/// a few thousand bytes: programs of their time copy it into a buffer of
+/// about that size (Age of Empires III's is 4 KB), which Linux's list, many
+/// times longer, runs past. It's cut at a name's end; Mesa lists the oldest
 /// first, so the names those programs look for are kept.
-static const unsigned char *short_extensions(const unsigned char *full) {
+static const unsigned char *mac_extensions(const unsigned char *full) {
+    static const char apple_vao[] = "GL_APPLE_vertex_array_object";
+#if defined(__i386__)
     enum { LIMIT = 4000 };
+#else
+    enum { LIMIT = 1 << 16 };
+#endif
     static const unsigned char *source;
-    static char trimmed[LIMIT + 1];
-    if (!full || strlen((const char *)full) <= LIMIT) return full;
+    static char made[LIMIT + sizeof apple_vao + 1];
+    if (!full) return full;
+    bool add = !strstr((const char *)full, apple_vao) && gl_function("_glBindVertexArray");
+    size_t length = strlen((const char *)full);
+    if (!add && length <= LIMIT) return full;
     if (full != source) {
-        size_t length = LIMIT;
-        while (length > 0 && full[length] != ' ') length--;
-        memcpy(trimmed, full, length);
-        trimmed[length] = 0;
+        if (length > LIMIT) {
+            length = LIMIT;
+            while (length > 0 && full[length] != ' ') length--;
+        }
+        memcpy(made, full, length);
+        made[length] = 0;
+        if (add) {
+            if (length > 0 && made[length - 1] != ' ') strcat(made, " ");
+            strcat(made, apple_vao);
+        }
         source = full;
     }
-    return (const unsigned char *)trimmed;
+    return (const unsigned char *)made;
 }
-#endif
 
 static const unsigned char *perry_glGetString(unsigned int name) {
     static const unsigned char *(*get_string)(unsigned int);
@@ -49,9 +68,7 @@ static const unsigned char *perry_glGetString(unsigned int name) {
     }
     if (name == 0x8B8C /* GL_SHADING_LANGUAGE_VERSION */ && !perry_cgl_current_is_core())
         return (const unsigned char *)"1.20";
-#if defined(__i386__)
-    if (name == 0x1F03 /* GL_EXTENSIONS */ && get_string) return short_extensions(get_string(name));
-#endif
+    if (name == 0x1F03 /* GL_EXTENSIONS */ && get_string) return mac_extensions(get_string(name));
     return get_string ? get_string(name) : NULL;
 }
 
@@ -128,6 +145,14 @@ void *perry_provider_symbol(const char *name) {
     if (strcmp(name, "_glGetString") == 0) return (void *)perry_glGetString;
     if (strcmp(name, "_glGetIntegerv") == 0) return (void *)perry_glGetIntegerv;
     if (strcmp(name, "_glProgramStringARB") == 0) return (void *)perry_glProgramString;
+    // APPLE_vertex_array_object's functions are ARB_vertex_array_object's,
+    // which a compatibility context's client arrays work with too.
+    static const char *const apple_vao[][2] = {
+        {"_glBindVertexArrayAPPLE", "_glBindVertexArray"}, {"_glDeleteVertexArraysAPPLE", "_glDeleteVertexArrays"},
+        {"_glGenVertexArraysAPPLE", "_glGenVertexArrays"}, {"_glIsVertexArrayAPPLE", "_glIsVertexArray"},
+    };
+    for (size_t index = 0; index < sizeof apple_vao / sizeof apple_vao[0]; index++)
+        if (strcmp(name, apple_vao[index][0]) == 0) return gl_function(apple_vao[index][1]);
     void *symbol = perry_wrapped_symbol(&gl, name, NULL);
     // That checks where the symbol came from, which dladdr can't tell through
     // an emulator's native libGL. A gl name is only ever libGL's.
