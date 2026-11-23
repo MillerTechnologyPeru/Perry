@@ -1,0 +1,9 @@
+-autolink-force-load
+-module-link-name
+swiftIntents
+-Xlinker
+-alias
+-Xlinker
+_$s7Intents24_INIntentSetImageKeyPathMp
+-Xlinker
+_$s7Intents24_INIntentSetImageKeyPathTL
