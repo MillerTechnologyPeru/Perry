@@ -165,7 +165,6 @@ PASSTHROUGH _localtime, localtime
 PASSTHROUGH _localtime_r, localtime_r
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_exit, pthread_exit
 PASSTHROUGH _rand, rand
