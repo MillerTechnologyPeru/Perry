@@ -289,5 +289,7 @@ void perry_objc_trampoline_remove(void *imp);
 typedef int (*perry_objc_raise_function)(void *exception);
 void perry_objc_set_unwinder(perry_objc_raise_function raise);
 _Noreturn void perry_objc_uncaught_exception(void *object);
+// The exception the preprocessor makes of a thrown one (Swift).
+void *perry_objc_preprocess_exception(void *object);
 
 #endif

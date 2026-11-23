@@ -40,6 +40,7 @@ void *objc_exception_extract(void *data) {
 
 _Noreturn void objc_exception_throw(void *object) DARWIN_SYMBOL("_objc_exception_throw");
 _Noreturn void objc_exception_throw(void *object) {
+    object = perry_objc_preprocess_exception(object);
     struct exception_data *handler = innermost;
     if (!handler)
         perry_objc_uncaught_exception(object);

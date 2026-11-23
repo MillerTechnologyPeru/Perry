@@ -1137,13 +1137,34 @@ public func perry_objc_uncaught_exception(_ exception: UnsafeMutableRawPointer?)
     objcFatal("terminating with uncaught exception of type NSException")
 }
 
+/// What a thrown exception is passed through first, as the runtime's
+/// exception preprocessor: the exception as it is, until a program sets one.
+/// There is always one, as Foundation installs its own on Darwin, and Xcode
+/// 4's DVTFoundation asserts that there is one before it chains its own.
+public typealias ExceptionPreprocessor = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+private let identityExceptionPreprocessor: ExceptionPreprocessor = { $0 }
+nonisolated(unsafe) private var exceptionPreprocessor: ExceptionPreprocessor = identityExceptionPreprocessor
+
+@c(_objc_setExceptionPreprocessor)
+public func objc_setExceptionPreprocessor(_ preprocessor: ExceptionPreprocessor?) -> ExceptionPreprocessor? {
+    let previous = exceptionPreprocessor
+    exceptionPreprocessor = preprocessor ?? identityExceptionPreprocessor
+    return previous
+}
+
+/// The exception the preprocessor makes of a thrown one.
+@c
+public func perry_objc_preprocess_exception(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    exceptionPreprocessor(exception)
+}
+
 #if !arch(arm) && !arch(i386) && !arch(arm64)
 /// Throws an exception, which on x86_64 nothing catches: every exception
 /// is uncaught. armv7, i386 and arm64 have their own (exceptions_arm.c,
 /// exceptions_i386.c, exceptions_arm64.c).
 @c(_objc_exception_throw)
 public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
-    perry_objc_uncaught_exception(exception)
+    perry_objc_uncaught_exception(perry_objc_preprocess_exception(exception))
 }
 
 @c(_objc_exception_rethrow)

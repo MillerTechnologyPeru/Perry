@@ -139,6 +139,7 @@ static void destroy(void *thrown) {
 
 _Noreturn void objc_exception_throw(void *object) DARWIN_SYMBOL("_objc_exception_throw");
 _Noreturn void objc_exception_throw(void *object) {
+    object = perry_objc_preprocess_exception(object);
     if (!load())
         perry_objc_uncaught_exception(object);
     struct objc_exception *exception = cxx.allocate(sizeof(*exception));
