@@ -239,14 +239,7 @@ void *carbon_MPAllocateAligned(size_t size, uint8_t alignment, uint32_t options)
 void carbon_MPFree(void *memory) CARBON_SYMBOL(MPFree);
 void carbon_MPFree(void *memory) { free(memory); }
 
-void *carbon_MPCurrentTaskID(void) CARBON_SYMBOL(MPCurrentTaskID);
-void *carbon_MPCurrentTaskID(void) {
-    static _Thread_local char task;
-    return &task;
-}
-
-void carbon_MPYield(void) CARBON_SYMBOL(MPYield);
-void carbon_MPYield(void) { sched_yield(); }
+// Tasks, queues and events are in multiprocessing.c.
 
 /// Waits until an AbsoluteTime, nanoseconds of the monotonic clock.
 OSStatus carbon_MPDelayUntil(const uint64_t *deadline) CARBON_SYMBOL(MPDelayUntil);
