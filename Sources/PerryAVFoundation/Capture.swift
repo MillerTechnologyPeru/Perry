@@ -62,7 +62,14 @@ enum MediaCharacteristics {
     static let AVMediaCharacteristicDescribesMusicAndSoundForAccessibility = "public.accessibility.describes-music-and-sound"
     static let AVMediaCharacteristicEasyToRead = "public.easy-to-read"
     static let AVMediaCharacteristicIsAuxiliaryContent = "public.auxiliary-content"
-    static let AVMediaCharacteristicIsOriginalContent = "public.main-program-content"
+    static let AVMediaCharacteristicIsOriginalContent = "public.original-content"
+    static let AVMediaCharacteristicIsMainProgramContent = "public.main-program-content"
+    static let AVMediaCharacteristicContainsAlphaChannel = "public.contains-alpha-channel"
+    static let AVMediaCharacteristicContainsHDRVideo = "public.contains-hdr-video"
+    static let AVMediaCharacteristicUsesWideGamutColorSpace = "public.uses-wide-gamut-color-space"
+    static let AVMediaCharacteristicLanguageTranslation = "public.translation"
+    static let AVMediaCharacteristicDubbedTranslation = "public.translation.dubbed"
+    static let AVMediaCharacteristicVoiceOverTranslation = "public.translation.voice-over"
     static let AVMediaTypeClosedCaption = "clcp"
     static let AVMediaTypeSubtitle = "sbtl"
     static let AVMediaTypeTimecode = "tmcd"
@@ -97,4 +104,39 @@ enum MetadataObjectTypes {
     static let AVMetadataObjectTypeEAN8Code = "org.gs1.EAN-8"
     static let AVMetadataObjectTypeCode128Code = "com.intermec.Code128"
     static let AVMetadataObjectTypeFace = "face"
+}
+
+/// The notifications capture sessions, devices and sample buffer renderers
+/// post, and the keys of AVFoundation's errors' user info. Each is its own
+/// name, as on Darwin.
+@ObjCConstants
+enum CaptureNotifications {
+    static let AVCaptureDeviceWasConnectedNotification = "AVCaptureDeviceWasConnectedNotification"
+    static let AVCaptureDeviceWasDisconnectedNotification = "AVCaptureDeviceWasDisconnectedNotification"
+    static let AVCaptureInputPortFormatDescriptionDidChangeNotification = "AVCaptureInputPortFormatDescriptionDidChangeNotification"
+    static let AVCaptureSessionDidStartRunningNotification = "AVCaptureSessionDidStartRunningNotification"
+    static let AVCaptureSessionDidStopRunningNotification = "AVCaptureSessionDidStopRunningNotification"
+    static let AVCaptureSessionInterruptionEndedNotification = "AVCaptureSessionInterruptionEndedNotification"
+    static let AVCaptureSessionRuntimeErrorNotification = "AVCaptureSessionRuntimeErrorNotification"
+    static let AVCaptureSessionWasInterruptedNotification = "AVCaptureSessionWasInterruptedNotification"
+    static let AVSampleBufferAudioRendererFlushTimeKey = "AVSampleBufferAudioRendererFlushTimeKey"
+    static let AVSampleBufferAudioRendererOutputConfigurationDidChangeNotification =
+        "AVSampleBufferAudioRendererOutputConfigurationDidChangeNotification"
+    static let AVSampleBufferAudioRendererWasFlushedAutomaticallyNotification =
+        "AVSampleBufferAudioRendererWasFlushedAutomaticallyNotification"
+    static let AVSampleBufferVideoRendererDidFailToDecodeNotification = "AVSampleBufferVideoRendererDidFailToDecodeNotification"
+    static let AVSampleBufferVideoRendererDidFailToDecodeNotificationErrorKey =
+        "AVSampleBufferVideoRendererDidFailToDecodeNotificationErrorKey"
+    static let AVSampleBufferVideoRendererRequiresFlushToResumeDecodingDidChangeNotification =
+        "AVSampleBufferVideoRendererRequiresFlushToResumeDecodingDidChangeNotification"
+    static let AVErrorDeviceKey = "AVErrorDeviceKey"
+    static let AVErrorFileSizeKey = "AVErrorFileSizeKey"
+    static let AVErrorFileTypeKey = "AVErrorFileTypeKey"
+    static let AVErrorMediaSubTypeKey = "AVErrorMediaSubTypeKey"
+    static let AVErrorMediaTypeKey = "AVErrorMediaTypeKey"
+    static let AVErrorPIDKey = "AVErrorPIDKey"
+    static let AVErrorPersistentTrackIDKey = "AVErrorPersistentTrackIDKey"
+    static let AVErrorPresentationTimeStampKey = "AVErrorPresentationTimeStampKey"
+    static let AVErrorRecordingSuccessfullyFinishedKey = "AVErrorRecordingSuccessfullyFinishedKey"
+    static let AVErrorTimeKey = "AVErrorTimeKey"
 }
