@@ -18,6 +18,7 @@ everything it calls is ordinary Linux code, mostly written in Swift.
 | armv7 and armv6 iOS | arm64 with AArch32 at EL0 | `perry32` | C, Objective-C and C++; iOS 2 through 10; no Swift |
 | x86_64 macOS | x86_64 | `perry` | AppKit apps and games |
 | i386 macOS | x86_64 | `perry32` | Cocoa, Carbon and QuickTime era apps and games |
+| ppc macOS | 32-bit PowerPC, G4 or later | `perry` | Mac OS X 10.3 to 10.5 Cocoa and Carbon apps |
  
 `perry` reads a program's architectures and hands 32-bit ones to `perry32`
 (beside it, or at `$PERRY32`). arm64e and FairPlay-encrypted binaries are
@@ -78,6 +79,15 @@ Scripts/docker-test.sh [swift test arguments...]
 - armv7 iOS: `Scripts/build-armv7-*.sh`, described in
   [Documentation/armv7.md](Documentation/armv7.md)
 - i386 macOS: `Scripts/build-i386-*.sh`
+
+### PowerPC
+
+ppc Mac programs run on 32-bit big-endian PowerPC Linux, where `perry` and
+its providers are themselves ppc Linux code, built with a powerpc-linux-gnu
+cross toolchain by `Scripts/build-ppc-*.sh` and SwiftPM. The loader
+translates between Darwin's ppc calling convention and Linux's at every
+boundary. See [Documentation/powerpc.md](Documentation/powerpc.md).
+
 ### Metal
  
 Metal runs on Vulkan 1.3 through `libmetal2vulkan.so`, a separate library
