@@ -40,6 +40,7 @@ out=.build/perry-fixtures/darwin
 deps=.build/perry-fixtures/sources
 min=15.0
 failed=""
+warmed=""
 
 # Runs a command for at most $2 seconds, recording its stdout as fixture
 # $1's reference, and once more if it fails or runs out of time: a
@@ -157,6 +158,12 @@ for src in Tests/Fixtures/Darwin/*/; do
         simulator="${PERRY_SIMULATOR:-$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')}"
         xcrun simctl boot "$simulator" 2>/dev/null || true
         xcrun simctl bootstatus "$simulator" -b >/dev/null
+        # A simulator that has just booted starts its first programs
+        # slowly, WebKit's above all: one is run and waited for first.
+        if [ -z "$warmed" ]; then
+            xcrun simctl spawn "$simulator" launchctl list >/dev/null 2>&1 || true
+            warmed=1
+        fi
         simulator_binary="$out/simulator/$name"
         mkdir -p "$out/simulator"
         xcrun --sdk iphonesimulator clang -target "arm64-apple-ios$min-simulator" \
@@ -182,7 +189,7 @@ for src in Tests/Fixtures/Darwin/*/; do
             xcrun simctl uninstall "$simulator" "$bundle_id"
         else
             cp "$simulator_binary" "$spawn_dir/$name"
-            record "$name" 60 xcrun simctl spawn "$simulator" "$spawn_dir/$name"
+            record "$name" 180 xcrun simctl spawn "$simulator" "$spawn_dir/$name"
         fi
         rm -rf "$spawn_dir"
         echo "$app"
