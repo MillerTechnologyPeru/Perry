@@ -304,6 +304,38 @@ public class NSString: NSObject {
         ObjCObject(Strings.autoreleased(other, of: cls.pointer))
     }
 
+    /// UserNotifications' addition: the main bundle's string for the key,
+    /// with each `%@` (or `%n$@`) replaced by an argument's description in
+    /// turn, as a notification's text is localized when it is shown.
+    @ObjCClassMethod("localizedUserNotificationStringForKey:arguments:")
+    static func localizedUserNotificationString(_ cls: ObjCClass, forKey key: id?, arguments: id?) -> ObjCObject {
+        let localized = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, id?, id?) -> id?).self)(
+            Bundles.main, ObjC.selector("localizedStringForKey:value:table:"), key, nil, nil)
+        let format = Strings.value(of: localized) ?? Strings.value(of: key) ?? ""
+        let values = Arrays.elements(arguments).map { Strings.value(of: $0) ?? Format.describe($0) }
+        var text = "", next = 0
+        var scalars = format.unicodeScalars[...]
+        while let first = scalars.first {
+            scalars = scalars.dropFirst()
+            guard first == "%" else { text.unicodeScalars.append(first); continue }
+            if scalars.first == "%" { text += "%"; scalars = scalars.dropFirst(); continue }
+            // An optional position, then the conversion.
+            let digits = scalars.prefix { ("0"..."9").contains($0) }
+            var position: Int?
+            var rest = scalars
+            if !digits.isEmpty, rest.dropFirst(digits.count).first == "$" {
+                position = Int(String(String.UnicodeScalarView(digits))).map { $0 - 1 }
+                rest = rest.dropFirst(digits.count + 1)
+            }
+            guard let conversion = rest.first, conversion == "@" else { text += "%"; continue }
+            scalars = rest.dropFirst()
+            let index = position ?? next
+            next = index + 1
+            text += index < values.count ? values[index] : ""
+        }
+        return ObjCObject(Strings.autoreleased(text, of: cls.pointer))
+    }
+
     @ObjCClassMethod("stringWithUTF8String:")
     static func string(_ cls: ObjCClass, utf8 bytes: UnsafePointer<CChar>?) -> ObjCObject? {
         bytes.map { ObjCObject(Strings.autoreleased(String(cString: $0), of: cls.pointer)) }
