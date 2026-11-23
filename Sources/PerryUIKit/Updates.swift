@@ -253,11 +253,15 @@ enum Snapshot {
                 tree += " color (\((c.0 * 100).rounded() / 100), \((c.1 * 100).rounded() / 100), \((c.2 * 100).rounded() / 100), \((c.3 * 100).rounded() / 100))"
             }
             tree += " font \(label.font.state.name) \(label.font.state.pointSize)"
+            // NSTextAlignment as UIKit numbers it (left 0, center 1, right 2), when not natural.
+            if label.alignment != 4 { tree += " align \(label.alignment)" }
         }
         if constraintsToo {
             // Whether constraints place the view, whether it is a stack view, and whether it awaits layout.
             if view.state.translatesAutoresizingMaskIntoConstraints { tree += " by frame" }
-            if let stack = view.as(UIStackView.self) { tree += " stack of \(stack.arranged.count)" }
+            if let stack = view.as(UIStackView.self) {
+                tree += " stack of \(stack.arranged.count) axis \(stack.stack.axis) alignment \(stack.stack.alignment) distribution \(stack.stack.distribution)"
+            }
             if view.state.needsLayout { tree += " needs layout" }
         }
         tree += view.state.hidden ? " hidden\n" : "\n"
