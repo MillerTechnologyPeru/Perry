@@ -238,6 +238,21 @@ const struct perry_cf_callbacks cf_type_set_callbacks DARWIN_SYMBOL("_kCFTypeSet
     CF_CALLBACKS(perry_foundation_cf_retain, perry_foundation_cf_hash);
 const struct perry_cf_callbacks cf_copy_string_set_callbacks DARWIN_SYMBOL("_kCFCopyStringSetCallBacks") =
     CF_CALLBACKS(perry_foundation_cf_copy_string, perry_foundation_cf_hash);
+const struct perry_cf_callbacks cf_type_bag_callbacks DARWIN_SYMBOL("_kCFTypeBagCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_retain, perry_foundation_cf_hash);
+const struct perry_cf_callbacks cf_copy_string_bag_callbacks DARWIN_SYMBOL("_kCFCopyStringBagCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_copy_string, perry_foundation_cf_hash);
+
+// CFBinaryHeapCallBacks: { version, retain, release, copyDescription,
+// compare }, comparing strings as CFStringCompare does.
+extern long perry_foundation_cf_string_compare(const void *, const void *, void *);
+const struct {
+    long version;
+    const void *retain, *release, *copy_description, *compare;
+} cf_string_binary_heap_callbacks DARWIN_SYMBOL("_kCFStringBinaryHeapCallBacks") = {
+    0, (const void *)perry_foundation_cf_retain, (const void *)perry_foundation_cf_release,
+    (const void *)perry_foundation_cf_copy_description, (const void *)perry_foundation_cf_string_compare,
+};
 
 // The default allocators: CoreFoundation's allocator arguments are ignored,
 // so any non-null objects do.
