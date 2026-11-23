@@ -966,6 +966,24 @@ public func CFPropertyListCreateFromXMLData(_ allocator: id?, _ data: id?, _ opt
     return made
 }
 
+/// CFPropertyListRef _CFPropertyListCreateFromXMLString(CFAllocatorRef,
+/// CFStringRef, CFOptionFlags, CFStringRef *errorString, Boolean
+/// allowNewTypes, CFPropertyListFormat *): CoreFoundation's private reader
+/// of a property list in a string, XML or old-style, +1. Xcode 4's
+/// -[NSString propertyList] (DVTFoundation replaces it) reads with it.
+@c(__CFPropertyListCreateFromXMLString)
+public func _CFPropertyListCreateFromXMLString(_ allocator: id?, _ string: id?, _ options: UInt,
+                                               _ errorString: UnsafeMutablePointer<id?>?, _ allowNewTypes: Bool,
+                                               _ format: UnsafeMutablePointer<UInt>?) -> id? {
+    errorString?.pointee = nil
+    guard let text = Strings.value(of: string), let (value, kind) = PropertyLists.parse(Array(text.utf8)) else {
+        errorString?.pointee = ObjC.retain(Strings.autoreleased("The string isn't a property list"))
+        return nil
+    }
+    format?.pointee = kind
+    return ObjC.retain(PropertyLists.object(value, mutability: options))
+}
+
 /// A path's URL relative to a base URL, as a relative path is.
 @c(_CFURLCreateWithFileSystemPathRelativeToBase)
 public func CFURLCreateWithFileSystemPathRelativeToBase(_ allocator: UnsafeRawPointer?, _ path: id?, _ style: Int,
