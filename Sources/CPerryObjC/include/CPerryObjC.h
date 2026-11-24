@@ -239,6 +239,9 @@ const void *perry_objc_msgSendSuper2_address(void);
 const void *perry_objc_msgSend_stret_address(void);
 #if defined(__i386__)
 const void *perry_objc_msgSend_fpret_address(void);
+/// The answer to an unrecognized message returning through memory, which
+/// pops the result pointer as a _stret method does.
+const void *perry_objc_i386_unrecognized_stret_address(void);
 #endif
 const void *perry_objc_msgSendSuper2_stret_address(void);
 #endif
