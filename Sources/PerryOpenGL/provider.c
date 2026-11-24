@@ -100,26 +100,81 @@ static void *gl_function(const char *name) {
     return symbol;
 }
 
-/// glProgramString(ARB), with a classic Mac's line ends, carriage returns
-/// alone, made Linux's: Mac programs' assembly shaders end their lines
-/// so, which a Mac's drivers take and Mesa's parser doesn't.
+/// What an ALIAS of a binding should have been declared as: OUTPUT for a
+/// result, ATTRIB for a vertex's or a fragment's attribute, PARAM for a
+/// program's or the state's parameter; NULL for an ALIAS of a variable,
+/// which is what the language has ALIAS for.
+static const char *alias_declaration(const char *text, const char *end) {
+    const char *cursor = text;
+    while (cursor < end && *cursor != '=' && *cursor != ';' && *cursor != '\n' && *cursor != '\r') cursor++;
+    if (cursor >= end || *cursor != '=') return NULL;
+    cursor++;
+    while (cursor < end && (*cursor == ' ' || *cursor == '\t')) cursor++;
+    size_t left = (size_t)(end - cursor);
+    if (left >= 7 && memcmp(cursor, "result.", 7) == 0) return "OUTPUT";
+    if (left >= 7 && memcmp(cursor, "vertex.", 7) == 0) return "ATTRIB";
+    if (left >= 9 && memcmp(cursor, "fragment.", 9) == 0) return "ATTRIB";
+    if (left >= 8 && memcmp(cursor, "program.", 8) == 0) return "PARAM";
+    if (left >= 6 && memcmp(cursor, "state.", 6) == 0) return "PARAM";
+    return NULL;
+}
+
+/// glProgramString(ARB), with what a Mac's drivers take and Mesa's parser
+/// doesn't made right: a classic Mac's line ends, carriage returns alone,
+/// become Linux's; and an ALIAS that names a binding ("ALIAS oPos =
+/// result.position;", as MacSoft's Halo declares every output of its vertex
+/// programs) becomes the declaration the language has for it.
 static void perry_glProgramString(unsigned int target, unsigned int format, int length, const void *string) {
     static void (*program_string)(unsigned int, unsigned int, int, const void *);
     if (!program_string) program_string = (void (*)(unsigned int, unsigned int, int, const void *))gl_function("_glProgramStringARB");
     if (!program_string) return;
     const char *text = string;
-    if (!text || length <= 0 || !memchr(text, '\r', (size_t)length)) {
+    if (!text || length <= 0) {
         program_string(target, format, length, string);
         return;
     }
-    char *copy = malloc((size_t)length);
+    const char *end = text + length;
+    // "OUTPUT" and "ATTRIB" are a byte longer than "ALIAS": at most one
+    // more for each five there are.
+    char *copy = malloc((size_t)length + (size_t)length / 5 + 1);
     if (!copy) {
         program_string(target, format, length, string);
         return;
     }
-    for (int index = 0; index < length; index++)
-        copy[index] = text[index] == '\r' && (index + 1 == length || text[index + 1] != '\n') ? '\n' : text[index];
-    program_string(target, format, length, copy);
+    size_t written = 0;
+    bool changed = false, line_start = true, comment = false;
+    for (const char *cursor = text; cursor < end; cursor++) {
+        char character = *cursor;
+        if (character == '\r' && (cursor + 1 == end || cursor[1] != '\n')) {
+            character = '\n';
+            changed = true;
+        }
+        if (character == '\n') {
+            comment = false;
+            line_start = true;
+            copy[written++] = character;
+            continue;
+        }
+        if (character == '#') comment = true;
+        if (line_start && !comment && end - cursor > 5 && memcmp(cursor, "ALIAS", 5) == 0 && (cursor[5] == ' ' || cursor[5] == '\t')) {
+            const char *declaration = alias_declaration(cursor + 5, end);
+            if (declaration) {
+                size_t size = strlen(declaration);
+                memcpy(copy + written, declaration, size);
+                written += size;
+                cursor += 4;
+                changed = true;
+                line_start = false;
+                continue;
+            }
+        }
+        // A statement starts a line, or follows the one before it.
+        if (character == ';') line_start = true;
+        else if (character != ' ' && character != '\t') line_start = false;
+        copy[written++] = character;
+    }
+    if (changed) program_string(target, format, (int)written, copy);
+    else program_string(target, format, length, string);
     free(copy);
 }
 
