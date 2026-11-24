@@ -9,6 +9,7 @@
 #include "perry_interface.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <sched.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -187,6 +188,15 @@ OSStatus carbon_ConvertUTCToLocalTime(const UTCDateTime *utc, LocalDateTime *loc
 }
 
 /// Ticks, sixtieths of a second, since the system started.
+/// The longest time between a double click's two clicks, in ticks: half a
+/// second, the Mac's usual setting.
+uint32_t carbon_GetDblTime(void) CARBON_SYMBOL(GetDblTime);
+uint32_t carbon_GetDblTime(void) { return 30; }
+
+/// The time between the caret's blinks, in ticks.
+uint32_t carbon_GetCaretTime(void) CARBON_SYMBOL(GetCaretTime);
+uint32_t carbon_GetCaretTime(void) { return 30; }
+
 uint32_t carbon_TickCount(void) CARBON_SYMBOL(TickCount);
 uint32_t carbon_TickCount(void) { return (uint32_t)(carbon_now() * 60.0); }
 
@@ -224,6 +234,58 @@ int32_t carbon_IncrementAtomic(int32_t *value) { return __atomic_fetch_add(value
 
 int32_t carbon_DecrementAtomic(int32_t *value) CARBON_SYMBOL(DecrementAtomic);
 int32_t carbon_DecrementAtomic(int32_t *value) { return __atomic_fetch_sub(value, 1, __ATOMIC_SEQ_CST); }
+
+// MARK: - Extended numbers
+
+// SANE's 80-bit extended, as the Sound Manager's sample rates and AIFF
+// files keep numbers: a sign and a 15-bit exponent, then a 64-bit
+// mantissa with its leading one, the most significant word first.
+#pragma pack(push, 2)
+typedef struct {
+    int16_t exp;
+    uint16_t man[4];
+} extended80;
+#pragma pack(pop)
+
+void carbon_dtox80(const double *value, extended80 *out) CARBON_SYMBOL(dtox80);
+void carbon_dtox80(const double *value, extended80 *out) {
+    if (!value || !out) return;
+    uint64_t bits;
+    memcpy(&bits, value, sizeof bits);
+    uint16_t sign = (uint16_t)(bits >> 63 << 15);
+    int exponent = (int)(bits >> 52 & 0x7ff);
+    uint64_t fraction = bits & 0xfffffffffffffull, mantissa;
+    if (exponent == 0 && fraction == 0) {
+        exponent = 0;
+        mantissa = 0;
+    } else if (exponent == 0x7ff) {
+        exponent = 0x7fff;
+        mantissa = 1ull << 63 | fraction << 11;
+    } else if (exponent == 0) {
+        // A denormal: its leading one is moved up to the mantissa's top.
+        mantissa = fraction << 11;
+        exponent = 16383 - 1022;
+        while (!(mantissa >> 63)) {
+            mantissa <<= 1;
+            exponent--;
+        }
+    } else {
+        mantissa = 1ull << 63 | fraction << 11;
+        exponent += 16383 - 1023;
+    }
+    out->exp = (int16_t)(sign | (uint16_t)exponent);
+    for (int word = 0; word < 4; word++) out->man[word] = (uint16_t)(mantissa >> (48 - 16 * word));
+}
+
+double carbon_x80tod(const extended80 *value) CARBON_SYMBOL(x80tod);
+double carbon_x80tod(const extended80 *value) {
+    if (!value) return 0;
+    uint64_t mantissa = 0;
+    for (int word = 0; word < 4; word++) mantissa = mantissa << 16 | value->man[word];
+    int exponent = value->exp & 0x7fff;
+    double result = mantissa == 0 ? 0 : ldexp((double)mantissa, exponent - 16383 - 63);
+    return value->exp & 0x8000 ? -result : result;
+}
 
 // MARK: - Multiprocessing Services
 

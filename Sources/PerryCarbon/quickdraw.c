@@ -66,6 +66,25 @@ void carbon_InsetRect(Rect *rect, int16_t dh, int16_t dv) {
     rect->bottom -= dv;
 }
 
+Boolean carbon_EqualPt(Point first, Point second) CARBON_SYMBOL(EqualPt);
+Boolean carbon_EqualPt(Point first, Point second) { return first.v == second.v && first.h == second.h; }
+
+/// AddPt and SubPt: the destination point, with the source's coordinates
+/// added to its own or taken from them.
+void carbon_AddPt(Point source, Point *destination) CARBON_SYMBOL(AddPt);
+void carbon_AddPt(Point source, Point *destination) {
+    if (!destination) return;
+    destination->v = (int16_t)(destination->v + source.v);
+    destination->h = (int16_t)(destination->h + source.h);
+}
+
+void carbon_SubPt(Point source, Point *destination) CARBON_SYMBOL(SubPt);
+void carbon_SubPt(Point source, Point *destination) {
+    if (!destination) return;
+    destination->v = (int16_t)(destination->v - source.v);
+    destination->h = (int16_t)(destination->h - source.h);
+}
+
 Boolean carbon_PtInRect(Point point, const Rect *rect) CARBON_SYMBOL(PtInRect);
 Boolean carbon_PtInRect(Point point, const Rect *rect) {
     return point.h >= rect->left && point.h < rect->right && point.v >= rect->top && point.v < rect->bottom;
