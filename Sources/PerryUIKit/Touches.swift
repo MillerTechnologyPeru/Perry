@@ -982,7 +982,8 @@ extension UIResponder {
 /// With PERRY_UIKIT_TAPS set to steps separated by semicolons, each is
 /// done in turn, two seconds apart, beginning two seconds after a window
 /// first shows: "195,120" taps a point; "drag:195,600,195,200" swipes
-/// from the first point to the second over a quarter second;
+/// from the first point to the second over a quarter second, or over the
+/// seconds given as a fifth number ("drag:195,600,195,200,3");
 /// "pinch:195,400,100,200" puts two fingers either side of the point, 100
 /// points apart, and spreads them to 200 over a quarter second (closer
 /// pinches in); "wheel:195,400,300" turns the wheel there by 300 points
@@ -995,7 +996,7 @@ extension UIResponder {
 enum TapScript {
     enum Step {
         case tap(CGPoint)
-        case drag(CGPoint, CGPoint)
+        case drag(CGPoint, CGPoint, seconds: Double)
         case pinch(CGPoint, CGFloat, CGFloat)
         case wheel(CGPoint, CGFloat)
         case doubleTap(CGPoint)
@@ -1036,8 +1037,9 @@ enum TapScript {
             if item.hasPrefix("drag:") {
                 let values: [CGFloat] = item.dropFirst(5).split(separator: ",")
                     .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
-                guard values.count == 4 else { return nil }
-                return .drag(CGPoint(x: values[0], y: values[1]), CGPoint(x: values[2], y: values[3]))
+                guard values.count == 4 || values.count == 5 else { return nil }
+                return .drag(CGPoint(x: values[0], y: values[1]), CGPoint(x: values[2], y: values[3]),
+                             seconds: values.count == 5 ? max(Double(values[4]), 0.25) : 0.25)
             }
             let values: [CGFloat] = item.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
             return values.count == 2 ? .tap(CGPoint(x: values[0], y: values[1])) : nil
@@ -1056,8 +1058,8 @@ enum TapScript {
                 TapScript.lastTap = point
                 Touches.down(at: point)
                 Display.dispatchAfter?(Display.dispatchTime!(0, 150_000_000), Updates.mainQueue, nil) { _ in Touches.up(at: TapScript.lastTap) }
-            case .drag(let start, let end):
-                TapScript.drag(from: start, to: end)
+            case .drag(let start, let end, let seconds):
+                TapScript.drag(from: start, to: end, seconds: seconds)
             case .pinch(let center, let from, let to):
                 TapScript.pinch(around: center, from: from, to: to)
             case .wheel(let point, let distance):
@@ -1094,10 +1096,12 @@ enum TapScript {
     /// The points a drag under way has still to move through.
     nonisolated(unsafe) private static var dragPath: [CGPoint] = []
 
-    /// Down at `start`, through ten moves 25 ms apart to `end`, and up.
-    private static func drag(from start: CGPoint, to end: CGPoint) {
-        dragPath = (1...10).map { step in
-            let fraction = CGFloat(step) / 10
+    /// Down at `start`, through moves 25 ms apart to `end` over `seconds`, and up.
+    private static func drag(from start: CGPoint, to end: CGPoint, seconds: Double) {
+        // A move every 25 ms, as a finger's are.
+        let moves = max(Int(seconds / 0.025), 1)
+        dragPath = (1...moves).map { step in
+            let fraction = CGFloat(step) / CGFloat(moves)
             return CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
         }
         Touches.down(at: start)
