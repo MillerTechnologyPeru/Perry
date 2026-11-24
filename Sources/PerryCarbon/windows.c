@@ -11,9 +11,14 @@
 
 static carbon_window *windows;
 
+/// The window a pointer is, if it is one of the windows there are: a
+/// program hands over what it kept, which may be a window it disposed of,
+/// or no pointer at all (MacSoft's Halo asks the kind of "window" 2), and
+/// neither is to be read.
 WindowRef carbon_window_from(void *pointer) {
-    WindowRef window = pointer;
-    return window && window->magic == CARBON_WINDOW_MAGIC ? window : NULL;
+    for (carbon_window *window = windows; window; window = window->next)
+        if (window == pointer) return window->magic == CARBON_WINDOW_MAGIC ? window : NULL;
+    return NULL;
 }
 
 WindowRef carbon_window_for_nswindow(id nswindow) {
