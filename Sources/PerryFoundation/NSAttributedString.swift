@@ -640,21 +640,21 @@ private func nsRange(_ range: PerryCFRange) -> PerryRange {
     PerryRange(location: UInt(max(0, range.location)), length: UInt(max(0, range.length)))
 }
 
-@c(_CFAttributedStringReplaceString)
+@DarwinC("_CFAttributedStringReplaceString")
 public func CFAttributedStringReplaceString(_ string: id?, _ range: PerryCFRange, _ replacement: id?) {
     typealias F = @convention(c) (id?, SEL, PerryRange, id?) -> Void
     unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("replaceCharactersInRange:withString:"), nsRange(range),
                                             replacement ?? Strings.autoreleased(""))
 }
 
-@c(_CFAttributedStringReplaceAttributedString)
+@DarwinC("_CFAttributedStringReplaceAttributedString")
 public func CFAttributedStringReplaceAttributedString(_ string: id?, _ range: PerryCFRange, _ replacement: id?) {
     typealias F = @convention(c) (id?, SEL, PerryRange, id?) -> Void
     unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("replaceCharactersInRange:withAttributedString:"), nsRange(range), replacement)
 }
 
 /// Sets one attribute over a range, or removes it for a NULL value.
-@c(_CFAttributedStringSetAttribute)
+@DarwinC("_CFAttributedStringSetAttribute")
 public func CFAttributedStringSetAttribute(_ string: id?, _ range: PerryCFRange, _ name: id?, _ value: id?) {
     guard let name else { return }
     if let value {
@@ -668,14 +668,14 @@ public func CFAttributedStringSetAttribute(_ string: id?, _ range: PerryCFRange,
 
 /// Sets the attributes over a range: added to those there, or in place of
 /// them when `clear` is set.
-@c(_CFAttributedStringSetAttributes)
+@DarwinC("_CFAttributedStringSetAttributes")
 public func CFAttributedStringSetAttributes(_ string: id?, _ range: PerryCFRange, _ attributes: id?, _ clear: Bool) {
     typealias F = @convention(c) (id?, SEL, id?, PerryRange) -> Void
     unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector(clear ? "setAttributes:range:" : "addAttributes:range:"),
                                             attributes, nsRange(range))
 }
 
-@c(_CFAttributedStringRemoveAttribute)
+@DarwinC("_CFAttributedStringRemoveAttribute")
 public func CFAttributedStringRemoveAttribute(_ string: id?, _ range: PerryCFRange, _ name: id?) {
     CFAttributedStringSetAttribute(string, range, name, nil)
 }
