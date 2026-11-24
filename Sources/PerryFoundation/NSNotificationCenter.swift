@@ -63,6 +63,9 @@ final class NotificationCenterStorage {
 enum Notifications {
     nonisolated(unsafe) static var notificationClass: Class!
     nonisolated(unsafe) static var centerClass: Class!
+    /// NSDistributedNotificationCenter, which CoreFoundation's distributed
+    /// center is an instance of.
+    nonisolated(unsafe) static var distributedCenterClass: Class?
     nonisolated(unsafe) static var defaultCenter: id!
 
     static func storage(_ notification: id?) -> NotificationStorage? {
@@ -157,7 +160,7 @@ public final class NSNotification: NSObject {
 
 /// NSNotificationCenter.
 @ObjCClass("NSNotificationCenter")
-public final class NSNotificationCenter: NSObject {
+public class NSNotificationCenter: NSObject {
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
@@ -238,6 +241,49 @@ public final class NSNotificationCenter: NSObject {
     }
 }
 
+// MARK: - NSDistributedNotificationCenter
+
+/// NSDistributedNotificationCenter: notifications between a Mac's apps.
+/// There are no other Mac apps here to post or hear them, so its default
+/// center is CoreFoundation's distributed center, whose observers are this
+/// process's own: what the system tells every app, such as AppKit's
+/// AppleInterfaceThemeChangedNotification when the desktop turns dark,
+/// reaches the app's observers, as do the app's own posts. Notifications
+/// are delivered at once, on the posting thread, and never suspended.
+@ObjCClass("NSDistributedNotificationCenter")
+public final class NSDistributedNotificationCenter: NSNotificationCenter {
+    /// Not NSNotificationCenter's set-up, which makes the default center.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        Notifications.distributedCenterClass = cls.storage
+    }
+
+    @ObjCClassMethod("defaultCenter")
+    static func distributedDefaultCenter() -> UnsafeMutableRawPointer? { CFNotificationCenterGetDistributedCenter() }
+
+    /// NSLocalNotificationCenterType, the one type there is.
+    @ObjCClassMethod("notificationCenterForType:")
+    static func notificationCenter(forType type: String?) -> UnsafeMutableRawPointer? { CFNotificationCenterGetDistributedCenter() }
+
+    /// How notifications wait while the app is suspended: it never is here.
+    @ObjCMethod("addObserver:selector:name:object:suspensionBehavior:")
+    func add(observer: ObjCObject?, selector: ObjCSelector, name: String?, object: ObjCObject?, suspensionBehavior: UInt) {
+        add(observer: observer, selector: selector, name: name, object: object)
+    }
+
+    @ObjCMethod("postNotificationName:object:userInfo:deliverImmediately:")
+    func post(name: ObjCObject, object: ObjCObject?, userInfo: ObjCObject?, deliverImmediately: Bool) {
+        post(name: name, object: object, userInfo: userInfo)
+    }
+
+    @ObjCMethod("postNotificationName:object:userInfo:options:")
+    func post(name: ObjCObject, object: ObjCObject?, userInfo: ObjCObject?, options: UInt) {
+        post(name: name, object: object, userInfo: userInfo)
+    }
+
+    @ObjCMethod("suspended") func suspended() -> Bool { false }
+    @ObjCMethod("setSuspended:") func setSuspended(_ suspended: Bool) {}
+}
+
 // MARK: - CFNotificationCenter
 
 /// The default center, which NSNotificationCenter's is.
@@ -256,7 +302,9 @@ nonisolated(unsafe) private var distributedCenter: id?
 @c(_CFNotificationCenterGetDistributedCenter)
 public func CFNotificationCenterGetDistributedCenter() -> id? {
     if let distributedCenter { return distributedCenter }
-    guard let center = Storage.allocate(UnsafeMutableRawPointer(Notifications.centerClass)) else { return nil }
+    // An NSDistributedNotificationCenter, as it is on macOS.
+    let cls = Notifications.distributedCenterClass ?? Notifications.centerClass
+    guard let center = Storage.allocate(UnsafeMutableRawPointer(cls)) else { return nil }
     Storage.set(center, NotificationCenterStorage())
     distributedCenter = center
     return center
