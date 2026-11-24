@@ -53,9 +53,11 @@ public final class DesktopAppearanceMonitor: @unchecked Sendable {
         if !finished && !waitedOut {
             var deadline = timespec()
             clock_gettime(CLOCK_REALTIME, &deadline)
-            let nanoseconds = Int(deadline.tv_nsec) + Int(seconds * 1_000_000_000)
-            deadline.tv_sec += nanoseconds / 1_000_000_000
-            deadline.tv_nsec = nanoseconds % 1_000_000_000
+            // In 64 bits: a second's nanoseconds don't fit the Int of a
+            // 32-bit program, which trapped here as it launched.
+            let nanoseconds = Int64(deadline.tv_nsec) + Int64(seconds * 1_000_000_000)
+            deadline.tv_sec += Int(nanoseconds / 1_000_000_000)
+            deadline.tv_nsec = Int(nanoseconds % 1_000_000_000)
             while !finished, pthread_cond_timedwait(condition, mutex, &deadline) != ETIMEDOUT {}
             if !finished { waitedOut = true }
         }
