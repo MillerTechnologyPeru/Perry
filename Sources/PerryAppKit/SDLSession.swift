@@ -38,15 +38,27 @@ enum SDLSession {
         return true
     }
 
-    nonisolated(unsafe) private static var started: Bool?
+    /// Whether SDL's video started, once it was asked to.
+    nonisolated(unsafe) private(set) static var started: Bool?
 
-    /// SDL's video started, once; false without a display.
+    /// The windows' Wayland app ID and X11 class: the app's bundle
+    /// identifier, keeping the characters a desktop file's name may have,
+    /// so the desktop's menu bar finds the app's menu by it; nil without one.
+    static let appID: String? = {
+        guard let identifier = NSBundle.main().infoObject(forKey: "CFBundleIdentifier")?.stringValue else { return nil }
+        let kept = String(identifier.map { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) ? $0 : "_" })
+        return kept.isEmpty ? nil : kept
+    }()
+
+    /// SDL's video started, once; false without a display. The main menu
+    /// is served to the desktop's menu bar from then.
     static func start() -> Bool {
         if let started { return started }
         prepareEnvironment()
         var result = false
         if wanted {
             if let videoDriver { SDL.setHint("SDL_VIDEO_DRIVER", videoDriver) }
+            if let appID { SDL.setHint("SDL_APP_ID", appID) }
             do {
                 try SDL.initialize(subSystems: [.video])
                 result = true
@@ -55,6 +67,7 @@ enum SDLSession {
             }
         }
         started = result
+        if result { DesktopMenus.start() }
         return result
     }
 
