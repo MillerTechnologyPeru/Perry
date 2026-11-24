@@ -180,8 +180,48 @@ final class WebPage: @unchecked Sendable {
         let size = (max(width, 1), max(height, 1))
         guard size != self.size || scale != self.scale else { return }
         (self.size, self.scale) = (size, scale)
-        content.attach(width: size.0, height: size.1, scale: scale)
+        if isShown { content.attach(width: size.0, height: size.1, scale: scale) }
         WebPage.trace("resized to \(size.0)x\(size.1) at scale \(scale)")
+    }
+
+    /// Whether the page is on screen: visible and focused in WebKit, which
+    /// paints its frames. A page made is shown until its view says.
+    private(set) var isShown = true
+    private var wantsShown = true
+    /// Snapshots waiting for the page to draw, which keep it shown.
+    private var holds = 0
+
+    /// Shows the page while its view is on screen, and hides it otherwise,
+    /// as iOS does a web view's outside a window: hidden pages paint
+    /// nothing and WebKit throttles their timers. Ad SDKs keep many web
+    /// views off screen, and each shown one painted every frame in software.
+    func setOnScreen(_ onScreen: Bool) {
+        wantsShown = onScreen
+        applyShown()
+    }
+
+    /// Keeps the page shown, for a snapshot, until `releaseShown`.
+    func holdShown() {
+        holds += 1
+        applyShown()
+    }
+
+    func releaseShown() {
+        holds = max(0, holds - 1)
+        applyShown()
+    }
+
+    private func applyShown() {
+        let shown = wantsShown || holds > 0
+        guard shown != isShown else { return }
+        isShown = shown
+        if shown {
+            content.attach(width: size.width, height: size.height, scale: scale)
+            content.focus(true)
+        } else {
+            content.detach()
+        }
+        WebPage.trace(shown ? "shown" : "hidden")
     }
 
     // MARK: Scripts
