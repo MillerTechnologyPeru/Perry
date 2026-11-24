@@ -49,6 +49,23 @@ typedef struct PerryClearColor {
     double red, green, blue, alpha;
 } PerryClearColor;
 
+// Metal's MTLRegion, an origin and a size, as MetalKit's texture loader
+// replaces a texture's pixels with it.
+typedef struct PerryMetalRegion {
+    unsigned long x, y, z;
+    unsigned long width, height, depth;
+} PerryMetalRegion;
+
+// Metal's MTLOrigin and MTLSize, as the loader copies a buffer into a
+// texture it can't write directly.
+typedef struct PerryMetalOrigin {
+    unsigned long x, y, z;
+} PerryMetalOrigin;
+
+typedef struct PerryMetalSize {
+    unsigned long width, height, depth;
+} PerryMetalSize;
+
 // A display link's frame rates: lowest, highest, and preferred; zero for
 // the display's own.
 typedef struct CAFrameRateRange {
