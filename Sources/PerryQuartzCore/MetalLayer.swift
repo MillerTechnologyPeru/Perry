@@ -15,6 +15,14 @@ import PerryObjCInterop
 // drawing in a loop is paced by it, and one drawing slower than the display
 // never waits. Their textures are reused once free, as Core Animation's
 // are, so a drawable an app keeps holds no new memory.
+//
+// Where metal2vulkan makes textures over dma-bufs (its ABI 11) and the
+// compositor imports them, a layer's drawables are those textures instead,
+// a slot each, and presenting one publishes its slot as a GL frame's shared
+// buffer is published: no pixel passes through the CPU. A drawable never
+// takes a slot the compositor holds (the one on screen, the newest), so a
+// layer has two more than it gives out at once. Where either side can't,
+// or with PERRY_METAL_SHARED=0, frames are read back as above.
 
 @ObjCWrapper("MTLTextureDescriptor")
 class MTLTextureDescriptor: NSObject {
@@ -26,6 +34,8 @@ class MTLTextureDescriptor: NSObject {
 
 extension NSObject {
     @ObjCMethod("newTextureWithDescriptor:") func newTexture(descriptor: MTLTextureDescriptor) -> NSObject?
+    @ObjCMethod("_perryNewDMABufTextureWithDescriptor:record:")
+    func newDMABufTexture(descriptor: MTLTextureDescriptor, record: UnsafeMutablePointer<Int64>) -> NSObject?
     @ObjCMethod("_perryReadPixels:width:height:")
     func readPixels(_ pixels: UnsafeMutableRawPointer?, width: UInt, height: UInt) -> Int
 }
@@ -198,6 +208,9 @@ final class MetalLayerState {
     var nextID = 0
     let pool = DrawablePool()
 
+    /// Drawables over dma-bufs the compositor imports, when there are.
+    let shared = SharedDrawables()
+
     /// The buffer drawables are read back into, reused frame to frame.
     var readback: UnsafeMutableRawPointer?
     var readbackSize = 0
@@ -272,6 +285,10 @@ open class CAMetalLayer: CALayer {
         // pixels can be read back.
         let key = DrawablePool.Key(width: UInt(size.width), height: UInt(size.height), format: metal.pixelFormat,
                                    usage: metal.framebufferOnly ? 0x4 : 0x5)
+        if let (texture, slot) = metal.shared.take(key, layer: self, device: device) {
+            metal.nextID += 1
+            return CAMetalDrawable(texture: texture, key: key, layer: self, id: metal.nextID, slot: slot)
+        }
         var texture = metal.pool.reuse(key)
         if texture == nil {
             let descriptor = MTLTextureDescriptor.texture2D(pixelFormat: key.format, width: key.width,
@@ -311,18 +328,21 @@ final class DrawableState {
     var returned = false
     var presentedTime: Double = 0
     var presentedHandlers: [ObjCBlock] = []
+    /// The shared buffer the texture is, or nil for a texture read back.
+    var slot: Int?
 }
 
 @ObjCClass("CAMetalDrawable")
 open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
     var drawable = DrawableState()
 
-    init(texture: NSObject, key: DrawablePool.Key, layer: CAMetalLayer, id: Int) {
+    init(texture: NSObject, key: DrawablePool.Key, layer: CAMetalLayer, id: Int, slot: Int? = nil) {
         super.init()
         drawable.texture = texture
         drawable.key = key
         drawable.layer = layer
         drawable.id = id
+        drawable.slot = slot
     }
 
     deinit { giveBack() }
@@ -333,11 +353,14 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
         guard !drawable.returned else { return }
         drawable.returned = true
         guard let layer = drawable.layer else { return }
+        // A shared drawable's texture is its slot's, not the pool's.
+        let texture = drawable.slot == nil ? drawable.texture : nil
+        if let slot = drawable.slot { layer.metal.shared.giveBack(slot) }
         if presented, layer.metal.displaySyncEnabled {
-            layer.metal.pool.givePresented(drawable.texture, key: drawable.key, limit: layer.metal.maximumDrawableCount,
+            layer.metal.pool.givePresented(texture, key: drawable.key, limit: layer.metal.maximumDrawableCount,
                                            interval: UInt64(1e9 / MetalTrace.framesPerSecond))
         } else {
-            layer.metal.pool.give(drawable.texture, key: drawable.key, limit: layer.metal.maximumDrawableCount)
+            layer.metal.pool.give(texture, key: drawable.key, limit: layer.metal.maximumDrawableCount)
         }
     }
 
@@ -355,6 +378,16 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
     @ObjCMethod("present") func present() {
         guard !drawable.presented, let texture = drawable.texture, let layer = drawable.layer else { return }
         drawable.presented = true
+        if let slot = drawable.slot {
+            // The command buffer that rendered it has completed: no fence.
+            layer.metal.shared.publish(slot, key: drawable.key, layer: layer)
+            MetalTrace.presents += 1
+            if MetalTrace.presents <= 3 || MetalTrace.presents % 300 == 0 {
+                MetalTrace.log("present #\(MetalTrace.presents): \(drawable.key.width)×\(drawable.key.height), shared slot \(slot)")
+            }
+            finishPresent()
+            return
+        }
         let size = layer.drawableSize()
         let width = Int(size.width), height = Int(size.height)
         // Presents come from one thread, metal2vulkan's, in order.
@@ -375,6 +408,12 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
             MetalTrace.log("present #\(MetalTrace.presents): \(width)×\(height), read \(read); per frame, read back \(Double(MetalTrace.readTime) / frames / 1e6) ms, shown \(Double(MetalTrace.showTime) / frames / 1e6) ms")
             (MetalTrace.readTime, MetalTrace.showTime) = (0, 0)
         }
+        finishPresent()
+    }
+
+    /// The presented time, the drawable back to its layer, and the
+    /// presented handlers called.
+    private func finishPresent() {
         drawable.presentedTime = Double(clock_gettime_nsec_np()) / 1e9
         giveBack(presented: true)
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void
@@ -386,6 +425,109 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
 
     @ObjCMethod("presentAtTime:") func present(atTime time: Double) { present() }
     @ObjCMethod("presentAfterMinimumDuration:") func present(afterMinimumDuration duration: Double) { present() }
+}
+
+/// A layer's drawables over dma-bufs, a slot each, for one size and
+/// format at a time. Taken on the threads apps ask for drawables on, and
+/// published on metal2vulkan's, which presents them.
+final class SharedDrawables: @unchecked Sendable {
+    /// PERRY_METAL_SHARED=0 reads every drawable back.
+    nonisolated(unsafe) static let wanted = getenv("PERRY_METAL_SHARED").map { String(cString: $0) != "0" } ?? true
+
+    private var mutex = pthread_mutex_t()
+    /// The key the slots' textures are of, and the textures.
+    private var key: DrawablePool.Key?
+    private var textures: [NSObject] = []
+    /// Slots of drawables out, not yet presented or given back.
+    private var out: Set<Int> = []
+    /// Sharing failed for good: no dma-buf textures, or the compositor
+    /// couldn't import them.
+    private var failed = !SharedDrawables.wanted
+
+    init() { pthread_mutex_init(&mutex, nil) }
+
+    /// A drawable's texture and slot, or nil to read this one back.
+    func take(_ key: DrawablePool.Key, layer: CAMetalLayer, device: NSObject) -> (NSObject, Int)? {
+        pthread_mutex_lock(&mutex)
+        defer { pthread_mutex_unlock(&mutex) }
+        guard !failed else { return nil }
+        if self.key != key, !make(key, count: layer.metal.maximumDrawableCount + 2, layer: layer, device: device) {
+            return nil
+        }
+        // Up to a second for a slot the compositor lets go of, as it shows
+        // the next frame; there is one at once unless it's behind.
+        for _ in 0..<500 {
+            let held = layer.sharedSlotsInUse()
+            if held < 0 {
+                MetalTrace.log("the compositor can't import Metal's dma-bufs: reading drawables back")
+                stop(layer)
+                return nil
+            }
+            if let slot = textures.indices.first(where: { held & (1 << $0) == 0 && !out.contains($0) }) {
+                out.insert(slot)
+                return (textures[slot], slot)
+            }
+            pthread_mutex_unlock(&mutex)
+            usleep(2000)
+            pthread_mutex_lock(&mutex)
+            if failed || self.key != key { return nil }
+        }
+        return nil
+    }
+
+    /// Makes `count` textures of `key` over dma-bufs and gives them to the
+    /// layer's compositor; false, with sharing stopped, where it can't.
+    /// With the mutex held.
+    private func make(_ key: DrawablePool.Key, count: Int, layer: CAMetalLayer, device: NSObject) -> Bool {
+        let descriptor = MTLTextureDescriptor.texture2D(pixelFormat: key.format, width: key.width, height: key.height,
+                                                        mipmapped: false)
+        descriptor.setUsage(key.usage)
+        // MTLStorageModePrivate: only the GPU and the compositor touch them.
+        descriptor.setStorageMode(2)
+        var made: [NSObject] = []
+        var records = [Int64](repeating: 0, count: 7 * count)
+        for slot in 0..<count {
+            let texture = records.withUnsafeMutableBufferPointer {
+                device.newDMABufTexture(descriptor: descriptor, record: $0.baseAddress! + 7 * slot)
+            }
+            guard let texture else { break }
+            made.append(texture)
+        }
+        defer { for slot in 0..<made.count { close(Int32(records[7 * slot])) } }
+        guard made.count == count else {
+            MetalTrace.log("no dma-buf textures of \(key.width)×\(key.height) format \(key.format): reading drawables back")
+            stop(layer)
+            return false
+        }
+        // The layer's surface duplicates the fds, which are closed above.
+        records.withUnsafeBytes { layer.setSharedBuffers($0.baseAddress, count: count, topFirst: true) }
+        (self.key, textures, out) = (key, made, [])
+        MetalTrace.log("\(count) drawables of \(key.width)×\(key.height) shared with the compositor")
+        return true
+    }
+
+    /// Back to reading drawables back, for good. With the mutex held.
+    private func stop(_ layer: CAMetalLayer) {
+        failed = true
+        if key != nil { layer.setSharedBuffers(nil, count: 0, topFirst: true) }
+        (key, textures, out) = (nil, [], [])
+    }
+
+    /// Shows the slot's frame, presented once its command buffer completed.
+    func publish(_ slot: Int, key: DrawablePool.Key, layer: CAMetalLayer) {
+        pthread_mutex_lock(&mutex)
+        let current = !failed && self.key == key
+        pthread_mutex_unlock(&mutex)
+        if current { layer.publishSharedSlot(slot, opaque: layer.state.isOpaque, fence: -1) }
+    }
+
+    /// A drawable presented or given back: its slot is the compositor's to
+    /// hold, or free.
+    func giveBack(_ slot: Int) {
+        pthread_mutex_lock(&mutex)
+        out.remove(slot)
+        pthread_mutex_unlock(&mutex)
+    }
 }
 
 /// The monotonic clock, in nanoseconds.

@@ -8,7 +8,7 @@
 // object an opaque handle, freed by its release; a call that can fail takes
 // `char **error` last, stores a message that string_free frees, and returns
 // NULL, false or -1. Version 2 adds rendering, 3 vertex attribute reflection, 4 compute
-// textures and samplers, 9 function constant values, 10 argument buffers.
+// textures and samplers, 9 function constant values, 10 argument buffers, 11 textures over dma-bufs.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -424,6 +424,15 @@ typedef struct perry_m2v {
                                                    uint32_t usage, uint32_t stages, perry_m2v_error);
     bool (* _Nullable compute_encoder_use_resource)(perry_m2v_handle, perry_m2v_handle buffer, perry_m2v_handle texture,
                                                     uint32_t usage, perry_m2v_error);
+
+    // Version 11: textures over dma-bufs, which the compositor shows without
+    // reading them back. NULL in a library of version 10 or before.
+    /// A 2D BGRA8 or RGBA8 texture of private storage, one level and sample,
+    /// whose memory is a dma-buf: `dma_buf` gets its seven values (an fd,
+    /// which the caller closes, width, height, row stride, offset, DRM fourcc
+    /// and DRM format modifier). NULL where the device can't export one.
+    perry_m2v_handle (* _Nullable device_new_dma_buf_texture)(perry_m2v_handle, const perry_m2v_texture_descriptor *,
+                                                              int64_t *_Nonnull dma_buf, perry_m2v_error);
 } perry_m2v;
 
 /// Opens libmetal2vulkan.so the first time: PERRY_METAL2VULKAN's path, else
