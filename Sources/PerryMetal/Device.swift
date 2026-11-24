@@ -266,6 +266,22 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
         return MTLTexture(handle: texture, device: self)
     }
 
+    /// Perry's, for CAMetalLayer: a texture of `descriptor` whose memory is
+    /// a dma-buf the compositor imports, its seven values (fd, width,
+    /// height, stride, offset, fourcc, modifier) written to `record`, the fd
+    /// for the caller to close; nil where the library or the device can't
+    /// make one.
+    @ObjCMethod("_perryNewDMABufTextureWithDescriptor:record:")
+    func newDMABufTexture(descriptor: MTLTextureDescriptor?, record: UnsafeMutablePointer<Int64>?) -> MTLTexture? {
+        guard let make = M2V.api.device_new_dma_buf_texture, var value = descriptor?.value, let record else { return nil }
+        let (texture, message) = M2V.call { make(handle, &value, record, $0) }
+        guard let texture else {
+            Trace.log("newDMABufTexture", "\(value.width)×\(value.height) format \(value.pixel_format): \(message ?? "failed")")
+            return nil
+        }
+        return MTLTexture(handle: texture, device: self)
+    }
+
     @ObjCMethod("newSamplerStateWithDescriptor:") func newSamplerState(descriptor: MTLSamplerDescriptor?) -> MTLSamplerState? {
         guard let descriptor else { return nil }
         var value = descriptor.value
