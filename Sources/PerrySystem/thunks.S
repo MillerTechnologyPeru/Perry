@@ -71,6 +71,13 @@
     .size \name, . - \name
 .endm
 
+// VARIADIC_DARWIN darwin_name, darwin_va_function, fixed_count
+//
+// For a v* function that takes Darwin's va_list, which is Linux's here.
+.macro VARIADIC_DARWIN name, target, nfixed
+    VARIADIC \name, \target, \nfixed
+.endm
+
 #elif defined(__aarch64__) && defined(__ELF__)
 
 // PASSTHROUGH darwin_name, glibc_name
@@ -111,6 +118,21 @@
     .size \name, . - \name
 .endm
 
+// VARIADIC_DARWIN darwin_name, darwin_va_function, fixed_count
+//
+// For a v* function that takes Darwin's va_list, a pointer to the variadic
+// arguments' slots: they start at the caller's sp, so that is passed as the
+// next argument, and nothing is left to do after the call.
+.macro VARIADIC_DARWIN name, target, nfixed
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    mov x\nfixed, sp
+    b \target
+    .size \name, . - \name
+.endm
+
 #endif
 
 #if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
@@ -119,7 +141,7 @@
 
 // MARK: - stdio
 VARIADIC _printf, vprintf, 1
-VARIADIC _fprintf, _vfprintf, 2
+VARIADIC_DARWIN _fprintf, _vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
 VARIADIC _sprintf, perry_vsprintf, 2
 VARIADIC _snprintf, perry_vsnprintf, 3
@@ -128,7 +150,7 @@ VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
 VARIADIC _asprintf, vasprintf, 2
 VARIADIC _scanf, vscanf, 1
-VARIADIC _fscanf, _vfscanf, 2
+VARIADIC_DARWIN _fscanf, _vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
 VARIADIC _swscanf, vswscanf, 2
 VARIADIC ___sprintf_chk, perry_vsprintf_chk, 4
@@ -169,7 +191,6 @@ PASSTHROUGH _pthread_equal, pthread_equal
 #endif
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _access, perry_access
 PASSTHROUGH _mkdir, mkdir
 PASSTHROUGH _symlink, symlink

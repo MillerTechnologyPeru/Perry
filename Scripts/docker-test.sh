@@ -19,6 +19,7 @@ sdk=$(ls -d .toolchains/swift-*-armv7-sdk/*/debian-* 2>/dev/null | head -1)
 # make namespaces in a container; the tests' pages are their own.
 exec docker run --rm --platform "$platform" \
     -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+    -e PERRY_REQUIRE_FIXTURES \
     -v "$PWD:/perry" \
     ${sdk:+-e QEMU_LD_PREFIX=/perry/$sdk} \
     "$image" \

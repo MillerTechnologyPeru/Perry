@@ -224,7 +224,6 @@ PASSTHROUGH _gmtime_r, gmtime_r
 PASSTHROUGH _strsignal, strsignal
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_cancel, pthread_cancel
 PASSTHROUGH _pthread_detach, pthread_detach

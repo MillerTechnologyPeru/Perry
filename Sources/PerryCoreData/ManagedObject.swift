@@ -78,9 +78,13 @@ enum ManagedObjects {
         let cls = ObjCClass(created)
         // Its objects and the class itself answer -class with
         // NSManagedObject, as Core Data's do.
+        // Added to the classes themselves: `add` leaves a method any
+        // superclass has, and NSObject has these.
         let answer = unsafeBitCast(answerManagedObject, to: UnsafeRawPointer.self)
-        add(cls, "class", "#16@0:8", answer)
-        add(ObjCClass(ObjCRuntime.functions.objectGetClass(created)!), "class", "#16@0:8", answer)
+        let selector = ObjCRuntime.selector("class")
+        for target in [created, ObjCRuntime.functions.objectGetClass(created)!] {
+            _ = ObjCRuntime.functions.addMethod(target, selector, answer, UnsafePointer(strdup("#16@0:8")!))
+        }
         genericClasses[name] = cls
         entitiesByClass[className] = entity
         return cls

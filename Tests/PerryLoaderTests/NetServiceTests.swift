@@ -101,6 +101,7 @@ enum Avahi {
             let socket = directory.appending(path: "bus").path
             address = "unix:path=\(socket)"
             let log = directory.appending(path: "avahi.log").path
+            let busLog = directory.appending(path: "dbus.log").path
 
             // The daemon itself: IPv4 only, publishing nothing of its own.
             let configuration = directory.appending(path: "avahi.conf")
@@ -117,7 +118,7 @@ enum Avahi {
             """.write(to: configuration, atomically: true, encoding: .utf8)
 
             do {
-                _ = try launch("dbus-daemon --session --nofork --address=\(address)", pidFile: "dbus.pid") {
+                _ = try launch("dbus-daemon --session --nofork --address=\(address) > \(busLog) 2>&1", pidFile: "dbus.pid") {
                     FileManager.default.fileExists(atPath: socket)
                 }
                 _ = try launch("avahi-daemon -f \(configuration.path) --no-chroot --no-drop-root --no-rlimits --debug"
@@ -127,7 +128,10 @@ enum Avahi {
             } catch {
                 stop()
                 let output = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
-                throw TestError.missingTool("an avahi-daemon that starts (\(output.isEmpty ? "no output" : output))")
+                let busOutput = (try? String(contentsOfFile: busLog, encoding: .utf8)) ?? ""
+                let bus = FileManager.default.fileExists(atPath: socket) ? "its bus is up" : "no bus at \(socket)"
+                throw TestError.missingTool("an avahi-daemon that starts (\(output.isEmpty ? "no output" : output); "
+                    + "\(bus); dbus-daemon: \(busOutput.isEmpty ? "no output" : busOutput))")
             }
         }
 

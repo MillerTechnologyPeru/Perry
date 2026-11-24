@@ -69,10 +69,14 @@ final class WebPage: @unchecked Sendable {
 
     init?(width: UInt32, height: UInt32, scale: Float) {
         let reporter = Reporter()
-        guard let content = WPEWebContent(delegate: reporter) else { return nil }
+        let size = (max(width, 1), max(height, 1))
+        // Made at the view's size, which the page then has from its first
+        // load: a size given by `attach` reaches it only once it has drawn,
+        // which can be after the load has finished and the app has asked
+        // the page its width.
+        guard let content = WPEWebContent(delegate: reporter, width: size.0, height: size.1) else { return nil }
         self.content = content
         self.reporter = reporter
-        let size = (max(width, 1), max(height, 1))
         (self.size, self.scale) = (size, scale)
         reporter.page = self
         content.asksAboutOwnLoads = true

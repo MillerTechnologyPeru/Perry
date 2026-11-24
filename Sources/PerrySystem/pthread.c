@@ -668,12 +668,65 @@ void darwin_pthread_testcancel(void) {
 // loaded, and the frameworks' calls run Perry's Swift, which takes more of
 // it: each thread gets 256 KB more than it asks for (Batman: Arkham Asylum's
 // 80 KB loading thread overflowed in FSGetCatalogInfo).
+//
+// The size asked for is what pthread_attr_getstacksize answers, as on
+// Darwin, so the attributes whose size was set here are remembered with it
+// and the size given. glibc's pthread_attr_t has no room for it (it fills
+// Darwin's on arm64), and attributes are few and short-lived, so the last
+// few are kept; one whose size is no longer the one given was initialized
+// again or set some other way, and answers with what it holds.
+#define STACK_SIZE_EXTRA 262144
+#define STACK_SIZES_KEPT 32
+
+static struct {
+    const pthread_attr_t *attributes;
+    size_t asked, given;
+} stack_sizes[STACK_SIZES_KEPT];
+static unsigned stack_sizes_next;
+static pthread_mutex_t stack_sizes_lock = PTHREAD_MUTEX_INITIALIZER;
+
 int darwin_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size) DARWIN_SYMBOL(pthread_attr_setstacksize);
 int darwin_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size) {
     if (size < 16384)
         return 22;
     size_t minimum = (size_t)sysconf(_SC_THREAD_STACK_MIN);
-    return result(pthread_attr_setstacksize(attributes, (size < minimum ? minimum : size) + 262144));
+    size_t given = (size < minimum ? minimum : size) + STACK_SIZE_EXTRA;
+    int error = pthread_attr_setstacksize(attributes, given);
+    if (error)
+        return result(error);
+    pthread_mutex_lock(&stack_sizes_lock);
+    unsigned slot = stack_sizes_next;
+    for (unsigned i = 0; i < STACK_SIZES_KEPT; i++) {
+        if (stack_sizes[i].attributes == attributes) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == stack_sizes_next)
+        stack_sizes_next = (stack_sizes_next + 1) % STACK_SIZES_KEPT;
+    stack_sizes[slot].attributes = attributes;
+    stack_sizes[slot].asked = size;
+    stack_sizes[slot].given = given;
+    pthread_mutex_unlock(&stack_sizes_lock);
+    return 0;
+}
+
+int darwin_pthread_attr_getstacksize(const pthread_attr_t *attributes, size_t *size) DARWIN_SYMBOL(pthread_attr_getstacksize);
+int darwin_pthread_attr_getstacksize(const pthread_attr_t *attributes, size_t *size) {
+    size_t given = 0;
+    int error = pthread_attr_getstacksize(attributes, &given);
+    if (error)
+        return result(error);
+    pthread_mutex_lock(&stack_sizes_lock);
+    for (unsigned i = 0; i < STACK_SIZES_KEPT; i++) {
+        if (stack_sizes[i].attributes == attributes && stack_sizes[i].given == given) {
+            given = stack_sizes[i].asked;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&stack_sizes_lock);
+    *size = given;
+    return 0;
 }
 
 int darwin_pthread_attr_setstack(pthread_attr_t *attributes, void *stack, size_t size) DARWIN_SYMBOL(pthread_attr_setstack);

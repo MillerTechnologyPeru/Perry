@@ -25,6 +25,11 @@
 # simulator, which is booted if it is not running. One that calls
 # UIApplicationMain is installed as an app and launched instead, as UIKit
 # needs a bundle identifier.
+#
+# A reference run that fails or hangs fails the build, after the other
+# fixtures are built, with what it printed to stderr. PERRY_FIXTURES_UNRECORDED
+# names fixtures (separated by spaces) that may go without a reference
+# instead, where the machine can't give one: CI's has no iCloud account.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -34,6 +39,28 @@ macsdk=$(xcrun --sdk macosx --show-sdk-path)
 out=.build/perry-fixtures/darwin
 deps=.build/perry-fixtures/sources
 min=15.0
+failed=""
+warmed=""
+
+# Runs a command for at most $2 seconds, recording its stdout as fixture
+# $1's reference, and once more if it fails or runs out of time: a
+# simulator that has just booted can take longer than that to start a
+# program. A second failure is kept for the end, without a reference.
+record() {
+    record_name=$1
+    record_seconds=$2
+    shift 2
+    for record_attempt in 1 2; do
+        if perl -e 'alarm shift; exec @ARGV' "$record_seconds" "$@" > "$out/$record_name.expected" 2> "$out/$record_name.stderr"; then
+            rm -f "$out/$record_name.stderr"
+            return 0
+        fi
+        echo "reference run $record_attempt of $record_name failed:" >&2
+        tail -20 "$out/$record_name.stderr" >&2
+    done
+    rm -f "$out/$record_name.expected" "$out/$record_name.stderr"
+    failed="$failed $record_name"
+}
 
 for src in Tests/Fixtures/Darwin/*/; do
     name=$(basename "$src")
@@ -54,7 +81,7 @@ for src in Tests/Fixtures/Darwin/*/; do
         xcrun --sdk macosx swiftc -target arm64-apple-macos14 -sdk "$macsdk" \
             -swift-version 5 -O -o "$macos/MacOS/$name" "$src"/*.swift
         cp "$src/Info.plist" "$macos/Info.plist"
-        perl -e 'alarm 60; exec @ARGV' "$macos/MacOS/$name" > "$out/$name.expected" 2>/dev/null
+        record "$name" 60 "$macos/MacOS/$name"
         echo "$app"
         continue
     fi
@@ -131,6 +158,12 @@ for src in Tests/Fixtures/Darwin/*/; do
         simulator="${PERRY_SIMULATOR:-$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')}"
         xcrun simctl boot "$simulator" 2>/dev/null || true
         xcrun simctl bootstatus "$simulator" -b >/dev/null
+        # A simulator that has just booted starts its first programs
+        # slowly, WebKit's above all: one is run and waited for first.
+        if [ -z "$warmed" ]; then
+            xcrun simctl spawn "$simulator" launchctl list >/dev/null 2>&1 || true
+            warmed=1
+        fi
         simulator_binary="$out/simulator/$name"
         mkdir -p "$out/simulator"
         xcrun --sdk iphonesimulator clang -target "arm64-apple-ios$min-simulator" \
@@ -156,8 +189,7 @@ for src in Tests/Fixtures/Darwin/*/; do
             xcrun simctl uninstall "$simulator" "$bundle_id"
         else
             cp "$simulator_binary" "$spawn_dir/$name"
-            perl -e 'alarm 60; exec @ARGV' xcrun simctl spawn "$simulator" "$spawn_dir/$name" \
-                > "$out/$name.expected" 2>/dev/null
+            record "$name" 180 xcrun simctl spawn "$simulator" "$spawn_dir/$name"
         fi
         rm -rf "$spawn_dir"
         echo "$app"
@@ -204,6 +236,15 @@ for src in Tests/Fixtures/Darwin/*/; do
     bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Info.plist")
     rm -rf "$HOME/Library/Saved Application State/$bundle_id~iosmac.savedState"
     # A hung reference run fails the build instead of stalling it.
-    perl -e 'alarm 30; exec @ARGV' "$macos/MacOS/$name" > "$out/$name.expected" 2>/dev/null
+    record "$name" 30 "$macos/MacOS/$name"
     echo "$app"
 done
+
+unexpected=""
+for name in $failed; do
+    case " ${PERRY_FIXTURES_UNRECORDED:-} " in
+        *" $name "*) echo "no reference for $name, as PERRY_FIXTURES_UNRECORDED allows" ;;
+        *) unexpected="$unexpected $name" ;;
+    esac
+done
+[ -z "$unexpected" ] || { echo "reference runs failed:$unexpected" >&2; exit 1; }

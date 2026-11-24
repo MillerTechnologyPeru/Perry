@@ -188,6 +188,11 @@ match it byte for byte.
 Scripts/build-darwin-fixtures.sh   # on a Mac
 Scripts/docker-test.sh --filter DarwinFixtureTests
 ```
+
+With `PERRY_REQUIRE_FIXTURES=1`, a missing tool or fixture fails the run
+instead of skipping its tests. `.github/workflows/test.yml` sets it on
+arm64, where a Mac job's fixtures are downloaded; x86_64 builds everything
+and runs the tests that need no arm64 program.
  
 ## Limits
  
