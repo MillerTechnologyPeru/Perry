@@ -805,6 +805,8 @@ final class SearchBarState: ObjectState {
     var scopeButtonTitles: NSObject?
     var selectedScopeButtonIndex = 0
     var showsScopeBar = false
+    /// The scope bar's background, kept: no scope bar is drawn.
+    var scopeBarBackgroundImage: UIImage?
     var field: UISearchTextField?
     var cancelButton: UIButton?
     /// The search controller whose bar this is, unretained.
@@ -896,6 +898,8 @@ open class UISearchBar: UIView {
     @ObjCMethod("setSelectedScopeButtonIndex:") func setSelectedScopeButtonIndex(_ index: Int) { search.selectedScopeButtonIndex = index }
     @ObjCMethod("showsScopeBar") func showsScopeBar() -> Bool { search.showsScopeBar }
     @ObjCMethod("setShowsScopeBar:") func setShowsScopeBar(_ shows: Bool) { search.showsScopeBar = shows }
+    @ObjCMethod("scopeBarBackgroundImage") func scopeBarBackgroundImage() -> UIImage? { search.scopeBarBackgroundImage }
+    @ObjCMethod("setScopeBarBackgroundImage:") func setScopeBarBackgroundImage(_ image: UIImage?) { search.scopeBarBackgroundImage = image }
     @ObjCMethod("searchTextField") func searchTextField() -> UISearchTextField { field }
     @ObjCMethod("keyboardType") func keyboardType() -> Int { field.keyboardType() }
     @ObjCMethod("setKeyboardType:") func setKeyboardType(_ type: Int) { field.setKeyboardType(type) }
