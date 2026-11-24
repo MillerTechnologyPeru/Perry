@@ -1,0 +1,9 @@
+{
+  "send_app": 2.8,
+  "send_swift": 1191.2,
+  "retain_release": 1189.7,
+  "alloc_init": 1690.6,
+  "weak_load": 594.6,
+  "string_bridge": 8746.4,
+  "startup": 31406879.0
+}
