@@ -23,6 +23,10 @@ final class UnitLock: @unchecked Sendable {
 
 final class UnitStorage {
     var symbol = ""
+    /// "NSUnitLength.meters" for a class method's shared unit: what
+    /// NSMeasurementFormatter knows it by. Units made otherwise have none,
+    /// and are written by their symbol, as on Darwin.
+    var tableKey: String?
     /// The converter of a dimension, retained.
     var converter: id?
 
@@ -34,6 +38,10 @@ final class UnitStorage {
 final class LinearConverterStorage {
     var coefficient = 1.0
     var constant = 0.0
+}
+
+final class ReciprocalConverterStorage {
+    var reciprocal = 1.0
 }
 
 final class MeasurementStorage {
@@ -50,6 +58,7 @@ enum Units {
     nonisolated(unsafe) static var unitClass: Class!
     nonisolated(unsafe) static var converterClass: Class!
     nonisolated(unsafe) static var linearClass: Class!
+    nonisolated(unsafe) static var reciprocalClass: Class!
     nonisolated(unsafe) static var measurementClass: Class!
 
     static func storage(_ object: id) -> UnitStorage {
@@ -62,6 +71,13 @@ enum Units {
     static func linear(_ object: id) -> LinearConverterStorage {
         if let storage = Storage.get(object, as: LinearConverterStorage.self) { return storage }
         let storage = LinearConverterStorage()
+        Storage.set(object, storage)
+        return storage
+    }
+
+    static func reciprocal(_ object: id) -> ReciprocalConverterStorage {
+        if let storage = Storage.get(object, as: ReciprocalConverterStorage.self) { return storage }
+        let storage = ReciprocalConverterStorage()
         Storage.set(object, storage)
         return storage
     }
@@ -104,6 +120,13 @@ enum Units {
         let state = linear(object)
         state.coefficient = coefficient
         state.constant = constant
+        return object
+    }
+
+    /// A reciprocal converter: base value = reciprocal ÷ value.
+    static func makeReciprocalConverter(_ reciprocal: Double) -> id? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(reciprocalClass)) else { return nil }
+        Units.reciprocal(object).reciprocal = reciprocal
         return object
     }
 }
@@ -213,6 +236,41 @@ public class NSUnitConverterLinear: NSUnitConverter {
     }
 }
 
+/// NSUnitConverterReciprocal: base value = reciprocal ÷ value, both ways;
+/// what NSUnitFuelEfficiency's miles per gallon convert by. Private on
+/// Darwin, where it has these methods.
+@ObjCClass("NSUnitConverterReciprocal")
+public class NSUnitConverterReciprocal: NSUnitConverter {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Units.reciprocalClass = cls.storage
+    }
+
+    var state: ReciprocalConverterStorage { Units.reciprocal(objcObject) }
+
+    @ObjCMethod("initWithReciprocalValue:")
+    func initialize(reciprocalValue: Double) -> Self {
+        state.reciprocal = reciprocalValue
+        return self
+    }
+
+    @ObjCMethod("reciprocalValue") func reciprocalValue() -> Double { state.reciprocal }
+
+    @ObjCMethod("baseUnitValueFromValue:")
+    override func baseUnitValue(fromValue value: Double) -> Double { state.reciprocal / value }
+
+    @ObjCMethod("valueFromBaseUnitValue:")
+    override func value(fromBaseUnitValue value: Double) -> Double { state.reciprocal / value }
+
+    @ObjCMethod("isEqual:")
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other, ObjC.objectGetClass(other.objcObject) == ObjC.objectGetClass(objcObject) else { return false }
+        return Units.reciprocal(other.objcObject).reciprocal == state.reciprocal
+    }
+
+    @ObjCMethod("hash") func hash() -> UInt { UInt(truncatingIfNeeded: state.reciprocal.bitPattern) }
+}
+
 /// NSDimension: a unit that converts to the base unit of its quantity.
 @ObjCClass("NSDimension")
 public class NSDimension: NSUnit {
@@ -235,6 +293,15 @@ public class NSDimension: NSUnit {
         state.converter = converter.flatMap { ObjC.retain($0.objcObject) }
         return ObjC.autorelease(object)
     }
+
+    /// Each quantity's class says its base unit; NSDimension has none, and
+    /// raises, as on Darwin.
+    @ObjCClassMethod("baseUnit")
+    static func baseUnit(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
+        let name = ObjC.name(ofClass: UnsafeMutableRawPointer(cls.storage))
+        Exceptions.raise(name: "NSInvalidArgumentException",
+                         reason: "*** You must override baseUnit in your class \(name) to define its base unit.")
+    }
 }
 
 // MARK: - The quantities
@@ -246,22 +313,27 @@ struct UnitSpec {
     let symbol: String
     let coefficient: Double
     var constant = 0.0
+    /// Whether the coefficient is a reciprocal converter's value instead.
+    var reciprocal = false
     var name: (singular: String, plural: String)?
 
-    init(_ selector: String, _ symbol: String, _ coefficient: Double, constant: Double = 0, name: (String, String)? = nil) {
+    init(_ selector: String, _ symbol: String, _ coefficient: Double, constant: Double = 0, reciprocal: Bool = false,
+         name: (String, String)? = nil) {
         self.selector = selector
         self.symbol = symbol
         self.coefficient = coefficient
         self.constant = constant
+        self.reciprocal = reciprocal
         self.name = name.map { (singular: $0.0, plural: $0.1) }
     }
 }
 
 enum UnitTables {
-    /// The base unit's selector and the units of each class.
+    /// The base unit's selector and the units of each class, with Darwin's
+    /// symbols and coefficients.
     static let tables: [String: (base: String, units: [UnitSpec])] = [
         "NSUnitLength": ("meters", [
-            UnitSpec("megameters", "Mm", 1e6, name: ("megameter", "megameters")),
+            UnitSpec("megameters", "Mm", 1000000, name: ("megameter", "megameters")),
             UnitSpec("kilometers", "km", 1000, name: ("kilometer", "kilometers")),
             UnitSpec("hectometers", "hm", 100, name: ("hectometer", "hectometers")),
             UnitSpec("decameters", "dam", 10, name: ("decameter", "decameters")),
@@ -269,32 +341,32 @@ enum UnitTables {
             UnitSpec("decimeters", "dm", 0.1, name: ("decimeter", "decimeters")),
             UnitSpec("centimeters", "cm", 0.01, name: ("centimeter", "centimeters")),
             UnitSpec("millimeters", "mm", 0.001, name: ("millimeter", "millimeters")),
-            UnitSpec("micrometers", "µm", 1e-6, name: ("micrometer", "micrometers")),
-            UnitSpec("nanometers", "nm", 1e-9, name: ("nanometer", "nanometers")),
+            UnitSpec("micrometers", "µm", 1e-06, name: ("micrometer", "micrometers")),
+            UnitSpec("nanometers", "nm", 1e-09, name: ("nanometer", "nanometers")),
             UnitSpec("picometers", "pm", 1e-12, name: ("picometer", "picometers")),
             UnitSpec("inches", "in", 0.0254, name: ("inch", "inches")),
             UnitSpec("feet", "ft", 0.3048, name: ("foot", "feet")),
             UnitSpec("yards", "yd", 0.9144, name: ("yard", "yards")),
             UnitSpec("miles", "mi", 1609.344, name: ("mile", "miles")),
             UnitSpec("scandinavianMiles", "smi", 10000, name: ("Scandinavian mile", "Scandinavian miles")),
-            UnitSpec("lightyears", "ly", 9.4607304725808e15, name: ("light year", "light years")),
+            UnitSpec("lightyears", "ly", 9460730472580800, name: ("light year", "light years")),
             UnitSpec("nauticalMiles", "NM", 1852, name: ("nautical mile", "nautical miles")),
-            UnitSpec("fathoms", "fathom", 1.8288, name: ("fathom", "fathoms")),
-            UnitSpec("furlongs", "furlong", 201.168, name: ("furlong", "furlongs")),
-            UnitSpec("astronomicalUnits", "ua", 1.495978707e11, name: ("astronomical unit", "astronomical units")),
-            UnitSpec("parsecs", "pc", 3.0856775814913673e16, name: ("parsec", "parsecs")),
+            UnitSpec("fathoms", "ftm", 1.8288, name: ("fathom", "fathoms")),
+            UnitSpec("furlongs", "fur", 201.168, name: ("furlong", "furlongs")),
+            UnitSpec("astronomicalUnits", "ua", 149597870700, name: ("astronomical unit", "astronomical units")),
+            UnitSpec("parsecs", "pc", 3.085677581491367e+16, name: ("parsec", "parsecs")),
         ]),
         "NSUnitSpeed": ("metersPerSecond", [
             UnitSpec("metersPerSecond", "m/s", 1, name: ("meter per second", "meters per second")),
-            UnitSpec("kilometersPerHour", "km/h", 0.277777778, name: ("kilometer per hour", "kilometers per hour")),
+            UnitSpec("kilometersPerHour", "km/h", 0.277778, name: ("kilometer per hour", "kilometers per hour")),
             UnitSpec("milesPerHour", "mph", 0.44704, name: ("mile per hour", "miles per hour")),
-            UnitSpec("knots", "kn", 0.514444444, name: ("knot", "knots")),
+            UnitSpec("knots", "kn", 0.514444, name: ("knot", "knots")),
         ]),
         "NSUnitDuration": ("seconds", [
             UnitSpec("seconds", "s", 1, name: ("second", "seconds")),
             UnitSpec("milliseconds", "ms", 0.001, name: ("millisecond", "milliseconds")),
-            UnitSpec("microseconds", "µs", 1e-6, name: ("microsecond", "microseconds")),
-            UnitSpec("nanoseconds", "ns", 1e-9, name: ("nanosecond", "nanoseconds")),
+            UnitSpec("microseconds", "µs", 1e-06, name: ("microsecond", "microseconds")),
+            UnitSpec("nanoseconds", "ns", 1e-09, name: ("nanosecond", "nanoseconds")),
             UnitSpec("picoseconds", "ps", 1e-12, name: ("picosecond", "picoseconds")),
             UnitSpec("minutes", "min", 60, name: ("minute", "minutes")),
             UnitSpec("hours", "hr", 3600, name: ("hour", "hours")),
@@ -303,9 +375,9 @@ enum UnitTables {
             UnitSpec("kilograms", "kg", 1, name: ("kilogram", "kilograms")),
             UnitSpec("grams", "g", 0.001, name: ("gram", "grams")),
             UnitSpec("decigrams", "dg", 0.0001, name: ("decigram", "decigrams")),
-            UnitSpec("centigrams", "cg", 1e-5, name: ("centigram", "centigrams")),
-            UnitSpec("milligrams", "mg", 1e-6, name: ("milligram", "milligrams")),
-            UnitSpec("micrograms", "µg", 1e-9, name: ("microgram", "micrograms")),
+            UnitSpec("centigrams", "cg", 1e-05, name: ("centigram", "centigrams")),
+            UnitSpec("milligrams", "mg", 1e-06, name: ("milligram", "milligrams")),
+            UnitSpec("micrograms", "µg", 1e-09, name: ("microgram", "micrograms")),
             UnitSpec("nanograms", "ng", 1e-12, name: ("nanogram", "nanograms")),
             UnitSpec("picograms", "pg", 1e-15, name: ("picogram", "picograms")),
             UnitSpec("ounces", "oz", 0.0283495, name: ("ounce", "ounces")),
@@ -327,37 +399,37 @@ enum UnitTables {
         "NSUnitTemperature": ("kelvin", [
             UnitSpec("kelvin", "K", 1, name: ("kelvin", "kelvin")),
             UnitSpec("celsius", "°C", 1, constant: 273.15, name: ("degree Celsius", "degrees Celsius")),
-            UnitSpec("fahrenheit", "°F", 0.555555555555556, constant: 255.372222222222, name: ("degree Fahrenheit", "degrees Fahrenheit")),
+            UnitSpec("fahrenheit", "°F", 0.55555555555556, constant: 255.37222222222428, name: ("degree Fahrenheit", "degrees Fahrenheit")),
         ]),
         "NSUnitAngle": ("degrees", [
             UnitSpec("degrees", "°", 1, name: ("degree", "degrees")),
-            UnitSpec("arcMinutes", "′", 1.0 / 60, name: ("arcminute", "arcminutes")),
-            UnitSpec("arcSeconds", "″", 1.0 / 3600, name: ("arcsecond", "arcseconds")),
-            UnitSpec("radians", "rad", 57.2957795131, name: ("radian", "radians")),
+            UnitSpec("arcMinutes", "ʹ", 0.016667, name: ("arcminute", "arcminutes")),
+            UnitSpec("arcSeconds", "ʺ", 0.00027778, name: ("arcsecond", "arcseconds")),
+            UnitSpec("radians", "rad", 57.29577951308232, name: ("radian", "radians")),
             UnitSpec("gradians", "grad", 0.9, name: ("gradian", "gradians")),
             UnitSpec("revolutions", "rev", 360, name: ("revolution", "revolutions")),
         ]),
         "NSUnitPower": ("watts", [
-            UnitSpec("terawatts", "TW", 1e12, name: ("terawatt", "terawatts")),
-            UnitSpec("gigawatts", "GW", 1e9, name: ("gigawatt", "gigawatts")),
-            UnitSpec("megawatts", "MW", 1e6, name: ("megawatt", "megawatts")),
+            UnitSpec("terawatts", "TW", 1000000000000, name: ("terawatt", "terawatts")),
+            UnitSpec("gigawatts", "GW", 1000000000, name: ("gigawatt", "gigawatts")),
+            UnitSpec("megawatts", "MW", 1000000, name: ("megawatt", "megawatts")),
             UnitSpec("kilowatts", "kW", 1000, name: ("kilowatt", "kilowatts")),
             UnitSpec("watts", "W", 1, name: ("watt", "watts")),
             UnitSpec("milliwatts", "mW", 0.001, name: ("milliwatt", "milliwatts")),
-            UnitSpec("microwatts", "µW", 1e-6, name: ("microwatt", "microwatts")),
-            UnitSpec("nanowatts", "nW", 1e-9, name: ("nanowatt", "nanowatts")),
+            UnitSpec("microwatts", "µW", 1e-06, name: ("microwatt", "microwatts")),
+            UnitSpec("nanowatts", "nW", 1e-09, name: ("nanowatt", "nanowatts")),
             UnitSpec("picowatts", "pW", 1e-12, name: ("picowatt", "picowatts")),
             UnitSpec("femtowatts", "fW", 1e-15, name: ("femtowatt", "femtowatts")),
             UnitSpec("horsepower", "hp", 745.7, name: ("horsepower", "horsepower")),
         ]),
         "NSUnitPressure": ("newtonsPerMetersSquared", [
             UnitSpec("newtonsPerMetersSquared", "N/m²", 1, name: ("newton per square meter", "newtons per square meter")),
-            UnitSpec("gigapascals", "GPa", 1e9, name: ("gigapascal", "gigapascals")),
-            UnitSpec("megapascals", "MPa", 1e6, name: ("megapascal", "megapascals")),
+            UnitSpec("gigapascals", "GPa", 1000000000, name: ("gigapascal", "gigapascals")),
+            UnitSpec("megapascals", "MPa", 1000000, name: ("megapascal", "megapascals")),
             UnitSpec("kilopascals", "kPa", 1000, name: ("kilopascal", "kilopascals")),
             UnitSpec("hectopascals", "hPa", 100, name: ("hectopascal", "hectopascals")),
             UnitSpec("inchesOfMercury", "inHg", 3386.39, name: ("inch of mercury", "inches of mercury")),
-            UnitSpec("bars", "bar", 1e5, name: ("bar", "bars")),
+            UnitSpec("bars", "bar", 100000, name: ("bar", "bars")),
             UnitSpec("millibars", "mbar", 100, name: ("millibar", "millibars")),
             UnitSpec("millimetersOfMercury", "mmHg", 133.322, name: ("millimeter of mercury", "millimeters of mercury")),
             UnitSpec("poundsForcePerSquareInch", "psi", 6894.76, name: ("pound per square inch", "pounds per square inch")),
@@ -367,21 +439,23 @@ enum UnitTables {
             UnitSpec("gravity", "g", 9.81, name: ("g-force", "g-force")),
         ]),
         "NSUnitArea": ("squareMeters", [
-            UnitSpec("squareMegameters", "Mm²", 1e12, name: ("square megameter", "square megameters")),
-            UnitSpec("squareKilometers", "km²", 1e6, name: ("square kilometer", "square kilometers")),
+            UnitSpec("squareMegameters", "Mm²", 1000000000000, name: ("square megameter", "square megameters")),
+            UnitSpec("squareKilometers", "km²", 1000000, name: ("square kilometer", "square kilometers")),
             UnitSpec("squareMeters", "m²", 1, name: ("square meter", "square meters")),
-            UnitSpec("squareCentimeters", "cm²", 1e-4, name: ("square centimeter", "square centimeters")),
-            UnitSpec("squareMillimeters", "mm²", 1e-6, name: ("square millimeter", "square millimeters")),
+            UnitSpec("squareCentimeters", "cm²", 0.0001, name: ("square centimeter", "square centimeters")),
+            UnitSpec("squareMillimeters", "mm²", 1e-06, name: ("square millimeter", "square millimeters")),
             UnitSpec("squareInches", "in²", 0.00064516, name: ("square inch", "square inches")),
-            UnitSpec("squareFeet", "ft²", 0.092903, name: ("square foot", "square feet")),
-            UnitSpec("squareYards", "yd²", 0.836127, name: ("square yard", "square yards")),
-            UnitSpec("squareMiles", "mi²", 2589988.11, name: ("square mile", "square miles")),
-            UnitSpec("acres", "ac", 4046.86, name: ("acre", "acres")),
+            UnitSpec("squareFeet", "ft²", 0.09290304, name: ("square foot", "square feet")),
+            UnitSpec("squareYards", "yd²", 0.83612736, name: ("square yard", "square yards")),
+            UnitSpec("squareMiles", "mi²", 2589988.110336, name: ("square mile", "square miles")),
+            UnitSpec("acres", "ac", 4046.8564224, name: ("acre", "acres")),
             UnitSpec("ares", "a", 100, name: ("are", "ares")),
             UnitSpec("hectares", "ha", 10000, name: ("hectare", "hectares")),
+            UnitSpec("squareMicrometers", "µm²", 1e-12),
+            UnitSpec("squareNanometers", "nm²", 1e-18),
         ]),
         "NSUnitVolume": ("liters", [
-            UnitSpec("megaliters", "ML", 1e6, name: ("megaliter", "megaliters")),
+            UnitSpec("megaliters", "ML", 1000000, name: ("megaliter", "megaliters")),
             UnitSpec("kiloliters", "kL", 1000, name: ("kiloliter", "kiloliters")),
             UnitSpec("liters", "L", 1, name: ("liter", "liters")),
             UnitSpec("deciliters", "dL", 0.1, name: ("deciliter", "deciliters")),
@@ -398,40 +472,112 @@ enum UnitTables {
             UnitSpec("pints", "pt", 0.473176, name: ("pint", "pints")),
             UnitSpec("quarts", "qt", 0.946353, name: ("quart", "quarts")),
             UnitSpec("gallons", "gal", 3.78541, name: ("gallon", "gallons")),
+            UnitSpec("acreFeet", "af", 1233000, name: ("acre-foot", "acre-feet")),
+            UnitSpec("bushels", "bsh", 35.2391, name: ("bushel", "bushels")),
+            UnitSpec("cubicDecimeters", "dm³", 1),
+            UnitSpec("cubicKilometers", "km³", 1000000000000, name: ("cubic kilometer", "cubic kilometers")),
+            UnitSpec("cubicMiles", "mi³", 4168000000000, name: ("cubic mile", "cubic miles")),
+            UnitSpec("cubicMillimeters", "mm³", 1e-06),
+            UnitSpec("cubicYards", "yd³", 764.555, name: ("cubic yard", "cubic yards")),
+            UnitSpec("imperialFluidOunces", "fl oz", 0.0284131),
+            UnitSpec("imperialGallons", "gal", 4.54609, name: ("Imp. gallon", "Imp. gallons")),
+            UnitSpec("imperialPints", "pt", 0.568261),
+            UnitSpec("imperialQuarts", "qt", 1.13652),
+            UnitSpec("imperialTablespoons", "tbsp", 0.0177582),
+            UnitSpec("imperialTeaspoons", "tsp", 0.00591939),
+            UnitSpec("metricCups", "metric cup", 0.25),
         ]),
         "NSUnitConcentrationMass": ("gramsPerLiter", [
             UnitSpec("gramsPerLiter", "g/L", 1, name: ("gram per liter", "grams per liter")),
             UnitSpec("milligramsPerDeciliter", "mg/dL", 0.01, name: ("milligram per deciliter", "milligrams per deciliter")),
         ]),
         "NSUnitElectricPotentialDifference": ("volts", [
-            UnitSpec("megavolts", "MV", 1e6, name: ("megavolt", "megavolts")),
+            UnitSpec("megavolts", "MV", 1000000, name: ("megavolt", "megavolts")),
             UnitSpec("kilovolts", "kV", 1000, name: ("kilovolt", "kilovolts")),
             UnitSpec("volts", "V", 1, name: ("volt", "volts")),
             UnitSpec("millivolts", "mV", 0.001, name: ("millivolt", "millivolts")),
-            UnitSpec("microvolts", "µV", 1e-6, name: ("microvolt", "microvolts")),
+            UnitSpec("microvolts", "µV", 1e-06, name: ("microvolt", "microvolts")),
         ]),
         "NSUnitFrequency": ("hertz", [
-            UnitSpec("terahertz", "THz", 1e12, name: ("terahertz", "terahertz")),
-            UnitSpec("gigahertz", "GHz", 1e9, name: ("gigahertz", "gigahertz")),
-            UnitSpec("megahertz", "MHz", 1e6, name: ("megahertz", "megahertz")),
+            UnitSpec("terahertz", "THz", 1000000000000, name: ("terahertz", "terahertz")),
+            UnitSpec("gigahertz", "GHz", 1000000000, name: ("gigahertz", "gigahertz")),
+            UnitSpec("megahertz", "MHz", 1000000, name: ("megahertz", "megahertz")),
             UnitSpec("kilohertz", "kHz", 1000, name: ("kilohertz", "kilohertz")),
             UnitSpec("hertz", "Hz", 1, name: ("hertz", "hertz")),
             UnitSpec("millihertz", "mHz", 0.001, name: ("millihertz", "millihertz")),
-            UnitSpec("microhertz", "µHz", 1e-6, name: ("microhertz", "microhertz")),
-            UnitSpec("nanohertz", "nHz", 1e-9, name: ("nanohertz", "nanohertz")),
+            UnitSpec("microhertz", "µHz", 1e-06, name: ("microhertz", "microhertz")),
+            UnitSpec("nanohertz", "nHz", 1e-09, name: ("nanohertz", "nanohertz")),
             UnitSpec("framesPerSecond", "fps", 1, name: ("frame per second", "frames per second")),
         ]),
         "NSUnitInformationStorage": ("bytes", [
-            UnitSpec("bytes", "byte", 1, name: ("byte", "bytes")),
+            UnitSpec("bytes", "B", 1, name: ("byte", "bytes")),
             UnitSpec("bits", "bit", 0.125, name: ("bit", "bits")),
             UnitSpec("nibbles", "nibble", 0.5, name: ("nibble", "nibbles")),
             UnitSpec("kilobytes", "kB", 1000, name: ("kilobyte", "kilobytes")),
-            UnitSpec("megabytes", "MB", 1e6, name: ("megabyte", "megabytes")),
-            UnitSpec("gigabytes", "GB", 1e9, name: ("gigabyte", "gigabytes")),
-            UnitSpec("terabytes", "TB", 1e12, name: ("terabyte", "terabytes")),
+            UnitSpec("megabytes", "MB", 1000000, name: ("megabyte", "megabytes")),
+            UnitSpec("gigabytes", "GB", 1000000000, name: ("gigabyte", "gigabytes")),
+            UnitSpec("terabytes", "TB", 1000000000000, name: ("terabyte", "terabytes")),
             UnitSpec("kibibytes", "KiB", 1024, name: ("kibibyte", "kibibytes")),
             UnitSpec("mebibytes", "MiB", 1048576, name: ("mebibyte", "mebibytes")),
             UnitSpec("gibibytes", "GiB", 1073741824, name: ("gibibyte", "gibibytes")),
+            UnitSpec("exabits", "Eb", 1.25e+17),
+            UnitSpec("exabytes", "EB", 1e+18),
+            UnitSpec("exbibits", "Eib", 1.4411518807585587e+17),
+            UnitSpec("exbibytes", "EiB", 1.152921504606847e+18),
+            UnitSpec("gibibits", "Gib", 134217728),
+            UnitSpec("gigabits", "Gb", 125000000, name: ("gigabit", "gigabits")),
+            UnitSpec("kibibits", "Kib", 128),
+            UnitSpec("kilobits", "kb", 125, name: ("kilobit", "kilobits")),
+            UnitSpec("mebibits", "Mib", 131072),
+            UnitSpec("megabits", "Mb", 125000, name: ("megabit", "megabits")),
+            UnitSpec("pebibits", "Pib", 140737488355328),
+            UnitSpec("pebibytes", "PiB", 1125899906842624),
+            UnitSpec("petabits", "Pb", 125000000000000),
+            UnitSpec("petabytes", "PB", 1000000000000000, name: ("petabyte", "petabytes")),
+            UnitSpec("tebibits", "Tib", 137438953472),
+            UnitSpec("tebibytes", "TiB", 1099511627776),
+            UnitSpec("terabits", "Tb", 125000000000, name: ("terabit", "terabits")),
+            UnitSpec("yobibits", "Yib", 1.5111572745182865e+23),
+            UnitSpec("yobibytes", "YiB", 1.2089258196146292e+24),
+            UnitSpec("yottabits", "Yb", 1.25e+23),
+            UnitSpec("yottabytes", "YB", 1e+24),
+            UnitSpec("zebibits", "Zib", 1.4757395258967641e+20),
+            UnitSpec("zebibytes", "ZiB", 1.1805916207174113e+21),
+            UnitSpec("zettabits", "Zb", 1.25e+20),
+            UnitSpec("zettabytes", "ZB", 1e+21),
+        ]),
+        "NSUnitDispersion": ("partsPerMillion", [
+            UnitSpec("partsPerMillion", "ppm", 1, name: ("part per million", "parts per million")),
+        ]),
+        "NSUnitElectricCharge": ("coulombs", [
+            UnitSpec("ampereHours", "Ah", 3600),
+            UnitSpec("coulombs", "C", 1),
+            UnitSpec("kiloampereHours", "kAh", 3600000),
+            UnitSpec("megaampereHours", "MAh", 3600000000),
+            UnitSpec("microampereHours", "µAh", 0.0036),
+            UnitSpec("milliampereHours", "mAh", 3.6),
+        ]),
+        "NSUnitElectricCurrent": ("amperes", [
+            UnitSpec("amperes", "A", 1, name: ("ampere", "amperes")),
+            UnitSpec("kiloamperes", "kA", 1000),
+            UnitSpec("megaamperes", "MA", 1000000),
+            UnitSpec("microamperes", "µA", 1e-06),
+            UnitSpec("milliamperes", "mA", 0.001, name: ("milliampere", "milliamperes")),
+        ]),
+        "NSUnitElectricResistance": ("ohms", [
+            UnitSpec("kiloohms", "kΩ", 1000),
+            UnitSpec("megaohms", "MΩ", 1000000),
+            UnitSpec("microohms", "µΩ", 1e-06),
+            UnitSpec("milliohms", "mΩ", 0.001),
+            UnitSpec("ohms", "Ω", 1, name: ("ohm", "ohms")),
+        ]),
+        "NSUnitFuelEfficiency": ("litersPer100Kilometers", [
+            UnitSpec("litersPer100Kilometers", "L/100km", 1, name: ("liter per 100 kilometers", "liters per 100 kilometers")),
+            UnitSpec("milesPerGallon", "mpg", 235.215, reciprocal: true, name: ("mile per gallon", "miles per gallon")),
+            UnitSpec("milesPerImperialGallon", "mpg", 282.481, reciprocal: true, name: ("mile per Imp. gallon", "miles per Imp. gallon")),
+        ]),
+        "NSUnitIlluminance": ("lux", [
+            UnitSpec("lux", "lx", 1, name: ("lux", "lux")),
         ]),
     ]
 
@@ -473,10 +619,12 @@ enum UnitTables {
             if let existing = shared[key] { return existing }
             guard let cls = classes[className],
                   let object = Storage.allocate(UnsafeMutableRawPointer(cls)),
-                  let converter = Units.makeConverter(coefficient: spec.coefficient, constant: spec.constant) else { return nil }
+                  let converter = spec.reciprocal ? Units.makeReciprocalConverter(spec.coefficient)
+                                                  : Units.makeConverter(coefficient: spec.coefficient, constant: spec.constant) else { return nil }
             let state = Units.storage(object)
             state.symbol = spec.symbol
             state.converter = converter
+            state.tableKey = key
             shared[key] = object
             return object
         }
@@ -536,6 +684,18 @@ enum UnitTables {
 }
 @ObjCClass("NSUnitConcentrationMass") public class NSUnitConcentrationMass: NSDimension {
     override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitConcentrationMass") }
+
+    /// Millimoles per liter of a substance of the molar mass given: a new
+    /// unit each time, "mmol/L", whose grams per liter are the molar mass
+    /// ÷ 1000, as on Darwin.
+    @ObjCClassMethod("millimolesPerLiterWithGramsPerMole:")
+    static func millimolesPerLiter(_ cls: ObjCClass, gramsPerMole: Double) -> UnsafeMutableRawPointer? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(cls.storage)) else { return nil }
+        let state = Units.storage(object)
+        state.symbol = "mmol/L"
+        state.converter = Units.makeConverter(coefficient: gramsPerMole / 1000, constant: 0)
+        return ObjC.autorelease(object)
+    }
 }
 @ObjCClass("NSUnitElectricPotentialDifference") public class NSUnitElectricPotentialDifference: NSDimension {
     override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitElectricPotentialDifference") }
@@ -545,6 +705,25 @@ enum UnitTables {
 }
 @ObjCClass("NSUnitInformationStorage") public class NSUnitInformationStorage: NSDimension {
     override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitInformationStorage") }
+}
+@ObjCClass("NSUnitDispersion") public class NSUnitDispersion: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitDispersion") }
+}
+@ObjCClass("NSUnitElectricCharge") public class NSUnitElectricCharge: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitElectricCharge") }
+}
+@ObjCClass("NSUnitElectricCurrent") public class NSUnitElectricCurrent: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitElectricCurrent") }
+}
+@ObjCClass("NSUnitElectricResistance") public class NSUnitElectricResistance: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitElectricResistance") }
+}
+/// Miles per gallon convert reciprocally, by NSUnitConverterReciprocal.
+@ObjCClass("NSUnitFuelEfficiency") public class NSUnitFuelEfficiency: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitFuelEfficiency") }
+}
+@ObjCClass("NSUnitIlluminance") public class NSUnitIlluminance: NSDimension {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { UnitTables.install(cls, "NSUnitIlluminance") }
 }
 
 // MARK: - NSMeasurement
@@ -770,38 +949,219 @@ public class NSMeasurementFormatter: NSFormatter {
         state.numberFormatter = formatter.flatMap { ObjC.retain($0.objcObject) }
     }
 
-    /// A unit's text in the style: its symbol, or its name in the long style.
-    private func text(of unit: id, for value: Double?) -> String {
-        let symbol = Units.symbol(of: unit)
-        guard state.unitStyle == 3, let name = UnitTables.names[symbol] else { return symbol }
-        return value == 1 ? name.singular : name.plural
+    /// NSFormattingUnitStyle as an index into the writings: short 0,
+    /// medium 1, long 2.
+    private var styleIndex: Int { state.unitStyle == 1 ? 0 : state.unitStyle == 3 ? 2 : 1 }
+
+    /// A unit as the style writes it: its name, or its symbol for a unit
+    /// Darwin has no name for, or one not made by its class's method.
+    @ObjCMethod("stringFromUnit:")
+    func string(fromUnit unit: ObjCObject) -> String {
+        guard let writing = MeasurementWritings.writing(of: unit.objcObject) else { return Units.symbol(of: unit.objcObject) }
+        return writing[styleIndex * 3]
     }
 
-    @ObjCMethod("stringFromUnit:")
-    func string(fromUnit unit: ObjCObject) -> String { text(of: unit.objcObject, for: nil) }
-
+    /// The value written by the number formatter, then the unit as the
+    /// style writes it, singular for one ("1 meter", "2.5 meters"); a unit
+    /// without a writing as "value symbol". The unit is the one given, as
+    /// NSMeasurementFormatterUnitOptionsProvidedUnit has it: the locale's
+    /// preferred units and natural scale are not chosen here.
     @ObjCMethod("stringFromMeasurement:")
     func string(fromMeasurement measurement: ObjCObject) -> String {
         let data = Units.measurement(measurement.objcObject)
-        guard let unit = data.unit else { return Units.format(data.value) }
-        let number: String
-        if let formatter = numberFormatter(),
-           let text = Strings.value(of: ObjC.send(formatter, ObjC.selector("stringFromNumber:"), Numbers.make(nil, .double(data.value)))) {
-            number = text
-        } else {
-            number = Units.format(data.value)
+        guard var unit = data.unit else { return Units.string(data.value, formatter: numberFormatter()) }
+        var value = data.value
+        // A few units Darwin writes in another of their class's units.
+        if let key = Storage.get(unit, as: UnitStorage.self)?.tableKey, let other = MeasurementWritings.writtenAs(key) {
+            value = Units.value(fromBase: Units.baseValue(value, of: unit), in: other)
+            unit = other
         }
-        let symbol = Units.symbol(of: unit)
+        let number = Units.string(value, formatter: numberFormatter())
         // Temperatures can go without their unit.
-        if state.unitOptions & 4 != 0, symbol.hasPrefix("°") { return number + "°" }
-        let name = text(of: unit, for: data.value)
-        return symbol.hasPrefix("°") && state.unitStyle != 3 ? number + name : number + " " + name
+        if state.unitOptions & 4 != 0, let temperature = Units.named("NSUnitTemperature"), ObjC.isKind(unit, of: temperature) {
+            return number + "°"
+        }
+        guard let writing = MeasurementWritings.writing(of: unit) else { return number + " " + Units.symbol(of: unit) }
+        let pattern = writing[styleIndex * 3 + (number == "1" ? 1 : 2)]
+        return pattern.replacingOccurrences(of: "{0}", with: number)
     }
 
     @ObjCMethod("stringForObjectValue:")
     func string(forObjectValue value: ObjCObject?) -> String? {
         guard let value, ObjC.isKind(value.objcObject, of: Units.measurementClass) else { return nil }
         return string(fromMeasurement: value)
+    }
+}
+
+/// How NSMeasurementFormatter writes the units Darwin has names for, in
+/// English, as Darwin's (ICU's) data has them: by the unit's class and
+/// selector, the short, medium and long styles' unit name and patterns for
+/// one and for other counts, "|"-separated.
+enum MeasurementWritings {
+    static let table: [String: String] = [
+        "NSUnitDispersion.partsPerMillion": "ppm|{0}ppm|{0}ppm|parts/million|{0} ppm|{0} ppm|parts per million|{0} part per million|{0} parts per million",
+        "NSUnitElectricCurrent.amperes": "amp|{0}A|{0}A|amps|{0} A|{0} A|amperes|{0} ampere|{0} amperes",
+        "NSUnitElectricCurrent.milliamperes": "mA|{0}mA|{0}mA|milliamps|{0} mA|{0} mA|milliamperes|{0} milliampere|{0} milliamperes",
+        "NSUnitElectricResistance.ohms": "ohm|{0}Ω|{0}Ω|ohms|{0} Ω|{0} Ω|ohms|{0} ohm|{0} ohms",
+        "NSUnitFuelEfficiency.litersPer100Kilometers": "L/100km|{0}L/100km|{0}L/100km|L/100 km|{0} L/100 km|{0} L/100 km|liters per 100 kilometers|{0} liter per 100 kilometers|{0} liters per 100 kilometers",
+        "NSUnitFuelEfficiency.milesPerGallon": "mpg|{0}mpg|{0}mpg|miles/gal|{0} mpg|{0} mpg|miles per gallon|{0} mile per gallon|{0} miles per gallon",
+        "NSUnitFuelEfficiency.milesPerImperialGallon": "mpg UK|{0}m/gUK|{0}m/gUK|miles/gal Imp.|{0} mpg Imp.|{0} mpg Imp.|miles per Imp. gallon|{0} mile per Imp. gallon|{0} miles per Imp. gallon",
+        "NSUnitIlluminance.lux": "lux|{0}lx|{0}lx|lux|{0} lx|{0} lx|lux|{0} lux|{0} lux",
+        "NSUnitInformationStorage.bits": "bit|{0}bit|{0}bit|bit|{0} bit|{0} bit|bits|{0} bit|{0} bits",
+        "NSUnitInformationStorage.bytes": "byte|{0}B|{0}B|byte|{0} byte|{0} byte|bytes|{0} byte|{0} bytes",
+        "NSUnitInformationStorage.gigabits": "Gbit|{0}Gb|{0}Gb|Gbit|{0} Gb|{0} Gb|gigabits|{0} gigabit|{0} gigabits",
+        "NSUnitInformationStorage.gigabytes": "GB|{0}GB|{0}GB|GByte|{0} GB|{0} GB|gigabytes|{0} gigabyte|{0} gigabytes",
+        "NSUnitInformationStorage.kilobits": "kbit|{0}kb|{0}kb|kbit|{0} kb|{0} kb|kilobits|{0} kilobit|{0} kilobits",
+        "NSUnitInformationStorage.kilobytes": "kB|{0}kB|{0}kB|kByte|{0} kB|{0} kB|kilobytes|{0} kilobyte|{0} kilobytes",
+        "NSUnitInformationStorage.megabits": "Mbit|{0}Mb|{0}Mb|Mbit|{0} Mb|{0} Mb|megabits|{0} megabit|{0} megabits",
+        "NSUnitInformationStorage.megabytes": "MB|{0}MB|{0}MB|MByte|{0} MB|{0} MB|megabytes|{0} megabyte|{0} megabytes",
+        "NSUnitInformationStorage.petabytes": "PB|{0}PB|{0}PB|PByte|{0} PB|{0} PB|petabytes|{0} petabyte|{0} petabytes",
+        "NSUnitInformationStorage.terabits": "Tbit|{0}Tb|{0}Tb|Tbit|{0} Tb|{0} Tb|terabits|{0} terabit|{0} terabits",
+        "NSUnitInformationStorage.terabytes": "TB|{0}TB|{0}TB|TByte|{0} TB|{0} TB|terabytes|{0} terabyte|{0} terabytes",
+        "NSUnitVolume.acreFeet": "acre ft|{0}ac ft|{0}ac ft|acre ft|{0} ac ft|{0} ac ft|acre-feet|{0} acre-foot|{0} acre-feet",
+        "NSUnitVolume.bushels": "bushel|{0}bu|{0}bu|bushels|{0} bu|{0} bu|bushels|{0} bushel|{0} bushels",
+        "NSUnitVolume.centiliters": "cL|{0}cL|{0}cL|cL|{0} cL|{0} cL|centiliters|{0} centiliter|{0} centiliters",
+        "NSUnitVolume.cubicCentimeters": "cm³|{0}cm³|{0}cm³|cm³|{0} cm³|{0} cm³|cubic centimeters|{0} cubic centimeter|{0} cubic centimeters",
+        "NSUnitVolume.cubicFeet": "ft³|{0}ft³|{0}ft³|feet³|{0} ft³|{0} ft³|cubic feet|{0} cubic foot|{0} cubic feet",
+        "NSUnitVolume.cubicInches": "in³|{0}in³|{0}in³|inches³|{0} in³|{0} in³|cubic inches|{0} cubic inch|{0} cubic inches",
+        "NSUnitVolume.cubicKilometers": "km³|{0}km³|{0}km³|km³|{0} km³|{0} km³|cubic kilometers|{0} cubic kilometer|{0} cubic kilometers",
+        "NSUnitVolume.cubicMeters": "m³|{0}m³|{0}m³|m³|{0} m³|{0} m³|cubic meters|{0} cubic meter|{0} cubic meters",
+        "NSUnitVolume.cubicMiles": "mi³|{0}mi³|{0}mi³|mi³|{0} mi³|{0} mi³|cubic miles|{0} cubic mile|{0} cubic miles",
+        "NSUnitVolume.cubicYards": "yd³|{0}yd³|{0}yd³|yards³|{0} yd³|{0} yd³|cubic yards|{0} cubic yard|{0} cubic yards",
+        "NSUnitVolume.cups": "cup|{0}c|{0}c|cups|{0} c|{0} c|cups|{0} cup|{0} cups",
+        "NSUnitVolume.deciliters": "dL|{0}dL|{0}dL|dL|{0} dL|{0} dL|deciliters|{0} deciliter|{0} deciliters",
+        "NSUnitVolume.fluidOunces": "fl oz|{0}fl oz|{0}fl oz|fl oz|{0} fl oz|{0} fl oz|fluid ounces|{0} fluid ounce|{0} fluid ounces",
+        "NSUnitVolume.gallons": "gal|{0}gal|{0}gal|gal|{0} gal|{0} gal|gallons|{0} gallon|{0} gallons",
+        "NSUnitVolume.imperialFluidOunces": "fl oz|{0}fl oz|{0}fl oz|fl oz|{0} fl oz|{0} fl oz|fluid ounces|{0} fluid ounce|{0} fluid ounces",
+        "NSUnitVolume.imperialGallons": "Imp gal|{0}gal-Im|{0}gal-Im|Imp. gal|{0} gal Imp.|{0} gal Imp.|Imp. gallons|{0} Imp. gallon|{0} Imp. gallons",
+        "NSUnitVolume.imperialPints": "pt|{0}pt|{0}pt|pints|{0} pt|{0} pt|pints|{0} pint|{0} pints",
+        "NSUnitVolume.imperialQuarts": "qt|{0}qt|{0}qt|qts|{0} qt|{0} qt|quarts|{0} quart|{0} quarts",
+        "NSUnitVolume.imperialTablespoons": "tbsp|{0}tbsp|{0}tbsp|tbsp|{0} tbsp|{0} tbsp|tablespoons|{0} tablespoon|{0} tablespoons",
+        "NSUnitVolume.imperialTeaspoons": "tsp|{0}tsp|{0}tsp|tsp|{0} tsp|{0} tsp|teaspoons|{0} teaspoon|{0} teaspoons",
+        "NSUnitVolume.liters": "liter|{0}L|{0}L|liters|{0} L|{0} L|liters|{0} liter|{0} liters",
+        "NSUnitVolume.megaliters": "ML|{0}ML|{0}ML|ML|{0} ML|{0} ML|megaliters|{0} megaliter|{0} megaliters",
+        "NSUnitVolume.metricCups": "mcup|{0}mc|{0}mc|mcup|{0} mc|{0} mc|metric cups|{0} metric cup|{0} metric cups",
+        "NSUnitVolume.milliliters": "mL|{0}mL|{0}mL|mL|{0} mL|{0} mL|milliliters|{0} milliliter|{0} milliliters",
+        "NSUnitVolume.pints": "pt|{0}pt|{0}pt|pints|{0} pt|{0} pt|pints|{0} pint|{0} pints",
+        "NSUnitVolume.quarts": "qt|{0}qt|{0}qt|qts|{0} qt|{0} qt|quarts|{0} quart|{0} quarts",
+        "NSUnitVolume.tablespoons": "tbsp|{0}tbsp|{0}tbsp|tbsp|{0} tbsp|{0} tbsp|tablespoons|{0} tablespoon|{0} tablespoons",
+        "NSUnitVolume.teaspoons": "tsp|{0}tsp|{0}tsp|tsp|{0} tsp|{0} tsp|teaspoons|{0} teaspoon|{0} teaspoons",
+        "NSUnitArea.acres": "acre|{0}ac|{0}ac|acres|{0} ac|{0} ac|acres|{0} acre|{0} acres",
+        "NSUnitArea.hectares": "hectare|{0}ha|{0}ha|hectares|{0} ha|{0} ha|hectares|{0} hectare|{0} hectares",
+        "NSUnitArea.squareCentimeters": "cm²|{0}cm²|{0}cm²|cm²|{0} cm²|{0} cm²|square centimeters|{0} square centimeter|{0} square centimeters",
+        "NSUnitArea.squareFeet": "ft²|{0}ft²|{0}ft²|sq feet|{0} sq ft|{0} sq ft|square feet|{0} square foot|{0} square feet",
+        "NSUnitArea.squareInches": "in²|{0}in²|{0}in²|inches²|{0} in²|{0} in²|square inches|{0} square inch|{0} square inches",
+        "NSUnitArea.squareKilometers": "km²|{0}km²|{0}km²|km²|{0} km²|{0} km²|square kilometers|{0} square kilometer|{0} square kilometers",
+        "NSUnitArea.squareMeters": "meters²|{0}m²|{0}m²|meters²|{0} m²|{0} m²|square meters|{0} square meter|{0} square meters",
+        "NSUnitArea.squareMiles": "mi²|{0}mi²|{0}mi²|sq miles|{0} sq mi|{0} sq mi|square miles|{0} square mile|{0} square miles",
+        "NSUnitArea.squareYards": "yd²|{0}yd²|{0}yd²|yards²|{0} yd²|{0} yd²|square yards|{0} square yard|{0} square yards",
+        "NSUnitConcentrationMass.milligramsPerDeciliter": "mg/dL|{0} g/L|{0} g/L|mg/dL|{0} g/L|{0} g/L|milligrams per deciliter|{0} g/L|{0} g/L",
+        "NSUnitEnergy.calories": "cal|{0}cal|{0}cal|cal|{0} cal|{0} cal|calories|{0} calorie|{0} calories",
+        "NSUnitEnergy.joules": "joule|{0}J|{0}J|joules|{0} J|{0} J|joules|{0} joule|{0} joules",
+        "NSUnitEnergy.kilocalories": "kcal|{0}kcal|{0}kcal|kcal|{0} kcal|{0} kcal|kilocalories|{0} kilocalorie|{0} kilocalories",
+        "NSUnitEnergy.kilojoules": "kJ|{0}kJ|{0}kJ|kilojoule|{0} kJ|{0} kJ|kilojoules|{0} kilojoule|{0} kilojoules",
+        "NSUnitEnergy.kilowattHours": "kWh|{0}kWh|{0}kWh|kW-hour|{0} kWh|{0} kWh|kilowatt-hours|{0} kilowatt hour|{0} kilowatt-hours",
+        "NSUnitLength.astronomicalUnits": "au|{0}au|{0}au|au|{0} au|{0} au|astronomical units|{0} astronomical unit|{0} astronomical units",
+        "NSUnitLength.centimeters": "cm|{0}cm|{0}cm|cm|{0} cm|{0} cm|centimeters|{0} centimeter|{0} centimeters",
+        "NSUnitLength.decimeters": "dm|{0}dm|{0}dm|dm|{0} dm|{0} dm|decimeters|{0} decimeter|{0} decimeters",
+        "NSUnitLength.fathoms": "fathom|{0}fth|{0}fth|fathoms|{0} fth|{0} fth|fathoms|{0} fathom|{0} fathoms",
+        "NSUnitLength.feet": "ft|{0}′|{0}′|feet|{0} ft|{0} ft|feet|{0} foot|{0} feet",
+        "NSUnitLength.furlongs": "furlong|{0}fur|{0}fur|furlongs|{0} fur|{0} fur|furlongs|{0} furlong|{0} furlongs",
+        "NSUnitLength.inches": "in|{0}″|{0}″|inches|{0} in|{0} in|inches|{0} inch|{0} inches",
+        "NSUnitLength.kilometers": "km|{0}km|{0}km|km|{0} km|{0} km|kilometers|{0} kilometer|{0} kilometers",
+        "NSUnitLength.lightyears": "ly|{0}ly|{0}ly|light yrs|{0} ly|{0} ly|light years|{0} light year|{0} light years",
+        "NSUnitLength.meters": "meter|{0}m|{0}m|meters|{0} m|{0} m|meters|{0} meter|{0} meters",
+        "NSUnitLength.micrometers": "μm|{0}μm|{0}μm|μmeters|{0} μm|{0} μm|micrometers|{0} micrometer|{0} micrometers",
+        "NSUnitLength.miles": "mi|{0}mi|{0}mi|miles|{0} mi|{0} mi|miles|{0} mile|{0} miles",
+        "NSUnitLength.millimeters": "mm|{0}mm|{0}mm|mm|{0} mm|{0} mm|millimeters|{0} millimeter|{0} millimeters",
+        "NSUnitLength.nanometers": "nm|{0}nm|{0}nm|nm|{0} nm|{0} nm|nanometers|{0} nanometer|{0} nanometers",
+        "NSUnitLength.nauticalMiles": "nmi|{0}nmi|{0}nmi|nmi|{0} nmi|{0} nmi|nautical miles|{0} nautical mile|{0} nautical miles",
+        "NSUnitLength.parsecs": "parsec|{0}pc|{0}pc|parsecs|{0} pc|{0} pc|parsecs|{0} parsec|{0} parsecs",
+        "NSUnitLength.picometers": "pm|{0}pm|{0}pm|pm|{0} pm|{0} pm|picometers|{0} picometer|{0} picometers",
+        "NSUnitLength.scandinavianMiles": "smi|{0}smi|{0}smi|smi|{0} smi|{0} smi|miles-scandinavian|{0} mile-scandinavian|{0} miles-scandinavian",
+        "NSUnitLength.yards": "yd|{0}yd|{0}yd|yards|{0} yd|{0} yd|yards|{0} yard|{0} yards",
+        "NSUnitAngle.arcMinutes": "arcmin|{0}′|{0}′|arcmins|{0} arcmin|{0} arcmins|arcminutes|{0} arcminute|{0} arcminutes",
+        "NSUnitAngle.arcSeconds": "arcsec|{0}″|{0}″|arcsecs|{0} arcsec|{0} arcsecs|arcseconds|{0} arcsecond|{0} arcseconds",
+        "NSUnitAngle.degrees": "deg|{0}°|{0}°|degrees|{0} deg|{0} deg|degrees|{0} degree|{0} degrees",
+        "NSUnitAngle.radians": "rad|{0}rad|{0}rad|radians|{0} rad|{0} rad|radians|{0} radian|{0} radians",
+        "NSUnitAngle.revolutions": "rev|{0}rev|{0}rev|rev|{0} rev|{0} rev|revolutions|{0} revolution|{0} revolutions",
+        "NSUnitTemperature.celsius": "°C|{0}°C|{0}°C|deg. C|{0}°C|{0}°C|degrees Celsius|{0} degree Celsius|{0} degrees Celsius",
+        "NSUnitTemperature.fahrenheit": "°F|{0}°|{0}°|deg. F|{0}°F|{0}°F|degrees Fahrenheit|{0} degree Fahrenheit|{0} degrees Fahrenheit",
+        "NSUnitTemperature.kelvin": "K|{0}K|{0}K|K|{0} K|{0} K|kelvins|{0} kelvin|{0} kelvins",
+        "NSUnitMass.carats": "carat|{0}CD|{0}CD|carats|{0} CD|{0} CD|carats|{0} carat|{0} carats",
+        "NSUnitMass.grams": "gram|{0}g|{0}g|grams|{0} g|{0} g|grams|{0} gram|{0} grams",
+        "NSUnitMass.kilograms": "kg|{0}kg|{0}kg|kg|{0} kg|{0} kg|kilograms|{0} kilogram|{0} kilograms",
+        "NSUnitMass.metricTons": "t|{0}t|{0}t|t|{0} t|{0} t|metric tons|{0} metric ton|{0} metric tons",
+        "NSUnitMass.micrograms": "μg|{0}μg|{0}μg|μg|{0} μg|{0} μg|micrograms|{0} microgram|{0} micrograms",
+        "NSUnitMass.milligrams": "mg|{0}mg|{0}mg|mg|{0} mg|{0} mg|milligrams|{0} milligram|{0} milligrams",
+        "NSUnitMass.ounces": "oz|{0}oz|{0}oz|oz|{0} oz|{0} oz|ounces|{0} ounce|{0} ounces",
+        "NSUnitMass.ouncesTroy": "oz t|{0}oz t|{0}oz t|oz troy|{0} oz t|{0} oz t|troy ounces|{0} troy ounce|{0} troy ounces",
+        "NSUnitMass.poundsMass": "lb|{0}#|{0}#|pounds|{0} lb|{0} lb|pounds|{0} pound|{0} pounds",
+        "NSUnitMass.shortTons": "ton|{0}tn|{0}tn|tons|{0} tn|{0} tn|tons|{0} ton|{0} tons",
+        "NSUnitMass.stones": "stone|{0}st|{0}st|stones|{0} st|{0} st|stones|{0} stone|{0} stones",
+        "NSUnitSpeed.kilometersPerHour": "km/hr|{0}km/h|{0}km/h|km/hour|{0} km/h|{0} km/h|kilometers per hour|{0} kilometer per hour|{0} kilometers per hour",
+        "NSUnitSpeed.knots": "kn|{0}kn|{0}kn|kn|{0} kn|{0} kn|knots|{0} knot|{0} knots",
+        "NSUnitSpeed.metersPerSecond": "m/s|{0}m/s|{0}m/s|meters/sec|{0} m/s|{0} m/s|meters per second|{0} meter per second|{0} meters per second",
+        "NSUnitSpeed.milesPerHour": "mi/hr|{0}mph|{0}mph|miles/hour|{0} mph|{0} mph|miles per hour|{0} mile per hour|{0} miles per hour",
+        "NSUnitDuration.hours": "hour|{0}h|{0}h|hours|{0} hr|{0} hr|hours|{0} hour|{0} hours",
+        "NSUnitDuration.microseconds": "μsec|{0}μs|{0}μs|μsecs|{0} μs|{0} μs|microseconds|{0} microsecond|{0} microseconds",
+        "NSUnitDuration.milliseconds": "msec|{0}ms|{0}ms|millisecs|{0} ms|{0} ms|milliseconds|{0} millisecond|{0} milliseconds",
+        "NSUnitDuration.minutes": "min|{0}m|{0}m|min|{0} min|{0} min|minutes|{0} minute|{0} minutes",
+        "NSUnitDuration.nanoseconds": "ns|{0}ns|{0}ns|nanosecs|{0} ns|{0} ns|nanoseconds|{0} nanosecond|{0} nanoseconds",
+        "NSUnitDuration.seconds": "sec|{0}s|{0}s|secs|{0} sec|{0} sec|seconds|{0} second|{0} seconds",
+        "NSUnitPower.gigawatts": "GW|{0}GW|{0}GW|GW|{0} GW|{0} GW|gigawatts|{0} gigawatt|{0} gigawatts",
+        "NSUnitPower.horsepower": "hp|{0}hp|{0}hp|hp|{0} hp|{0} hp|horsepower|{0} horsepower|{0} horsepower",
+        "NSUnitPower.kilowatts": "kW|{0}kW|{0}kW|kW|{0} kW|{0} kW|kilowatts|{0} kilowatt|{0} kilowatts",
+        "NSUnitPower.megawatts": "MW|{0}MW|{0}MW|MW|{0} MW|{0} MW|megawatts|{0} megawatt|{0} megawatts",
+        "NSUnitPower.milliwatts": "mW|{0}mW|{0}mW|mW|{0} mW|{0} mW|milliwatts|{0} milliwatt|{0} milliwatts",
+        "NSUnitPower.watts": "watt|{0}W|{0}W|watts|{0} W|{0} W|watts|{0} watt|{0} watts",
+        "NSUnitPressure.bars": "bar|{0}bar|{0}bar|bar|{0} bar|{0} bar|bars|{0} bar|{0} bars",
+        "NSUnitPressure.hectopascals": "hPa|{0}hPa|{0}hPa|hPa|{0} hPa|{0} hPa|hectopascals|{0} hectopascal|{0} hectopascals",
+        "NSUnitPressure.inchesOfMercury": "″ Hg|{0}″ Hg|{0}″ Hg|in Hg|{0} inHg|{0} inHg|inches of mercury|{0} inch of mercury|{0} inches of mercury",
+        "NSUnitPressure.kilopascals": "kPa|{0}kPa|{0}kPa|kPa|{0} kPa|{0} kPa|kilopascals|{0} kilopascal|{0} kilopascals",
+        "NSUnitPressure.megapascals": "MPa|{0}MPa|{0}MPa|MPa|{0} MPa|{0} MPa|megapascals|{0} megapascal|{0} megapascals",
+        "NSUnitPressure.millibars": "mbar|{0}mb|{0}mb|mbar|{0} mbar|{0} mbar|millibars|{0} millibar|{0} millibars",
+        "NSUnitPressure.millimetersOfMercury": "mm Hg|{0}mmHg|{0}mmHg|mm Hg|{0} mmHg|{0} mmHg|millimeters of mercury|{0} millimeter of mercury|{0} millimeters of mercury",
+        "NSUnitPressure.poundsForcePerSquareInch": "psi|{0}psi|{0}psi|psi|{0} psi|{0} psi|pounds-force per square inch|{0} pound-force per square inch|{0} pounds-force per square inch",
+        "NSUnitAcceleration.gravity": "g-force|{0}G|{0}Gs|g-force|{0} G|{0} G|g-force|{0} g-force|{0} g-force",
+        "NSUnitAcceleration.metersPerSecondSquared": "m/s²|{0}m/s²|{0}m/s²|meters/sec²|{0} m/s²|{0} m/s²|meters per second squared|{0} meter per second squared|{0} meters per second squared",
+        "NSUnitFrequency.gigahertz": "GHz|{0}GHz|{0}GHz|GHz|{0} GHz|{0} GHz|gigahertz|{0} gigahertz|{0} gigahertz",
+        "NSUnitFrequency.hertz": "Hz|{0}Hz|{0}Hz|Hz|{0} Hz|{0} Hz|hertz|{0} hertz|{0} hertz",
+        "NSUnitFrequency.kilohertz": "kHz|{0}kHz|{0}kHz|kHz|{0} kHz|{0} kHz|kilohertz|{0} kilohertz|{0} kilohertz",
+        "NSUnitFrequency.megahertz": "MHz|{0}MHz|{0}MHz|MHz|{0} MHz|{0} MHz|megahertz|{0} megahertz|{0} megahertz",
+        "NSUnitElectricPotentialDifference.volts": "volt|{0}V|{0}V|volts|{0} V|{0} V|volts|{0} volt|{0} volts",
+    ]
+
+    /// Units Darwin writes as another unit of their class, converted:
+    /// imperial cooking measures as US ones, milligrams per deciliter as
+    /// grams per liter.
+    static let writtenAsSelectors: [String: String] = [
+        "NSUnitVolume.imperialFluidOunces": "fluidOunces", "NSUnitVolume.imperialPints": "pints",
+        "NSUnitVolume.imperialQuarts": "quarts", "NSUnitVolume.imperialTablespoons": "tablespoons",
+        "NSUnitVolume.imperialTeaspoons": "teaspoons", "NSUnitConcentrationMass.milligramsPerDeciliter": "gramsPerLiter",
+    ]
+
+    nonisolated(unsafe) private static var parsed: [String: [String]] = [:]
+    private static let lock = UnitLock()
+
+    /// The nine writings of a unit its class's method made, if Darwin has
+    /// any.
+    static func writing(of unit: id) -> [String]? {
+        guard let key = Storage.get(unit, as: UnitStorage.self)?.tableKey, let row = table[key] else { return nil }
+        return lock.withLock {
+            if let found = parsed[key] { return found }
+            let fields = row.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 9 else { return nil }
+            parsed[key] = fields
+            return fields
+        }
+    }
+
+    /// The shared unit a unit is written as, by its table key.
+    static func writtenAs(_ key: String) -> id? {
+        guard let selector = writtenAsSelectors[key], let className = key.split(separator: ".").first.map(String.init),
+              let cls = UnitTables.classes[className] else { return nil }
+        return ObjC.send(UnsafeMutableRawPointer(cls), ObjC.selector(selector))
     }
 }
 
@@ -958,6 +1318,16 @@ public class NSLengthFormatter: NSFormatter {
         typealias Fn = @convention(c) (id, SEL) -> Double
         return string(fromMeters: unsafeBitCast(ObjC.msgSend, to: Fn.self)(value.objcObject, ObjC.selector("doubleValue")))
     }
+
+    /// Lengths aren't parsed, on Darwin either: NO, with no value and no
+    /// error.
+    @ObjCMethod("getObjectValue:forString:errorDescription:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                        errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        value?.pointee = nil
+        errorDescription?.pointee = nil
+        return false
+    }
 }
 
 // MARK: - NSDateComponentsFormatter
@@ -1074,9 +1444,11 @@ public class NSDateComponentsFormatter: NSFormatter {
         let behavior = state.zeroFormattingBehavior
         let positional = state.unitsStyle == 0
         var values = all
-        // Zero units: positional keeps its units unless told to drop them;
-        // the others drop them unless told to keep them.
-        let dropLeading = behavior & 1 != 0, dropMiddle = behavior & 2 != 0, dropTrailing = behavior & 4 != 0
+        // Zero units: positional keeps its units unless told to drop them,
+        // and by default drops the leading ones ("1:00:10"); the others
+        // drop them unless told to keep them.
+        let dropLeading = behavior & 1 != 0 || (positional && behavior == 0)
+        let dropMiddle = behavior & 2 != 0, dropTrailing = behavior & 4 != 0
         if positional {
             if dropLeading { while values.count > 2, values[0].count == 0 { values.removeFirst() } }
             if dropTrailing { while values.count > 1, values[values.count - 1].count == 0 { values.removeLast() } }
@@ -1106,6 +1478,15 @@ public class NSDateComponentsFormatter: NSFormatter {
             return values.map { "\($0.count)\(units[$0.unit].brief)" }.joined(separator: " ")
         case 2:
             return values.map { "\($0.count) \(units[$0.unit].short)" }.joined(separator: ", ")
+        case 4:
+            // Spelled out: "one hour, two minutes".
+            let speller = NumberFormatterStorage()
+            speller.locale = Locale(identifier: "en_US")
+            speller.setStyle(5)
+            return values.map { value -> String in
+                let count = speller.string(fromDouble: Double(value.count))
+                return "\(count) \(value.count == 1 ? units[value.unit].singular : units[value.unit].plural)"
+            }.joined(separator: ", ")
         default:
             return values.map { "\($0.count) \($0.count == 1 ? units[$0.unit].singular : units[$0.unit].plural)" }.joined(separator: ", ")
         }
@@ -1138,6 +1519,27 @@ public class NSDateComponentsFormatter: NSFormatter {
     func string(fromDate start: ObjCObject?, toDate end: ObjCObject?) -> String? {
         guard let start, let end else { return nil }
         return string(fromTimeInterval: Dates.date(end.objcObject).timeIntervalSince(Dates.date(start.objcObject)))
+    }
+
+    /// A formatter with the style, writing the components.
+    @ObjCClassMethod("localizedStringFromDateComponents:unitsStyle:")
+    static func localizedString(_ cls: ObjCClass, from components: ObjCObject?, unitsStyle: Int) -> String? {
+        guard let components,
+              let formatter = ObjC.send(ObjC.send(UnsafeMutableRawPointer(cls.storage), ObjC.selector("alloc")), ObjC.selector("init")) else { return nil }
+        defer { ObjC.release(formatter) }
+        typealias SetStyle = @convention(c) (id, SEL, Int) -> Void
+        unsafeBitCast(ObjC.msgSend, to: SetStyle.self)(formatter, ObjC.selector("setUnitsStyle:"), unitsStyle)
+        return Strings.value(of: ObjC.send(formatter, ObjC.selector("stringFromDateComponents:"), components.objcObject))
+    }
+
+    /// Durations aren't parsed, on Darwin either: NO, with no value and no
+    /// error.
+    @ObjCMethod("getObjectValue:forString:errorDescription:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                        errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        value?.pointee = nil
+        errorDescription?.pointee = nil
+        return false
     }
 
     @ObjCMethod("stringForObjectValue:")
