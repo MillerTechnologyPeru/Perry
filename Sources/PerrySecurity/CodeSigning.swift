@@ -69,6 +69,15 @@ public func SecRequirementCreateWithData(_ data: UnsafeMutableRawPointer?, _ fla
     return give(SecRequirementObject.objCClass, out)
 }
 
+/// The code's designated requirement, which Sparkle reads to check that an
+/// update is signed as the running app is; this code meets any requirement.
+@c(_SecCodeCopyDesignatedRequirement)
+public func SecCodeCopyDesignatedRequirement(_ code: UnsafeMutableRawPointer?, _ flags: UInt32,
+                                             _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard code != nil else { return errSecParam }
+    return give(SecRequirementObject.objCClass, out)
+}
+
 @c(_SecCodeCheckValidity)
 public func SecCodeCheckValidity(_ code: UnsafeMutableRawPointer?, _ flags: UInt32, _ requirement: UnsafeMutableRawPointer?) -> Int32 {
     code == nil ? errSecParam : errSecSuccess
