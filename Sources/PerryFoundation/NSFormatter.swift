@@ -53,6 +53,19 @@ final class DateFormatterStorage {
     /// keeps, alive as long as the formatter.
     let held = HeldObjects()
     private var cached: (key: String, handle: DateHandle)?
+    /// Held while the settings change and while the cached ICU formatter is
+    /// in use: Darwin's date formatters are thread-safe (since iOS 7), and
+    /// apps share one across threads, which closed a handle twice or while
+    /// another thread formatted with it.
+    let lock = NSRecursiveLockStorage()
+
+    /// Changes the settings, and drops the formatter made from the old ones.
+    func update(_ body: (DateFormatterStorage) -> Void) {
+        lock.locked {
+            body(self)
+            changed()
+        }
+    }
 
     deinit {
         if let cached { swift_udat_close(cached.handle) }
@@ -101,12 +114,14 @@ final class DateFormatterStorage {
 
     /// The pattern: the format set, or the styles' pattern for the locale.
     var pattern: String {
-        if let format { return format }
-        guard dateStyle != 0 || timeStyle != 0,
-              let handle = Self.open(time: Self.icuStyle(timeStyle), date: Self.icuStyle(dateStyle), locale: localeID,
-                                     zone: effectiveTimeZone.identifier, pattern: nil) else { return "" }
-        defer { swift_udat_close(handle) }
-        return ICU.string { swift_udat_toPattern(handle, 0, $0, $1, $2) } ?? ""
+        lock.locked {
+            if let format { return format }
+            guard dateStyle != 0 || timeStyle != 0,
+                  let handle = Self.open(time: Self.icuStyle(timeStyle), date: Self.icuStyle(dateStyle), locale: localeID,
+                                         zone: effectiveTimeZone.identifier, pattern: nil) else { return "" }
+            defer { swift_udat_close(handle) }
+            return ICU.string { swift_udat_toPattern(handle, 0, $0, $1, $2) } ?? ""
+        }
     }
 
     var handle: DateHandle? {
@@ -126,20 +141,24 @@ final class DateFormatterStorage {
     }
 
     func string(from date: Date) -> String {
-        guard !pattern.isEmpty, let handle else { return "" }
-        let milliseconds = date.timeIntervalSince1970 * 1000
-        return ICU.string { swift_udat_format(handle, milliseconds, $0, $1, nil, $2) } ?? ""
+        lock.locked {
+            guard !pattern.isEmpty, let handle else { return "" }
+            let milliseconds = date.timeIntervalSince1970 * 1000
+            return ICU.string { swift_udat_format(handle, milliseconds, $0, $1, nil, $2) } ?? ""
+        }
     }
 
     /// The date, when the whole string parses.
     func date(from string: String) -> Date? {
-        guard let handle else { return nil }
-        return ICU.withUChars(string) { chars, length in
-            var position: Int32 = 0
-            var status = U_ZERO_ERROR
-            let milliseconds = swift_udat_parse(handle, chars, length, &position, &status)
-            guard !ICU.failed(status), position == length else { return nil }
-            return Date(timeIntervalSince1970: milliseconds / 1000)
+        lock.locked {
+            guard let handle else { return nil }
+            return ICU.withUChars(string) { chars, length in
+                var position: Int32 = 0
+                var status = U_ZERO_ERROR
+                let milliseconds = swift_udat_parse(handle, chars, length, &position, &status)
+                guard !ICU.failed(status), position == length else { return nil }
+                return Date(timeIntervalSince1970: milliseconds / 1000)
+            }
         }
     }
 
@@ -222,8 +241,7 @@ public final class NSDateFormatter: NSFormatter {
 
     @ObjCMethod("setDateFormat:")
     func setDateFormat(_ format: String?) {
-        storage.format = format
-        storage.changed()
+        storage.update { $0.format = format }
     }
 
     @ObjCMethod("dateStyle") func dateStyle() -> UInt { UInt(storage.dateStyle) }
@@ -231,34 +249,28 @@ public final class NSDateFormatter: NSFormatter {
     /// Setting a style replaces the format, as on Darwin.
     @ObjCMethod("setDateStyle:")
     func setDateStyle(_ style: UInt) {
-        storage.dateStyle = Int(style)
-        storage.format = nil
-        storage.changed()
+        storage.update { $0.dateStyle = Int(style); $0.format = nil }
     }
 
     @ObjCMethod("timeStyle") func timeStyle() -> UInt { UInt(storage.timeStyle) }
 
     @ObjCMethod("setTimeStyle:")
     func setTimeStyle(_ style: UInt) {
-        storage.timeStyle = Int(style)
-        storage.format = nil
-        storage.changed()
+        storage.update { $0.timeStyle = Int(style); $0.format = nil }
     }
 
     @ObjCMethod("locale") func locale() -> UnsafeMutableRawPointer { Locales.autoreleased(storage.effectiveLocale) }
 
     @ObjCMethod("setLocale:")
     func setLocale(_ locale: ObjCObject?) {
-        storage.locale = locale.map { Locales.locale($0.id) }
-        storage.changed()
+        storage.update { storage in storage.locale = locale.map { Locales.locale($0.id) } }
     }
 
     @ObjCMethod("timeZone") func timeZone() -> UnsafeMutableRawPointer { TimeZones.autoreleased(storage.effectiveTimeZone) }
 
     @ObjCMethod("setTimeZone:")
     func setTimeZone(_ zone: ObjCObject?) {
-        storage.timeZone = TimeZones.zone(zone?.id)
-        storage.changed()
+        storage.update { $0.timeZone = TimeZones.zone(zone?.id) }
     }
 
     @ObjCMethod("calendar")
@@ -271,22 +283,19 @@ public final class NSDateFormatter: NSFormatter {
 
     @ObjCMethod("setCalendar:")
     func setCalendar(_ calendar: ObjCObject?) {
-        storage.calendar = Calendars.calendar(calendar?.id)
-        storage.changed()
+        storage.update { $0.calendar = Calendars.calendar(calendar?.id) }
     }
 
     @ObjCMethod("isLenient") func isLenient() -> Bool { storage.lenient }
 
     @ObjCMethod("setLenient:")
     func setLenient(_ lenient: Bool) {
-        storage.lenient = lenient
-        storage.changed()
+        storage.update { $0.lenient = lenient }
     }
 
     @ObjCMethod("setLocalizedDateFormatFromTemplate:")
     func setLocalizedDateFormat(fromTemplate template: String) {
-        storage.format = DateFormatterStorage.pattern(fromTemplate: template, locale: storage.localeID)
-        storage.changed()
+        storage.update { $0.format = DateFormatterStorage.pattern(fromTemplate: template, locale: storage.localeID) }
     }
 
     @ObjCClassMethod("dateFormatFromTemplate:options:locale:")
