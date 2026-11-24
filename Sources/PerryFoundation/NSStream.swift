@@ -36,7 +36,7 @@ final class StreamStorage {
         case callbacks(CallbackStream)                  // CFReadStreamCreate's and CFWriteStreamCreate's (CFStreamMore.swift)
     }
 
-    let source: Source
+    var source: Source
     var status = StreamStatus.notOpen
     var error: id?
     /// The delegate, not retained; nil is the stream itself.
@@ -371,8 +371,18 @@ enum Streams {
         return true
     }
 
-    /// A property: the bytes written to memory, a file's offset, or one
-    /// that was set.
+    /// Whether a stream keeps the properties it's given: Darwin's data,
+    /// file, memory and buffer streams have only their own (the offset,
+    /// the bytes written), and refuse others.
+    private static func keepsProperties(_ source: StreamStorage.Source) -> Bool {
+        switch source {
+        case .data, .file, .fileOutput, .memory, .buffer: return false
+        default: return true
+        }
+    }
+
+    /// A property: the bytes written to memory, an open file's offset, or
+    /// one that was set.
     static func property(_ object: id, _ key: id?) -> id? {
         guard let name = Strings.value(of: key) else { return nil }
         let storage = storage(object)
@@ -382,10 +392,8 @@ enum Streams {
         case "kCFStreamPropertyFileCurrentOffset":
             switch storage.source {
             case .file, .fileOutput:
-                let offset = storage.descriptor >= 0 ? lseek(storage.descriptor, 0, SEEK_CUR) : 0
-                return Numbers.make(nil, .signed(Int64(offset)))
-            case .data:
-                return Numbers.make(nil, .signed(Int64(storage.offset)))
+                guard storage.descriptor >= 0 else { return nil }
+                return Numbers.make(nil, .signed(Int64(lseek(storage.descriptor, 0, SEEK_CUR))))
             default:
                 break
             }
@@ -403,7 +411,10 @@ enum Streams {
         return storage.properties[name]
     }
 
-    /// Sets a property; a file's offset seeks.
+    /// Sets a property: a file's offset seeks, and before a file's output
+    /// stream opens kCFStreamPropertyAppendToFile says whether it appends.
+    /// Data, file, memory and buffer streams refuse other properties, as
+    /// Darwin's do.
     static func setProperty(_ object: id, _ value: id?, _ key: id?) -> Bool {
         guard let name = Strings.value(of: key) else { return false }
         let storage = storage(object)
@@ -414,15 +425,16 @@ enum Streams {
             switch storage.source {
             case .file, .fileOutput:
                 return storage.descriptor >= 0 && lseek(storage.descriptor, off_t(offset), SEEK_SET) >= 0
-            case .data(let data):
-                guard offset >= 0, offset <= data.count else { return false }
-                storage.offset = Int(offset)
-                if storage.status == StreamStatus.atEnd, storage.offset < data.count { storage.status = StreamStatus.open }
-                return true
             default:
                 return false
             }
         }
+        if name == "kCFStreamPropertyAppendToFile", case .fileOutput(let path, _) = storage.source {
+            guard storage.status == StreamStatus.notOpen, let value else { return false }
+            storage.source = .fileOutput(path, append: ObjC.sendBool(value, ObjC.selector("boolValue"), nil))
+            return true
+        }
+        guard keepsProperties(storage.source) else { return false }
         switch storage.source {
         case .socketInput(let socket), .socketOutput(let socket): socket.setProperty(name, value)
         default: break
@@ -697,8 +709,8 @@ public func CFReadStreamCreateWithFile(_ allocator: UnsafeRawPointer?, _ url: id
     fileStream(url, fallback: Streams.inputClass) { .file($0) }
 }
 
-/// The file is replaced when the stream opens, as kCFStreamPropertyAppendToFile
-/// is not kept.
+/// The file is replaced when the stream opens, unless
+/// kCFStreamPropertyAppendToFile is set first.
 @c(_CFWriteStreamCreateWithFile)
 public func CFWriteStreamCreateWithFile(_ allocator: UnsafeRawPointer?, _ url: id?) -> id? {
     fileStream(url, fallback: Streams.outputClass) { .fileOutput($0, append: false) }
