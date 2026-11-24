@@ -2,9 +2,10 @@
 #define CPERRY_IMAGEIO_H
 
 // ImageIO's codecs over Linux's libpng, libjpeg-turbo, giflib, libwebp,
-// libheif and libtiff. Images cross as straight (not premultiplied) RGBA, 8 bits per
-// component, rows packed; buffers the codecs return are malloc'd and the
-// caller frees them with free().
+// libheif and libtiff, and its own readers of BMP and ICO. Images cross as
+// straight (not premultiplied) RGBA, 8 bits per component, rows packed;
+// buffers the codecs return are malloc'd and the caller frees them with
+// free().
 
 #include <stddef.h>
 #include <stdint.h>
@@ -41,6 +42,10 @@ int perry_heif_decode(const uint8_t *data, size_t size, perry_decoded *out);
 int perry_tiff_decode(const uint8_t *data, size_t size, perry_decoded *out);
 /// A PDF's first page, rendered at 144 dpi; Poppler is loaded when first needed.
 int perry_pdf_decode(const uint8_t *data, size_t size, perry_decoded *out);
+/// A Windows bitmap (BMP) file.
+int perry_bmp_decode(const uint8_t *data, size_t size, perry_decoded *out);
+/// A Windows icon or cursor (ICO, CUR): one frame for each image in it.
+int perry_ico_decode(const uint8_t *data, size_t size, perry_decoded *out);
 void perry_decoded_free(perry_decoded *decoded);
 
 int perry_png_encode(const uint8_t *rgba, int width, int height, int has_alpha, uint8_t **out, size_t *out_size);
