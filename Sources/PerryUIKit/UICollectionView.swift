@@ -1232,8 +1232,21 @@ open class UICollectionView: UIScrollView {
     private func asks(_ delegate: NSObject?, _ selector: String) -> Bool { delegate?.responds(to: selector) ?? false }
 
     /// Selects or deselects an item as a tap does, asking and telling the
-    /// delegate.
+    /// delegate, then performs the item's primary action (iOS 16) if the
+    /// delegate has one and allows it, outside editing: on every tap, an
+    /// item already selected included.
     func tapItem(_ path: RowPath) {
+        selectTapped(path)
+        let delegate = delegate(), indexPath = path.object
+        guard !collection.editing, asks(delegate, "collectionView:performPrimaryActionForItemAtIndexPath:") else { return }
+        if asks(delegate, "collectionView:canPerformPrimaryActionForItemAtIndexPath:"),
+           !delegate!.sendCollectionView(self, canPerformPrimaryActionForItemAt: indexPath) {
+            return
+        }
+        delegate!.sendCollectionView(self, performPrimaryActionForItemAt: indexPath)
+    }
+
+    private func selectTapped(_ path: RowPath) {
         let editing = collection.editing
         guard editing ? collection.allowsSelectionDuringEditing || collection.allowsSelection : collection.allowsSelection else { return }
         let delegate = delegate(), indexPath = path.object
@@ -1247,6 +1260,8 @@ open class UICollectionView: UIScrollView {
             if asks(delegate, "collectionView:didDeselectItemAtIndexPath:") { delegate!.sendCollectionView(self, didDeselectItemAt: indexPath) }
             return
         }
+        // An item already selected stays so, and isn't selected again.
+        if !multiple, collection.selected.contains(path) { return }
         if asks(delegate, "collectionView:shouldSelectItemAtIndexPath:"), !delegate!.sendCollectionView(self, shouldSelectItemAt: indexPath) {
             return
         }
@@ -1342,6 +1357,10 @@ extension NSObject {
     func sendCollectionView(_ collection: UICollectionView, didSelectItemAt path: NSObject)
     @ObjCMethod("collectionView:didDeselectItemAtIndexPath:")
     func sendCollectionView(_ collection: UICollectionView, didDeselectItemAt path: NSObject)
+    @ObjCMethod("collectionView:canPerformPrimaryActionForItemAtIndexPath:")
+    func sendCollectionView(_ collection: UICollectionView, canPerformPrimaryActionForItemAt path: NSObject) -> Bool
+    @ObjCMethod("collectionView:performPrimaryActionForItemAtIndexPath:")
+    func sendCollectionView(_ collection: UICollectionView, performPrimaryActionForItemAt path: NSObject)
     @ObjCMethod("collectionView:layout:sizeForItemAtIndexPath:")
     func sendCollectionView(_ collection: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt path: NSObject) -> CGSize
     @ObjCMethod("collectionView:layout:insetForSectionAtIndex:")
