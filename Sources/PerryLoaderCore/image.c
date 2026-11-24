@@ -1006,6 +1006,13 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
             "/usr/lib/swift/libswift_DarwinFoundation3.dylib",
             "/usr/lib/swift/libswift_Builtin_float.dylib",
         };
+        // XCTest's Swift API, which test bundles built with a current Xcode
+        // link as @rpath/libXCTestSwiftSupport.dylib, is the XCTest overlay's.
+        const char *leaf = strrchr(name, '/');
+        if (leaf && strcmp(leaf, "/libXCTestSwiftSupport.dylib") == 0) {
+            perry_trace(PERRY_TRACE_LOAD, "%s -> /usr/lib/swift/libswiftXCTest.dylib", name);
+            name = "/usr/lib/swift/libswiftXCTest.dylib";
+        }
         for (size_t part = 0; part < sizeof(darwin_parts) / sizeof(darwin_parts[0]); part++)
             if (strcmp(name, darwin_parts[part]) == 0 && !swift_runtime_file(loader, name, swift_path, sizeof(swift_path))) {
                 name = "/usr/lib/swift/libswiftDarwin.dylib";
@@ -1038,6 +1045,27 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
                 if (name[0] == '/')
                     dep->provider = perry_find_provider(loader, name);
                 continue;
+            }
+        }
+
+        // A framework that is only Swift (CreateML), which newer SDKs link by
+        // the framework's path and older ones as /usr/lib/swift/libswift<Name>:
+        // without a provider or a framework built for Perry, it is that
+        // overlay of the runtime given.
+        if (loader->swift_runtime_dir && strncmp(name, frameworks, strlen(frameworks)) == 0
+            && !perry_find_provider(loader, name)) {
+            const char *start = name + strlen(frameworks);
+            const char *dot = strstr(start, ".framework/");
+            char overlay[PATH_MAX];
+            if (dot) {
+                snprintf(overlay, sizeof(overlay), "%s/libswift%.*s.dylib", loader->swift_runtime_dir, (int)(dot - start), start);
+                if (file_exists(overlay)) {
+                    perry_trace(PERRY_TRACE_LOAD, "%s -> %s", name, overlay);
+                    dep->image = find_loaded(loader, overlay);
+                    if (!dep->image)
+                        dep->image = load_image(loader, overlay);
+                    continue;
+                }
             }
         }
 
