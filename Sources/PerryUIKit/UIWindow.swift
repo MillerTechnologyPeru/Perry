@@ -165,6 +165,33 @@ open class UIWindow: UIView {
     @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
     @ObjCMethod("setScreen:") func setScreen(_ screen: UIScreen?) {}
 
+    // Window coordinates: a window's own space is its bounds; the screen's
+    // is shifted by the window's frame origin. A nil window is the screen.
+
+    private var screenOrigin: CGPoint { UIView.state(of: objcObject).frame.origin }
+
+    @ObjCMethod("convertPoint:toWindow:")
+    func convert(_ point: CGPoint, toWindow window: UIWindow?) -> CGPoint {
+        let origin = screenOrigin, target = window?.screenOrigin ?? .zero
+        return CGPoint(x: point.x + origin.x - target.x, y: point.y + origin.y - target.y)
+    }
+
+    @ObjCMethod("convertPoint:fromWindow:")
+    func convert(_ point: CGPoint, fromWindow window: UIWindow?) -> CGPoint {
+        let origin = screenOrigin, source = window?.screenOrigin ?? .zero
+        return CGPoint(x: point.x + source.x - origin.x, y: point.y + source.y - origin.y)
+    }
+
+    @ObjCMethod("convertRect:toWindow:")
+    func convert(_ rect: CGRect, toWindow window: UIWindow?) -> CGRect {
+        CGRect(origin: convert(rect.origin, toWindow: window), size: rect.size)
+    }
+
+    @ObjCMethod("convertRect:fromWindow:")
+    func convert(_ rect: CGRect, fromWindow window: UIWindow?) -> CGRect {
+        CGRect(origin: convert(rect.origin, fromWindow: window), size: rect.size)
+    }
+
     @ObjCMethod("makeKeyAndVisible")
     func makeKeyAndVisible() {
         sendSetHidden(false)
