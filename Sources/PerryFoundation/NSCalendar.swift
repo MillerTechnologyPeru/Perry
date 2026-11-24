@@ -16,12 +16,24 @@ enum CalendarIdentifiers {
         ("islamic-umalqura", .islamicUmmAlQura),
     ]
 
+    /// Calendars Darwin added later (iOS 26's Indian regional calendars,
+    /// Dangi, Vietnamese), named by value: another file exports their
+    /// NSCalendarIdentifier constants.
+    static let newer: Set<String> = [
+        "bangla", "dangi", "gujarati", "kannada", "malayalam", "marathi", "odia", "tamil", "telugu", "vietnamese", "vikram",
+    ]
+
     static func identifier(_ name: String) -> Calendar.Identifier? {
-        table.first { $0.0 == name }?.1
+        if let known = table.first(where: { $0.0 == name })?.1 { return known }
+        // One of the newer calendars, when this system's Foundation and ICU
+        // know it: a locale asking for it then has it; nil otherwise.
+        guard newer.contains(name) else { return nil }
+        let found = Locale(identifier: "en_US@calendar=" + name).calendar.identifier
+        return found == .gregorian ? nil : found
     }
 
     static func name(_ identifier: Calendar.Identifier) -> String {
-        table.first { $0.1 == identifier }?.0 ?? "gregorian"
+        table.first { $0.1 == identifier }?.0 ?? identifier.debugDescription
     }
 }
 
@@ -85,6 +97,10 @@ enum CalendarUnits {
     static func component(_ unit: UInt) -> Calendar.Component? {
         table.first { $0.0 == unit }?.1
     }
+
+    /// NSWeekCalendarUnit, the deprecated week: the week of the year, kept
+    /// apart in date components as Darwin keeps it.
+    static let week: UInt = 1 << 8
 }
 
 /// A calendar, which NSCalendar's setters change in place.
@@ -120,6 +136,19 @@ enum Calendars {
 
     /// NSCalendarOptions' matching and wrapping bits.
     static func wraps(_ options: UInt) -> Bool { options & (1 << 0) != 0 }
+
+    /// NSCalendarOptions for searches: NSCalendarMatchStrictly (1 << 1),
+    /// NSCalendarSearchBackwards (1 << 2), the previous or next time
+    /// preserving smaller units (1 << 8, 1 << 9), the next time (1 << 10,
+    /// the default here where Darwin requires one) and the first or last
+    /// of repeated times (1 << 12, 1 << 13).
+    static func search(_ options: UInt) -> (policy: Calendar.MatchingPolicy, repeated: Calendar.RepeatedTimePolicy,
+                                           direction: Calendar.SearchDirection) {
+        let policy: Calendar.MatchingPolicy = options & (1 << 1) != 0 ? .strict
+            : options & (1 << 8) != 0 ? .previousTimePreservingSmallerComponents
+            : options & (1 << 9) != 0 ? .nextTimePreservingSmallerComponents : .nextTime
+        return (policy, options & (1 << 13) != 0 ? .last : .first, options & (1 << 2) != 0 ? .backward : .forward)
+    }
 }
 
 /// NSCalendar.
@@ -197,14 +226,29 @@ public final class NSCalendar: NSObject {
     func standaloneWeekdaySymbols() -> ObjCObject { Locales.strings(calendar.standaloneWeekdaySymbols) }
     @ObjCMethod("quarterSymbols") func quarterSymbols() -> ObjCObject { Locales.strings(calendar.quarterSymbols) }
     @ObjCMethod("shortQuarterSymbols") func shortQuarterSymbols() -> ObjCObject { Locales.strings(calendar.shortQuarterSymbols) }
+    @ObjCMethod("standaloneQuarterSymbols")
+    func standaloneQuarterSymbols() -> ObjCObject { Locales.strings(calendar.standaloneQuarterSymbols) }
+    @ObjCMethod("shortStandaloneQuarterSymbols")
+    func shortStandaloneQuarterSymbols() -> ObjCObject { Locales.strings(calendar.shortStandaloneQuarterSymbols) }
+    @ObjCMethod("shortStandaloneWeekdaySymbols")
+    func shortStandaloneWeekdaySymbols() -> ObjCObject { Locales.strings(calendar.shortStandaloneWeekdaySymbols) }
+    @ObjCMethod("veryShortStandaloneWeekdaySymbols")
+    func veryShortStandaloneWeekdaySymbols() -> ObjCObject { Locales.strings(calendar.veryShortStandaloneWeekdaySymbols) }
+    @ObjCMethod("veryShortStandaloneMonthSymbols")
+    func veryShortStandaloneMonthSymbols() -> ObjCObject { Locales.strings(calendar.veryShortStandaloneMonthSymbols) }
     @ObjCMethod("AMSymbol") func amSymbol() -> String { calendar.amSymbol }
     @ObjCMethod("PMSymbol") func pmSymbol() -> String { calendar.pmSymbol }
 
     // MARK: Components
 
+    /// NSWeekCalendarUnit gives the week of the year as the deprecated week.
     @ObjCMethod("components:fromDate:")
     func components(_ units: UInt, from date: NSDate) -> UnsafeMutableRawPointer {
-        DateComponentsBox.autoreleased(calendar.dateComponents(CalendarUnits.components(units), from: date.date))
+        let object = DateComponentsBox.autoreleased(calendar.dateComponents(CalendarUnits.components(units), from: date.date))
+        if units & CalendarUnits.week != 0 {
+            DateComponentsBox.box(object).week = calendar.component(.weekOfYear, from: date.date)
+        }
+        return object
     }
 
     @ObjCMethod("componentsInTimeZone:fromDate:")
@@ -226,7 +270,40 @@ public final class NSCalendar: NSObject {
 
     @ObjCMethod("component:fromDate:")
     func component(_ unit: UInt, from date: NSDate) -> Int {
-        CalendarUnits.component(unit).map { calendar.component($0, from: date.date) } ?? Int.max
+        if unit == CalendarUnits.week { return calendar.component(.weekOfYear, from: date.date) }
+        return CalendarUnits.component(unit).map { calendar.component($0, from: date.date) } ?? Int.max
+    }
+
+    /// Each pointer given gets its component; one Foundation can't compute
+    /// is left as it is.
+    @ObjCMethod("getEra:year:month:day:fromDate:")
+    func get(era: UnsafeMutablePointer<Int>?, year: UnsafeMutablePointer<Int>?, month: UnsafeMutablePointer<Int>?,
+             day: UnsafeMutablePointer<Int>?, from date: NSDate) {
+        let parts = calendar.dateComponents([.era, .year, .month, .day], from: date.date)
+        if let value = parts.era { era?.pointee = value }
+        if let value = parts.year { year?.pointee = value }
+        if let value = parts.month { month?.pointee = value }
+        if let value = parts.day { day?.pointee = value }
+    }
+
+    @ObjCMethod("getEra:yearForWeekOfYear:weekOfYear:weekday:fromDate:")
+    func get(era: UnsafeMutablePointer<Int>?, yearForWeekOfYear: UnsafeMutablePointer<Int>?, weekOfYear: UnsafeMutablePointer<Int>?,
+             weekday: UnsafeMutablePointer<Int>?, from date: NSDate) {
+        let parts = calendar.dateComponents([.era, .yearForWeekOfYear, .weekOfYear, .weekday], from: date.date)
+        if let value = parts.era { era?.pointee = value }
+        if let value = parts.yearForWeekOfYear { yearForWeekOfYear?.pointee = value }
+        if let value = parts.weekOfYear { weekOfYear?.pointee = value }
+        if let value = parts.weekday { weekday?.pointee = value }
+    }
+
+    @ObjCMethod("getHour:minute:second:nanosecond:fromDate:")
+    func get(hour: UnsafeMutablePointer<Int>?, minute: UnsafeMutablePointer<Int>?, second: UnsafeMutablePointer<Int>?,
+             nanosecond: UnsafeMutablePointer<Int>?, from date: NSDate) {
+        let parts = calendar.dateComponents([.hour, .minute, .second, .nanosecond], from: date.date)
+        if let value = parts.hour { hour?.pointee = value }
+        if let value = parts.minute { minute?.pointee = value }
+        if let value = parts.second { second?.pointee = value }
+        if let value = parts.nanosecond { nanosecond?.pointee = value }
     }
 
     @ObjCMethod("dateFromComponents:")
@@ -263,6 +340,15 @@ public final class NSCalendar: NSObject {
               nanosecond: Int) -> UnsafeMutableRawPointer? {
         let components = DateComponents(era: era, year: year, month: month, day: day, hour: hour, minute: minute,
                                         second: second, nanosecond: nanosecond)
+        return calendar.date(from: components).flatMap { Dates.autoreleased($0) }
+    }
+
+    @ObjCMethod("dateWithEra:yearForWeekOfYear:weekOfYear:weekday:hour:minute:second:nanosecond:")
+    func date(era: Int, yearForWeekOfYear: Int, weekOfYear: Int, weekday: Int, hour: Int, minute: Int, second: Int,
+              nanosecond: Int) -> UnsafeMutableRawPointer? {
+        var components = DateComponents(era: era, hour: hour, minute: minute, second: second, nanosecond: nanosecond,
+                                        weekday: weekday, weekOfYear: weekOfYear)
+        components.yearForWeekOfYear = yearForWeekOfYear
         return calendar.date(from: components).flatMap { Dates.autoreleased($0) }
     }
 
@@ -337,12 +423,75 @@ public final class NSCalendar: NSObject {
 
     @ObjCMethod("nextDateAfterDate:matchingComponents:options:")
     func nextDate(after date: NSDate, matching components: ObjCObject, options: UInt) -> UnsafeMutableRawPointer? {
-        let direction: Calendar.SearchDirection = options & (1 << 2) != 0 ? .backward : .forward
-        let policy: Calendar.MatchingPolicy = options & (1 << 9) != 0 ? .strict
-            : options & (1 << 12) != 0 ? .previousTimePreservingSmallerComponents
-            : options & (1 << 13) != 0 ? .nextTimePreservingSmallerComponents : .nextTime
-        return calendar.nextDate(after: date.date, matching: DateComponentsBox.value(components.id),
-                                 matchingPolicy: policy, direction: direction).flatMap { Dates.autoreleased($0) }
+        nextDate(after: date.date, matching: DateComponentsBox.value(components.id), options: options)
+    }
+
+    private func nextDate(after date: Date, matching components: DateComponents, options: UInt) -> UnsafeMutableRawPointer? {
+        let search = Calendars.search(options)
+        return calendar.nextDate(after: date, matching: components, matchingPolicy: search.policy,
+                                 repeatedTimePolicy: search.repeated, direction: search.direction).flatMap { Dates.autoreleased($0) }
+    }
+
+    @ObjCMethod("nextDateAfterDate:matchingUnit:value:options:")
+    func nextDate(after date: NSDate, matchingUnit unit: UInt, value: Int, options: UInt) -> UnsafeMutableRawPointer? {
+        guard let component = CalendarUnits.component(unit) else { return nil }
+        var components = DateComponents()
+        components.setValue(value, for: component)
+        return nextDate(after: date.date, matching: components, options: options)
+    }
+
+    @ObjCMethod("nextDateAfterDate:matchingHour:minute:second:options:")
+    func nextDate(after date: NSDate, matchingHour hour: Int, minute: Int, second: Int, options: UInt) -> UnsafeMutableRawPointer? {
+        // A component given as NSDateComponentUndefined is not matched.
+        func given(_ value: Int) -> Int? { value == dateComponentUndefined ? nil : value }
+        let components = DateComponents(hour: given(hour), minute: given(minute), second: given(second))
+        return nextDate(after: date.date, matching: components, options: options)
+    }
+
+    /// Calls the block with each date matching the components after the
+    /// date, whether it matched exactly, and a stop flag; a strict search
+    /// that finds nothing gives nil once and ends.
+    @ObjCMethod("enumerateDatesStartingAfterDate:matchingComponents:options:usingBlock:")
+    func enumerateDates(after date: NSDate, matching components: ObjCObject, options: UInt, using block: ObjCObject) {
+        typealias Invoke = @convention(c) (id, id?, Bool, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let search = Calendars.search(options)
+        calendar.enumerateDates(startingAfter: date.date, matching: DateComponentsBox.value(components.id),
+                                matchingPolicy: search.policy, repeatedTimePolicy: search.repeated,
+                                direction: search.direction) { found, exact, stop in
+            var stopped = false
+            ObjC.autoreleasepool { invoke(block.id, found.flatMap { Dates.autoreleased($0) }, exact, &stopped) }
+            if stopped { stop = true }
+        }
+    }
+
+    @ObjCMethod("date:matchesComponents:")
+    func date(_ date: NSDate, matchesComponents components: ObjCObject) -> Bool {
+        calendar.date(date.date, matchesComponents: DateComponentsBox.value(components.id))
+    }
+
+    /// The weekend containing the date: its start and length. NO for a date
+    /// on a weekday.
+    @ObjCMethod("rangeOfWeekendStartDate:interval:containingDate:")
+    func rangeOfWeekend(start: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, interval: UnsafeMutablePointer<Double>?,
+                        containing date: NSDate) -> Bool {
+        guard let weekend = calendar.dateIntervalOfWeekend(containing: date.date) else { return false }
+        start?.pointee = Dates.autoreleased(weekend.start)
+        interval?.pointee = weekend.duration
+        return true
+    }
+
+    /// The next weekend after the date, or with NSCalendarSearchBackwards
+    /// the one before it.
+    @ObjCMethod("nextWeekendStartDate:interval:options:afterDate:")
+    func nextWeekend(start: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, interval: UnsafeMutablePointer<Double>?,
+                     options: UInt, after date: NSDate) -> Bool {
+        guard let weekend = calendar.nextWeekend(startingAfter: date.date, direction: Calendars.search(options).direction) else {
+            return false
+        }
+        start?.pointee = Dates.autoreleased(weekend.start)
+        interval?.pointee = weekend.duration
+        return true
     }
 
     @ObjCMethod("isEqual:")
@@ -364,6 +513,11 @@ let dateComponentUndefined = Int.max
 
 final class DateComponentsBox {
     var components = DateComponents()
+    /// The deprecated week (NSWeekCalendarUnit), which DateComponents lacks.
+    var week: Int?
+    /// iOS 26's repeatedDay: whether the day is a repeated one (some
+    /// lunisolar calendars have them).
+    var repeatedDay = false
 
     nonisolated(unsafe) static var componentsClass: Class!
 
@@ -448,6 +602,12 @@ public final class NSDateComponents: NSObject {
 
     @ObjCMethod("isLeapMonth") func isLeapMonth() -> Bool { box.components.isLeapMonth ?? false }
     @ObjCMethod("setLeapMonth:") func setLeapMonth(_ value: Bool) { box.components.isLeapMonth = value }
+    @ObjCMethod("isRepeatedDay") func isRepeatedDay() -> Bool { box.repeatedDay }
+    @ObjCMethod("setRepeatedDay:") func setRepeatedDay(_ value: Bool) { box.repeatedDay = value }
+
+    /// The deprecated week, apart from the week of the month and of the year.
+    @ObjCMethod("week") func getWeek() -> Int { box.week ?? dateComponentUndefined }
+    @ObjCMethod("setWeek:") func setWeek(_ value: Int) { box.week = value == dateComponentUndefined ? nil : value }
 
     @ObjCMethod("calendar") func calendar() -> UnsafeMutableRawPointer? { box.components.calendar.map(Calendars.autoreleased) }
     @ObjCMethod("setCalendar:") func setCalendar(_ calendar: ObjCObject?) { box.components.calendar = Calendars.calendar(calendar?.id) }
@@ -464,23 +624,28 @@ public final class NSDateComponents: NSObject {
 
     @ObjCMethod("valueForComponent:")
     func value(forComponent unit: UInt) -> Int {
-        CalendarUnits.component(unit).map { DateComponentsBox.get(objcObject, $0) } ?? dateComponentUndefined
+        if unit == CalendarUnits.week { return getWeek() }
+        return CalendarUnits.component(unit).map { DateComponentsBox.get(objcObject, $0) } ?? dateComponentUndefined
     }
 
     @ObjCMethod("setValue:forComponent:")
     func setValue(_ value: Int, forComponent unit: UInt) {
+        if unit == CalendarUnits.week { return setWeek(value) }
         if let component = CalendarUnits.component(unit) { DateComponentsBox.set(objcObject, component, value) }
     }
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
-        ObjC.retain(DateComponentsBox.autoreleased(box.components))!
+        let copy = DateComponentsBox.autoreleased(box.components)
+        let copied = DateComponentsBox.box(copy)
+        (copied.week, copied.repeatedDay) = (box.week, box.repeatedDay)
+        return ObjC.retain(copy)!
     }
 
     @ObjCMethod("isEqual:")
     func isEqual(_ other: ObjCObject?) -> Bool {
         guard let other = Storage.get(other?.id, as: DateComponentsBox.self) else { return false }
-        return other.components == box.components
+        return other.components == box.components && other.week == box.week && other.repeatedDay == box.repeatedDay
     }
 
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: box.components.hashValue) }
