@@ -49,6 +49,11 @@ enum AppKitNames {
     static let NSCalibratedWhiteColorSpace = "NSCalibratedWhiteColorSpace"
     static let NSDeviceWhiteColorSpace = "NSDeviceWhiteColorSpace"
     static let NSPatternColorSpace = "NSPatternColorSpace"
+    static let NSDeviceCMYKColorSpace = "NSDeviceCMYKColorSpace"
+    static let NSNamedColorSpace = "NSNamedColorSpace"
+    static let NSCustomColorSpace = "NSCustomColorSpace"
+    static let NSCalibratedBlackColorSpace = "NSCalibratedBlackColorSpace"
+    static let NSDeviceBlackColorSpace = "NSDeviceBlackColorSpace"
 
     // Text: document options and types, attributes, font features.
     static let NSCharacterEncodingDocumentOption = "CharacterEncoding"

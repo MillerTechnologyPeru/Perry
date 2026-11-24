@@ -194,7 +194,7 @@ END _objc_msgSendSuper2_stret
 // forwarding target and resends, or jumps to the forward handler with the
 // original arguments. perry_objc_forward aborts when neither exists; its two
 // words come back in eax and edx.
-.macro FORWARD receiver, selector, resend
+.macro FORWARD receiver, selector, resend, function
     SAVE_FRAME
     movl (\selector + 4)(%ebp), %eax
     movl %eax, 4(%esp)
@@ -202,7 +202,7 @@ END _objc_msgSendSuper2_stret
     movl %eax, 0(%esp)
     call perry_i386_objc_pc_ebx
     addl $_GLOBAL_OFFSET_TABLE_, %ebx
-    call perry_objc_forward@PLT
+    call \function@PLT
     RESTORE_FRAME
     testl %eax, %eax
     jz 1f
@@ -213,13 +213,22 @@ END _objc_msgSendSuper2_stret
 
 ENTRY __objc_msgForward
 .Lmsgforward:
-    FORWARD 4, 8, .Lmsgsend
+    FORWARD 4, 8, .Lmsgsend, perry_objc_forward
 END __objc_msgForward
 
 ENTRY __objc_msgForward_stret
 .Lmsgforward_stret:
-    FORWARD 8, 12, .Lmsgsend_stret
+    FORWARD 8, 12, .Lmsgsend_stret, perry_objc_forward_stret
 END __objc_msgForward_stret
+
+// The answer to an unrecognized message returning through memory, with
+// PERRY_OBJC_UNRECOGNIZED=continue: the result is left alone, as for nil,
+// and its pointer popped, as the caller expects of a _stret method. A plain
+// return would leave the caller's stack four bytes off.
+ENTRY perry_objc_i386_unrecognized_stret
+    movl 4(%esp), %eax
+    ret $4
+END perry_objc_i386_unrecognized_stret
 
 // void perry_objc_i386_longjmp(int *buffer): back to Darwin's setjmp
 // (libSystem's thunks_i386.S), returning 1.
@@ -255,6 +264,7 @@ ADDRESS perry_objc_msgForward_address, .Lmsgforward
 ADDRESS perry_objc_msgSend_stret_address, .Lmsgsend_stret
 ADDRESS perry_objc_msgSend_fpret_address, .Lmsgsend_fpret
 ADDRESS perry_objc_msgSendSuper2_stret_address, .Lmsgsend_super2_stret
+ADDRESS perry_objc_i386_unrecognized_stret_address, perry_objc_i386_unrecognized_stret
 
 #endif
 
