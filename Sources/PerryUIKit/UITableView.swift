@@ -161,6 +161,7 @@ open class UITableViewCell: UIView {
         if decoded.has("UISelectionStyle") { cell.selectionStyle = decoded.integer("UISelectionStyle") }
         if cell.contentView == nil { setUp(style: cell.style, reuseIdentifier: cell.reuseIdentifier) }
         if state.backgroundColor == nil { setOwnBackground(UIColor.systemBackground()) }
+        CellConfigurations.setNeeded(self)
         return self
     }
 
@@ -190,11 +191,13 @@ open class UITableViewCell: UIView {
             addSubview(content)
         }
         setOwnBackground(UIColor.systemBackground())
+        CellConfigurations.setNeeded(self)
     }
 
     @ObjCMethod("dealloc")
     override func dealloc() {
         UITableViewCell.cellStates.remove(objcObject)
+        CellConfigurations.forget(self)
         super.dealloc()
     }
 
@@ -262,6 +265,7 @@ open class UITableViewCell: UIView {
     @ObjCMethod("setSelected:") func setSelected(_ selected: Bool) { sendSetSelected(selected, animated: false) }
     @ObjCMethod("setSelected:animated:")
     func setSelected(_ selected: Bool, animated: Bool) {
+        if cell.selected != selected { CellConfigurations.setNeeded(self) }
         cell.selected = selected
         showSelection()
     }
@@ -269,9 +273,21 @@ open class UITableViewCell: UIView {
     @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { sendSetHighlighted(highlighted, animated: false) }
     @ObjCMethod("setHighlighted:animated:")
     func setHighlighted(_ highlighted: Bool, animated: Bool) {
+        if cell.highlighted != highlighted { CellConfigurations.setNeeded(self) }
         cell.highlighted = highlighted
         showSelection()
     }
+
+    // MARK: Configuration
+
+    @ObjCMethod("configurationState")
+    func configurationState() -> UICellConfigurationState {
+        UICellConfigurationState.of(self, selected: cell.selected, highlighted: cell.highlighted)
+    }
+    @ObjCMethod("setNeedsUpdateConfiguration") func setNeedsUpdateConfiguration() { CellConfigurations.setNeeded(self) }
+    /// What an Objective-C subclass overrides; Swift ones override the
+    /// overlay's bridged method instead.
+    @ObjCMethod("updateConfigurationUsingState:") func updateConfiguration(using state: UICellConfigurationState?) {}
 
     /// Shows the selected background behind the content while the cell is
     /// highlighted or selected, unless its selection style is none.
@@ -381,6 +397,7 @@ open class UITableViewCell: UIView {
     @ObjCMethod("layoutSubviews")
     override func layoutSubviews() {
         let bounds = state.bounds
+        CellConfigurations.updateIfNeeded(self, selected: cell.selected, highlighted: cell.highlighted)
         let accessoryWidth = self.accessoryWidth
         let content = CGRect(x: 0, y: 0, width: bounds.width - accessoryWidth, height: bounds.height)
         cell.contentView?.sendSetFrame(content)
