@@ -1017,6 +1017,17 @@ open class UIBarButtonItem: UIBarItem {
         return item
     }
 
+    /// iOS 14's space items: a flexible space (system item 5) and a fixed
+    /// space (6) of a width.
+    @ObjCClassMethod("flexibleSpaceItem")
+    static func flexibleSpaceItem(_ cls: ObjCClass) -> UIBarButtonItem { make(systemItem: 5, target: nil, action: nil) }
+    @ObjCClassMethod("fixedSpaceItemOfWidth:")
+    static func fixedSpaceItem(_ cls: ObjCClass, width: CGFloat) -> UIBarButtonItem {
+        let item = make(systemItem: 6, target: nil, action: nil)
+        item.state.width = width
+        return item
+    }
+
     private func configure(systemItem: Int, target: NSObject?, action: UnsafeRawPointer?) {
         state.systemItem = systemItem
         state.style = systemItem == 0 || systemItem == 3 ? 2 : 0

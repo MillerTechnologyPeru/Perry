@@ -696,6 +696,9 @@ open class WKWebView: UIView {
     @ObjCMethod("title") func title() -> String? { web.page?.title ?? "" }
     @ObjCMethod("isLoading") func isLoading() -> Bool { web.page?.isLoading ?? false }
     @ObjCMethod("estimatedProgress") func estimatedProgress() -> Double { web.page?.progress ?? 1 }
+    /// WKFullscreenState: not in full screen (0), as no element goes full
+    /// screen here.
+    @ObjCMethod("fullscreenState") func fullscreenState() -> Int { 0 }
     @ObjCMethod("canGoBack") func canGoBack() -> Bool { web.page?.canGoBack ?? false }
     @ObjCMethod("canGoForward") func canGoForward() -> Bool { web.page?.canGoForward ?? false }
     @ObjCMethod("goBack") func goBack() -> NSObject? {
