@@ -571,13 +571,12 @@ open class WKWebViewConfiguration: NSObject {
     @ObjCMethod("setLimitsNavigationsToAppBoundDomains:") func setLimitsNavigationsToAppBoundDomains(_ value: Bool) {}
     @ObjCMethod("defaultWebpagePreferences") func defaultWebpagePreferences() -> NSObject? { nil }
 
-    /// Schemes an app serves itself. WPE asks no handler for them here, so
-    /// their loads fail.
+    /// Schemes an app serves itself, which web views made with this
+    /// configuration ask the handler to load.
     @ObjCMethod("setURLSchemeHandler:forURLScheme:")
     func setURLSchemeHandler(_ handler: NSObject?, forURLScheme scheme: String?) {
         guard let scheme else { return }
         schemeHandlers[scheme] = handler
-        WPE.log("no URL scheme handlers here: \(scheme): loads fail")
     }
 
     @ObjCMethod("urlSchemeHandlerForURLScheme:") func urlSchemeHandler(forURLScheme scheme: String?) -> NSObject? { scheme.flatMap { schemeHandlers[$0] } }
@@ -585,6 +584,86 @@ open class WKWebViewConfiguration: NSObject {
     /// Private settings set by key (allowFileAccessFromFileURLs), kept.
     @ObjCMethod("setValue:forKey:") func setValue(_ value: NSObject?, forKey key: String?) { if let key { values[key] = value } }
     @ObjCMethod("valueForKey:") func value(forKey key: String?) -> NSObject? { key.flatMap { values[$0] } }
+}
+
+/// A load in a scheme the app serves: its handler is given one, and answers
+/// with a response, data and its finish (or a failure), from any thread.
+/// The answer goes to the page on the main queue.
+@ObjCClass("WKURLSchemeTaskImpl")
+open class WKURLSchemeTaskImpl: NSObject {
+    var schemeRequest: SchemeRequest?
+    var url = ""
+    private let lock: UnsafeMutablePointer<pthread_mutex_t> = {
+        let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(lock, nil)
+        return lock
+    }()
+    private var status = 200
+    private var contentType: String?
+    private var data: [UInt8] = []
+    private var answered = false
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    deinit {
+        pthread_mutex_destroy(lock)
+        lock.deallocate()
+    }
+
+    private func locked<T>(_ body: () -> T) -> T {
+        pthread_mutex_lock(lock)
+        defer { pthread_mutex_unlock(lock) }
+        return body()
+    }
+
+    @ObjCMethod("request") func taskRequest() -> NSObject? { Calls.request(Calls.url(url)).map { NSObject($0) } }
+
+    /// The status and type of the response: an HTTP response's status and
+    /// Content-Type header, else its MIME type.
+    @ObjCMethod("didReceiveResponse:")
+    func didReceive(response: NSObject?) {
+        guard let response = response?.objcObject else { return }
+        var status = 200
+        var type = Calls.string(Send.object(response, "MIMEType"))
+        if Send.responds(response, "statusCode") { status = Send.integer(response, "statusCode") }
+        if Send.responds(response, "allHeaderFields"), let headers = Send.object(response, "allHeaderFields"),
+           let header = Calls.string(Send.object(headers, "objectForKey:", "Content-Type".objCArgument())) {
+            type = header
+        }
+        locked { (self.status, self.contentType) = (status, type) }
+    }
+
+    @ObjCMethod("didReceiveData:")
+    func didReceive(data: NSObject?) {
+        guard let data, let bytes = data.sendBytes() else { return }
+        let count = Send.integer(data.objcObject, "length")
+        guard count > 0 else { return }
+        locked { self.data.append(contentsOf: UnsafeRawBufferPointer(start: bytes, count: count)) }
+    }
+
+    @ObjCMethod("didFinish") func didFinish() { answer(failing: false) }
+    @ObjCMethod("didFailWithError:") func didFail(error: NSObject?) { answer(failing: true) }
+    @ObjCMethod("didPerformRedirection:newRequest:") func didPerformRedirection(response: NSObject?, newRequest: NSObject?) {}
+
+    /// The answer, once: the page has it on the main queue, and the task is
+    /// let go.
+    private func answer(failing: Bool) {
+        let answer = locked { () -> (Int, String?, [UInt8])? in
+            guard !answered else { return nil }
+            answered = true
+            return (status, contentType, data)
+        }
+        guard let (status, type, body) = answer else { return }
+        let object = objcObject
+        Dispatch.onMain {
+            let task = WKURLSchemeTaskImpl.objCInstance(object, ownership: .retain)
+            if let request = task.schemeRequest {
+                if failing { request.fail("the handler failed") } else { request.finish(status: status, contentType: type, body: body) }
+            }
+            task.schemeRequest = nil
+            ObjCRuntime.release(object)
+        }
+    }
 }
 
 @ObjCClass("WKSnapshotConfiguration")
@@ -720,6 +799,10 @@ open class WKWebView: NSView {
                 WKWebView.decide(object, uri: uri, type: type, modifiers: modifiers, button: button, decide)
             }
             configuration.userContentController.attach(page)
+            page.schemeRequest = { request in WKWebView.startSchemeTask(object, request) }
+            for scheme in configuration.schemeHandlers.keys where !page.registerURLScheme(scheme) {
+                WPE.log("\(scheme) can't be served by a handler: its loads fail")
+            }
         }
         content.loadChanged = { event in WKWebView.loadChanged(object, event) }
         content.loadFailed = { committed, domain, code, message in
@@ -927,6 +1010,23 @@ open class WKWebView: NSView {
     // MARK: Callbacks from the page
 
     private static func view(_ object: UnsafeMutableRawPointer) -> WKWebView { WKWebView.objCInstance(object, ownership: .retain) }
+
+    /// A load in a scheme the configuration's handler serves, given to it
+    /// as a task through -webView:startURLSchemeTask:.
+    static func startSchemeTask(_ object: UnsafeMutableRawPointer, _ request: SchemeRequest) {
+        let view = view(object)
+        let handler = view.configuration.schemeHandlers.first { $0.key.lowercased() == request.scheme }?.value
+        guard let handler, Send.responds(handler.objcObject, "webView:startURLSchemeTask:") else {
+            return request.fail("no handler for \(request.scheme)")
+        }
+        Trace.log("web view: \(request.method) \(request.url) to its scheme's handler")
+        let task = WKURLSchemeTaskImpl()
+        task.schemeRequest = request
+        task.url = request.url
+        // Kept until it is answered.
+        _ = ObjCRuntime.retain(task.objcObject)
+        Send.void(handler.objcObject, "webView:startURLSchemeTask:", object, task.objcObject)
+    }
 
     /// A script message, to its handler's -userContentController:didReceiveScriptMessage:.
     static func deliver(_ object: UnsafeMutableRawPointer, _ name: String, _ json: String?) {
