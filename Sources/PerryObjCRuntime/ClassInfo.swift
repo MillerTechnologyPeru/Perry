@@ -47,6 +47,18 @@ public final class ClassInfo {
 
     private var cacheCount = 0
 
+    /// Whether the class is in `Runtime.cachedClasses`, as it has cached
+    /// methods or its retain/release kind. Guarded by `Runtime.lock`.
+    private var isListedAsCached = false
+
+    /// Puts the class in `Runtime.cachedClasses`, which a flush empties.
+    /// Called with the runtime lock held.
+    func noteCached() {
+        guard !isListedAsCached else { return }
+        isListedAsCached = true
+        Runtime.cachedClasses.append(self)
+    }
+
     init(cls: ClassPointer, ro: UnsafePointer<perry_class_ro>, superInfo: ClassInfo?) {
         self.cls = cls
         let flags = ro.pointee.flags
@@ -145,6 +157,7 @@ public final class ClassInfo {
         var table = perry_load_acquire(cacheSlot)!
         var mask = table.load(as: UInt.self)
         let isEmpty = table == Runtime.emptyTable
+        if isEmpty { noteCached() }
         if isEmpty || (cacheCount + 1) * 4 > Int(mask + 1) * 3 {
             let capacity = isEmpty ? 8 : Int(mask + 1) * 2
             let tableSize = Layout.bucketsOffset + capacity * Layout.bucketSize
@@ -202,6 +215,7 @@ public final class ClassInfo {
         perry_store_release(cacheSlot, Runtime.emptyTable)
         cacheCount = 0
         retainRelease.store(0, ordering: .relaxed)
+        isListedAsCached = false
     }
 }
 
