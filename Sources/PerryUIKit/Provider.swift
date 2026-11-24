@@ -51,6 +51,10 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
                              "NSLayoutConstraint", "NSLayoutAnchor", "NSLayoutXAxisAnchor", "NSLayoutYAxisAnchor", "NSLayoutDimension",
                              "NSParagraphStyle", "NSMutableParagraphStyle"]
         for name in appKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
+        // A Mac Catalyst app's code is UIKit code: by name, these are UIKit's.
+        if MainProgram.platform == 6 {
+            for name in appKitClasses { ObjCRuntime.setClassAlias(name, to: "PerryUIKit" + name) }
+        }
     }
     #endif
     return true
