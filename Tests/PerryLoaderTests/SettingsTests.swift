@@ -1,12 +1,12 @@
 import Foundation
 import Testing
 
-/// Sources/PerryInterface/include/perry_settings.def lists every PERRY_*
+/// Sources/PerryInterface/perry_settings.def lists every PERRY_*
 /// environment variable: a name read in Sources and missing from it, or
 /// listed and read nowhere, fails here.
 @Suite struct SettingsTests {
 
-    static let table = TestEnvironment.packageRoot.appending(path: "Sources/PerryInterface/include/perry_settings.def")
+    static let table = TestEnvironment.packageRoot.appending(path: "Sources/PerryInterface/perry_settings.def")
 
     static let kinds: Set<String> = ["flag", "bool01", "number", "string", "path", "list", "dynamic"]
 
