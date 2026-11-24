@@ -90,6 +90,19 @@ typedef struct {
     double second;
 } CFGregorianDate;
 
+/// CFGregorianUnits: the seconds at 24 in 32 bytes on 64-bit Darwin, and at
+/// 20 in 28 on 32-bit, whose ABIs align a double in a structure to 4.
+#if !defined(__LP64__)
+#pragma pack(push, 4)
+#endif
+typedef struct {
+    int32_t years, months, days, hours, minutes;
+    double seconds;
+} CFGregorianUnits;
+#if !defined(__LP64__)
+#pragma pack(pop)
+#endif
+
 // Key-value observing's setter for any argument type (kvo.S, kvo_arm.S): it calls
 // perry_foundation_kvo_will, which returns the setter it replaces, then
 // perry_foundation_kvo_did.

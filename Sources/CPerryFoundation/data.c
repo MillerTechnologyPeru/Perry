@@ -266,6 +266,20 @@ const void *const cf_allocator_use_context DARWIN_SYMBOL("_kCFAllocatorUseContex
 
 const void *perry_foundation_cf_allocator(int which) { return &cf_allocator_objects[which]; }
 
+// CoreFoundation's version string, a C string of what(1)'s kind.
+const char darwin_kCFCoreFoundationVersionString[] DARWIN_SYMBOL("_kCFCoreFoundationVersionString") =
+    "@(#)PROGRAM:CoreFoundation  PROJECT:CoreFoundation-1854\n";
+
+// CFStream's error domains for SOCKS and SSL, which are numbers.
+const int darwin_kCFStreamErrorDomainSOCKS DARWIN_SYMBOL("_kCFStreamErrorDomainSOCKS") = 5;
+const int darwin_kCFStreamErrorDomainSSL DARWIN_SYMBOL("_kCFStreamErrorDomainSSL") = 3;
+
+// Garbage collection's allocators, from when the Mac had it: allocators are
+// ignored here, so any non-null objects do.
+static long cf_gc_allocator_objects[2][2];
+const void *const cf_allocator_default_gc_ref_zero DARWIN_SYMBOL("_kCFAllocatorDefaultGCRefZero") = &cf_gc_allocator_objects[0];
+const void *const cf_allocator_system_default_gc_ref_zero DARWIN_SYMBOL("_kCFAllocatorSystemDefaultGCRefZero") = &cf_gc_allocator_objects[1];
+
 // CoreFoundation's version: iOS 15's.
 const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFoundationVersionNumber") = 1854.0;
 

@@ -229,7 +229,7 @@ enum Bundles {
 
     nonisolated(unsafe) static var bundleClass: Class!
     nonisolated(unsafe) static var main: id!
-    nonisolated(unsafe) private static var byPath: [String: id] = [:]
+    nonisolated(unsafe) static var byPath: [String: id] = [:]
 
     static func storage(_ object: id?) -> BundleStorage? {
         Storage.get(object, as: BundleStorage.self)

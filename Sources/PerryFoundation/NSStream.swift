@@ -33,6 +33,7 @@ final class StreamStorage {
         case unreachable                                // an HTTP request's, with no network to send it on
         case socketInput(StreamSocket)                  // a connection's two streams (SocketStreams.swift)
         case socketOutput(StreamSocket)
+        case callbacks(CallbackStream)                  // CFReadStreamCreate's and CFWriteStreamCreate's (CFStreamMore.swift)
     }
 
     let source: Source
@@ -45,6 +46,8 @@ final class StreamStorage {
     /// A CFReadStream's or CFWriteStream's client: the events it asked for,
     /// its callback and its context's info, which its release lets go of.
     var client: StreamClient?
+    /// CFReadStreamSetDispatchQueue's queue, retained: events go to it too.
+    var queue: id?
 
     var offset = 0              // into data, or into the caller's buffer
     var descriptor: Int32 = -1
@@ -61,6 +64,7 @@ final class StreamStorage {
         }
         if descriptor >= 0 { close(descriptor) }
         ObjC.release(error)
+        ObjC.release(queue)
         for value in properties.values { ObjC.release(value) }
     }
 }
@@ -140,19 +144,29 @@ enum Streams {
     /// Tells the delegate of `event` on each run loop the stream is
     /// scheduled on, if the stream is still open then.
     static func post(_ object: id, _ storage: StreamStorage, _ event: UInt) {
-        guard !storage.runLoops.isEmpty else { return }
+        guard !storage.runLoops.isEmpty || storage.queue != nil else { return }
+        let deliver = {
+            guard storage.status != StreamStatus.closed, storage.status != StreamStatus.notOpen || event == StreamEvent.errorOccurred else { return }
+            if let client = storage.client, client.events & event != 0 { client.callback(object, event, client.info) }
+            let delegate = storage.delegate ?? object
+            typealias Responds = @convention(c) (id, SEL, SEL) -> Bool
+            typealias Handle = @convention(c) (id, SEL, id, UInt) -> Void
+            let selector = ObjC.selector("stream:handleEvent:")
+            guard unsafeBitCast(ObjC.msgSend, to: Responds.self)(delegate, ObjC.selector("respondsToSelector:"), selector) else { return }
+            unsafeBitCast(ObjC.msgSend, to: Handle.self)(delegate, selector, object, event)
+        }
         for runLoop in storage.runLoops {
             _ = ObjC.retain(object)
             runLoop.perform {
                 defer { ObjC.release(object) }
-                guard storage.status != StreamStatus.closed, storage.status != StreamStatus.notOpen || event == StreamEvent.errorOccurred else { return }
-                if let client = storage.client, client.events & event != 0 { client.callback(object, event, client.info) }
-                let delegate = storage.delegate ?? object
-                typealias Responds = @convention(c) (id, SEL, SEL) -> Bool
-                typealias Handle = @convention(c) (id, SEL, id, UInt) -> Void
-                let selector = ObjC.selector("stream:handleEvent:")
-                guard unsafeBitCast(ObjC.msgSend, to: Responds.self)(delegate, ObjC.selector("respondsToSelector:"), selector) else { return }
-                unsafeBitCast(ObjC.msgSend, to: Handle.self)(delegate, selector, object, event)
+                deliver()
+            }
+        }
+        if let queue = storage.queue {
+            _ = ObjC.retain(object)
+            DispatchedWork.async(queue) {
+                defer { ObjC.release(object) }
+                deliver()
             }
         }
     }
@@ -176,6 +190,8 @@ enum Streams {
         case .socketOutput(let socket):
             storage.status = StreamStatus.opening
             return socket.open(object, input: false)
+        case .callbacks(let stream):
+            return stream.open(storage)
         case .file, .fileOutput:
             if storage.descriptor < 0 { return fail(object, storage, code: errno) }
         case .unreachable:
@@ -221,6 +237,8 @@ enum Streams {
             socket.close(input: true)
         case .socketOutput(let socket):
             socket.close(input: false)
+        case .callbacks(let stream):
+            stream.close()
         default:
             break
         }
@@ -233,6 +251,7 @@ enum Streams {
 
     static func hasBytes(_ storage: StreamStorage) -> Bool {
         switch storage.source {
+        case .callbacks(let stream): return stream.canTransfer(storage)
         case .data(let data): return storage.offset < data.count
         case .file: return storage.status == StreamStatus.open
         case .pipeInput(let pipe): return pipe.monitor.locked { !pipe.bytes.isEmpty || pipe.outputClosed }
@@ -243,6 +262,7 @@ enum Streams {
 
     static func read(_ object: id, _ buffer: UnsafeMutablePointer<UInt8>?, _ length: Int) -> Int {
         let storage = storage(object)
+        if case .callbacks(let stream) = storage.source { return stream.read(storage, buffer, length) }
         guard let buffer, storage.status == StreamStatus.open else {
             return storage.status == StreamStatus.atEnd ? 0 : -1
         }
@@ -287,6 +307,7 @@ enum Streams {
 
     static func write(_ object: id, _ buffer: UnsafePointer<UInt8>?, _ length: Int) -> Int {
         let storage = storage(object)
+        if case .callbacks(let stream) = storage.source { return stream.write(storage, buffer, length) }
         guard let buffer, storage.status == StreamStatus.open else { return -1 }
         var count = 0
         switch storage.source {
@@ -296,7 +317,13 @@ enum Streams {
             storage.written.append(buffer, count: length)
             count = length
         case .buffer(let target, let capacity):
-            count = min(length, capacity - storage.offset)
+            // As on Darwin, a write that doesn't fit fails whole, and the
+            // stream with it.
+            guard length <= capacity - storage.offset else {
+                fail(object, storage, code: ENOSPC)
+                return -1
+            }
+            count = length
             if count > 0 { memcpy(target + storage.offset, buffer, count) }
             storage.offset += count
             if storage.offset >= capacity { storage.status = StreamStatus.atEnd }
@@ -337,6 +364,7 @@ enum Streams {
     }
 
     static func hasSpace(_ storage: StreamStorage) -> Bool {
+        if case .callbacks(let stream) = storage.source { return stream.canTransfer(storage) }
         guard storage.status == StreamStatus.open else { return false }
         if case .buffer(_, let capacity) = storage.source { return storage.offset < capacity }
         if case .pipeOutput(let pipe) = storage.source { return pipe.monitor.locked { pipe.bytes.count < pipe.capacity } }
@@ -367,6 +395,8 @@ enum Streams {
         switch storage.source {
         case .socketInput(let socket), .socketOutput(let socket):
             if let value = socket.property(name) { return value }
+        case .callbacks(let stream):
+            return stream.copyProperty(key).flatMap { ObjC.autorelease($0) }
         default:
             break
         }
@@ -377,6 +407,7 @@ enum Streams {
     static func setProperty(_ object: id, _ value: id?, _ key: id?) -> Bool {
         guard let name = Strings.value(of: key) else { return false }
         let storage = storage(object)
+        if case .callbacks(let stream) = storage.source { return stream.setProperty(key, value) }
         if name == "kCFStreamPropertyFileCurrentOffset" {
             typealias Get = @convention(c) (id, SEL) -> Int64
             let offset = value.map { unsafeBitCast(ObjC.msgSend, to: Get.self)($0, ObjC.selector("longLongValue")) } ?? 0
@@ -402,16 +433,19 @@ enum Streams {
         return true
     }
 
-    static func schedule(_ object: id, _ runLoop: id?) {
+    static func schedule(_ object: id, _ runLoop: id?, _ mode: id? = nil) {
         guard let state = RunLoops.state(runLoop) else { return }
         let storage = storage(object)
         guard !storage.runLoops.contains(where: { $0 === state }) else { return }
         storage.runLoops.append(state)
+        if case .callbacks(let stream) = storage.source { stream.schedule(runLoop, mode, adding: true) }
     }
 
-    static func unschedule(_ object: id, _ runLoop: id?) {
+    static func unschedule(_ object: id, _ runLoop: id?, _ mode: id? = nil) {
         guard let state = RunLoops.state(runLoop) else { return }
-        storage(object).runLoops.removeAll { $0 === state }
+        let storage = storage(object)
+        storage.runLoops.removeAll { $0 === state }
+        if case .callbacks(let stream) = storage.source { stream.schedule(runLoop, mode, adding: false) }
     }
 
     static func path(_ url: id?) -> String? {
@@ -469,7 +503,7 @@ public class NSStream: NSObject {
     @ObjCMethod("setDelegate:")
     func setDelegate(_ delegate: UnsafeMutableRawPointer?) { storage.delegate = delegate == objcObject ? nil : delegate }
 
-    @ObjCMethod("streamStatus") func streamStatus() -> UInt { storage.status }
+    @ObjCMethod("streamStatus") func streamStatus() -> UInt { CallbackStream.status(storage) }
     @ObjCMethod("streamError") func streamError() -> UnsafeMutableRawPointer? { storage.error }
 
     @ObjCMethod("propertyForKey:")
@@ -481,10 +515,10 @@ public class NSStream: NSObject {
     }
 
     @ObjCMethod("scheduleInRunLoop:forMode:")
-    func schedule(in runLoop: UnsafeMutableRawPointer?, forMode mode: UnsafeMutableRawPointer?) { Streams.schedule(objcObject, runLoop) }
+    func schedule(in runLoop: UnsafeMutableRawPointer?, forMode mode: UnsafeMutableRawPointer?) { Streams.schedule(objcObject, runLoop, mode) }
 
     @ObjCMethod("removeFromRunLoop:forMode:")
-    func remove(from runLoop: UnsafeMutableRawPointer?, forMode mode: UnsafeMutableRawPointer?) { Streams.unschedule(objcObject, runLoop) }
+    func remove(from runLoop: UnsafeMutableRawPointer?, forMode mode: UnsafeMutableRawPointer?) { Streams.unschedule(objcObject, runLoop, mode) }
 }
 
 @ObjCClass("NSInputStream")
@@ -492,6 +526,8 @@ public class NSInputStream: NSStream {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         Streams.inputClass = cls.storage
     }
+
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CallbackStream.readTypeID }
 
     @ObjCClassMethod("inputStreamWithData:")
     static func stream(_ cls: ObjCClass, data: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
@@ -552,6 +588,8 @@ public class NSOutputStream: NSStream {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         Streams.outputClass = cls.storage
     }
+
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CallbackStream.writeTypeID }
 
     @ObjCClassMethod("outputStreamToMemory")
     static func toMemory(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
@@ -708,6 +746,7 @@ private func setClient(_ stream: id?, _ events: UInt, _ callback: StreamClient.C
     let parts = context?.loadUnaligned(as: StreamClientContext.self)
     let info = parts.flatMap { parts in parts.retain.map { $0(parts.info) } ?? parts.info }
     storage.client = StreamClient(events: events, callback: callback, info: info, release: parts?.release)
+    if case .callbacks(let stream) = storage.source { stream.requestEvents(events) }
     return true
 }
 @c(_CFReadStreamSetClient)

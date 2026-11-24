@@ -851,11 +851,15 @@ public func CFXMLParserGetCallBacks(_ parser: id?, _ callbacks: UnsafeMutableRaw
 @c(_CFXMLParserCopyErrorDescription)
 public func CFXMLParserCopyErrorDescription(_ parser: id?) -> id? { CFXMLParsers.storage(parser)?.reader.errorDescription.map(Strings.make) }
 
-@c(_CFXMLParserAbortParsing)
-public func CFXMLParserAbortParsing(_ parser: id?) {
+/// Ends the parse from one of its callbacks: the parse fails with the
+/// status code and description given, which the status and error
+/// description report afterwards.
+@c(_CFXMLParserAbort)
+public func CFXMLParserAbort(_ parser: id?, _ errorCode: Int, _ errorDescription: id?) {
     guard let reader = CFXMLParsers.storage(parser)?.reader else { return }
     reader.aborted = true
-    reader.errorDescription = reader.errorDescription ?? "Parsing aborted"
+    reader.status = errorCode
+    reader.errorDescription = Strings.value(of: errorDescription) ?? reader.errorDescription ?? "Parsing aborted"
 }
 
 @c(_CFXMLParserParse) public func CFXMLParserParse(_ parser: id?) -> Bool { CFXMLParsers.storage(parser)?.reader.parse() ?? false }

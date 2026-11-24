@@ -259,8 +259,12 @@ public final class NSTimer: NSObject {
     @ObjCMethod("userInfo")
     func userInfo() -> ObjCObject? { storage?.userInfo.map(ObjCObject.init) }
 
-    @ObjCMethod("tolerance") func tolerance() -> Double { 0 }
-    @ObjCMethod("setTolerance:") func setTolerance(_ tolerance: Double) {}
+    /// Recorded, as CFRunLoopTimer's is: timers fire when due here.
+    @ObjCMethod("tolerance") func tolerance() -> Double { storage.map(RunLoopTimerExtras.tolerance(of:)) ?? 0 }
+    @ObjCMethod("setTolerance:")
+    func setTolerance(_ tolerance: Double) { storage.map { RunLoopTimerExtras.set(tolerance: max(tolerance, 0), of: $0) } }
+
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { 47 }
 }
 
 /// Delayed performs, which Foundation adds to NSObject.

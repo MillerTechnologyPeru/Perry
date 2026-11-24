@@ -28,6 +28,11 @@ final class RunLoopState {
     /// Ports added, which keep the loop running as input sources do.
     var ports = 0
     private var stopRequested = false
+    /// Whether the loop is asleep waiting for something to happen.
+    private var waiting = false
+    /// Modes CFRunLoopAddCommonMode added, beyond the default mode: names
+    /// only, as every mode is the same run loop here.
+    private var addedModes: [String] = []
     private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     private let wakeFile = eventfd(0, Int32(EFD_CLOEXEC | EFD_NONBLOCK))
 
@@ -48,6 +53,20 @@ final class RunLoopState {
     /// an audio queue's on the run loop its app names.
     func addSource() { locked { ports += 1 } }
     func removeSource() { locked { ports = max(0, ports - 1) } }
+
+    /// Whether the loop is asleep, waiting for a source, timer or wake-up.
+    var isWaiting: Bool { locked { waiting } }
+
+    /// Records a common mode; the default mode is one from the start.
+    func addCommonMode(_ name: String) {
+        guard name != RunLoopModes.kCFRunLoopDefaultMode, name != RunLoopModes.kCFRunLoopCommonModes else { return }
+        locked { () -> Void in
+            if !addedModes.contains(name) { addedModes.append(name) }
+        }
+    }
+
+    /// The common modes added, beyond the default mode, in order.
+    var commonModes: [String] { locked { addedModes } }
 
     private func locked<T>(_ body: () -> T) -> T {
         pthread_mutex_lock(mutex)
@@ -259,7 +278,9 @@ final class RunLoopState {
         let timeout = remaining.isFinite ? Int32(min(max(ceil(remaining * 1000), 0), Double(Int32.max))) : -1
         var files = [pollfd(fd: wakeFile, events: Int16(POLLIN), revents: 0)]
         if servesMainQueue { files.append(pollfd(fd: MainDispatchQueue.port, events: Int16(POLLIN), revents: 0)) }
+        locked { waiting = true }
         _ = poll(&files, nfds_t(files.count), timeout)
+        locked { waiting = false }
         var value: eventfd_t = 0
         _ = eventfd_read(wakeFile, &value)
     }
@@ -358,6 +379,8 @@ public final class NSRunLoop: NSObject {
     @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
     @ObjCMethod("release", types: "Vv16@0:8") func release() {}
     @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
+
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFTypeIDs.runLoop }
 
     @ObjCMethod("getCFRunLoop")
     func cfRunLoop() -> UnsafeMutableRawPointer { objcObject }
@@ -536,6 +559,7 @@ public func CFRunLoopTimerCreate(_ allocator: UnsafeMutableRawPointer?, _ fireDa
     storage.retainInfo = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: UnsafeRawPointer?.self)
     storage.copyDescription = context?.load(fromByteOffset: DarwinLayout.contextRelease + MemoryLayout<UnsafeRawPointer>.size,
                                             as: UnsafeRawPointer?.self)
+    RunLoopTimerExtras.set(order: order, of: storage)
     return Timers.make(storage)
 }
 
@@ -562,6 +586,7 @@ public func CFRunLoopTimerCreateWithHandler(_ allocator: UnsafeMutableRawPointer
                                             _ block: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     let storage = TimerStorage(fireDate: fireDate, interval: interval > 0 ? Timers.clamp(interval) : 0,
                                repeats: interval > 0, target: nil, selector: nil, userInfo: nil, block: block)
+    RunLoopTimerExtras.set(order: order, of: storage)
     return Timers.make(storage)
 }
 
@@ -615,10 +640,13 @@ public func CFRunLoopCopyCurrentMode(_ loop: UnsafeMutableRawPointer?) -> Unsafe
     ObjC.retain(RunLoopModes.NSDefaultRunLoopModeObject)
 }
 
-/// The modes the run loop has, +1: the default mode.
+/// The modes the run loop has, +1: the default mode, then the common modes
+/// CFRunLoopAddCommonMode added.
 @c(_CFRunLoopCopyAllModes)
 public func CFRunLoopCopyAllModes(_ loop: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    Arrays.make([RunLoopModes.NSDefaultRunLoopModeObject])
+    let added = (RunLoops.state(loop)?.commonModes ?? []).map(Strings.make)
+    defer { added.forEach { ObjC.release($0) } }
+    return Arrays.make([RunLoopModes.NSDefaultRunLoopModeObject] + added)
 }
 
 @c(_CFRunLoopStop)
@@ -656,6 +684,10 @@ final class RunLoopObserverStorage {
     let callout: Callout?
     let info: UnsafeMutableRawPointer?
     let release: Release?
+    /// The context's retain and copyDescription callbacks, given back by
+    /// CFRunLoopObserverGetContext.
+    var retainInfo: UnsafeRawPointer?
+    var copyDescription: UnsafeRawPointer?
     var valid = true
 
     init(activities: UInt, repeats: Bool, order: Int, block: id?, callout: Callout?, info: UnsafeMutableRawPointer?,
@@ -718,6 +750,8 @@ final class NSCFRunLoopObserver: NSObject {
         RunLoopObservers.observerClass = cls.storage
     }
 
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFRunLoopObserverGetTypeID() }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -743,8 +777,12 @@ public func CFRunLoopObserverCreate(_ allocator: UnsafeMutableRawPointer?, _ act
         info = UnsafeMutableRawPointer(mutating: retain(info))
     }
     let release = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: RunLoopObserverStorage.Release?.self)
-    return RunLoopObservers.make(RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: nil,
-                                                        callout: callout, info: info, release: release))
+    let storage = RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: nil,
+                                         callout: callout, info: info, release: release)
+    storage.retainInfo = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: UnsafeRawPointer?.self)
+    storage.copyDescription = context?.load(fromByteOffset: DarwinLayout.contextRelease + DarwinLayout.word,
+                                            as: UnsafeRawPointer?.self)
+    return RunLoopObservers.make(storage)
 }
 
 /// Every mode is the same run loop here.
