@@ -38,8 +38,11 @@ export BOX86_MMAP_BASE=0x48000000
 glib=libglib-2.0.so.0:libgobject-2.0.so.0:libgmodule-2.0.so.0:libgio-2.0.so.0
 gst=libgstreamer-1.0.so.0:libgstbase-1.0.so.0:libgstapp-1.0.so.0:libgstaudio-1.0.so.0:libgsttag-1.0.so.0:libgstpbutils-1.0.so.0:libgstvideo-1.0.so.0
 # The i386 fontconfig and FreeType too: box86's wrapper for the native one lacks
-# FcConfigAppFontAddDir, which Core Graphics needs for an app's own fonts.
-export BOX86_EMULATED_LIBS=libwayland-client.so.0:libdrm.so.2:libpulse.so.0:libpulse-simple.so.0:libfontconfig.so.1:libfreetype.so.6:$glib:$gst
+# FcConfigAppFontAddDir, which Core Graphics needs for an app's own fonts. And
+# cairo with them, with what it draws through: the machine's cairo would be
+# handed the i386 fontconfig's patterns and FreeType's faces, which aren't its
+# own libraries', and no text is drawn.
+export BOX86_EMULATED_LIBS=libwayland-client.so.0:libdrm.so.2:libpulse.so.0:libpulse-simple.so.0:libfontconfig.so.1:libfreetype.so.6:libcairo.so.2:libpixman-1.so.0:libpng16.so.16:libexpat.so.1:$glib:$gst
 
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/var/run/0-runtime-dir} DISPLAY=${DISPLAY:-:0} SDL_VIDEODRIVER=x11
 export SDL_VIDEO_X11_XINPUT2=0

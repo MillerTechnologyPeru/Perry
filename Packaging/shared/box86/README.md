@@ -63,6 +63,11 @@ libraries preloaded with `BOX86_LD_PRELOAD` give them.
   wraps.
 - `capget` and `capset`, as system calls, for machines with no armhf libcap
   (ROCKNIX), where box86 loads the i386 one.
+- `tsearch`, `tfind`, `tdelete` and `twalk`, and `openpty`, which glibc 2.34
+  moved into libc.
+- `xcb_poll_for_reply` and `_XReadEvents`, doing nothing, for the i386 cairo
+  where a launcher has box86 run it (`BOX86_EMULATED_LIBS`): they belong to
+  its Xlib and XCB surfaces, which Perry doesn't make.
 
 `libc23box.map` gives each the glibc version libraries ask for it with;
 unversioned, box86 doesn't match them.
