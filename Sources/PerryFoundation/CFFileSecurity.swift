@@ -10,6 +10,9 @@ import PerryObjCInterop
 //
 // The owner and group UUIDs are their own properties, as on Darwin: setting
 // an owner or group gives no UUID, and a UUID no ID.
+//
+// A CFFileSecurityRef is an __NSFileSecurity, the concrete subclass of
+// NSFileSecurity (NSFileSecurity.swift), so either API takes either.
 
 final class FileSecurityStorage {
     var owner: UInt32?
@@ -59,7 +62,7 @@ enum FileSecurities {
 }
 
 @ObjCClass("__NSFileSecurity")
-final class NSCFFileSecurity: NSObject {
+final class NSCFFileSecurity: NSFileSecurity {
     override class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         FileSecurities.securityClass = cls.storage
@@ -93,14 +96,16 @@ final class NSCFFileSecurity: NSObject {
         return FileSecurities.make(FileSecurityStorage(copying: storage))
     }
 
+    /// Darwin's: each filesec property, set or (null); the mode in decimal.
     @ObjCMethod("description")
     func description() -> String {
-        guard let storage = FileSecurities.storage(objcObject) else { return "<CFFileSecurity \(objcObject)>" }
-        var parts: [String] = []
-        if let owner = storage.effectiveOwner { parts.append("owner \(owner)") }
-        if let group = storage.effectiveGroup { parts.append("group \(group)") }
-        if let mode = storage.mode { parts.append("mode 0\(String(mode, radix: 8))") }
-        return "<CFFileSecurity \(objcObject)> {\(parts.joined(separator: ", "))}"
+        let address = "0x" + String(UInt(bitPattern: objcObject), radix: 16)
+        let storage = FileSecurities.storage(objcObject) ?? FileSecurityStorage()
+        func shown<T>(_ value: T?) -> String { value.map { "\($0)" } ?? "(null)" }
+        let fields = ["FILESEC_OWNER = \(shown(storage.effectiveOwner))", "FILESEC_GROUP = \(shown(storage.effectiveGroup))",
+                      "FILESEC_MODE = \(shown(storage.mode))", "FILESEC_UUID = \(shown(storage.effectiveOwnerUUID?.uuidString))",
+                      "FILESEC_GRPUUID = \(shown(storage.effectiveGroupUUID?.uuidString))", "FILESEC_ACL = (null)"]
+        return "<FileSecurity \(address)> [\(address)] {\(fields.joined(separator: ", "))}"
     }
 }
 
