@@ -19,7 +19,7 @@ private let badFormat: Int16 = -206
 /// Sound Manager commands (Sound.h).
 private enum Command: UInt16 {
     case null = 0, quiet = 3, flush = 4, reInit = 5, wait = 10, pause = 11, resume = 12, callBack = 13, sync = 14
-    case available = 24, version = 25, volume = 46, getVolume = 47, sound = 80, buffer = 81
+    case available = 24, version = 25, volume = 46, getVolume = 47, sound = 80, buffer = 81, rateMultiplier = 86
 }
 
 /// SndChannel, as Sound.h lays it out (2-byte packing): its callBack at 8,
@@ -56,6 +56,7 @@ private enum Audio {
     nonisolated(unsafe) static var clear: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
     nonisolated(unsafe) static var setFormat: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool)?
     nonisolated(unsafe) static var setGain: (@convention(c) (UnsafeMutableRawPointer?, Float) -> Bool)?
+    nonisolated(unsafe) static var setRatio: (@convention(c) (UnsafeMutableRawPointer?, Float) -> Bool)?
     nonisolated(unsafe) static var pauseDevice: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
     nonisolated(unsafe) static var resumeDevice: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
     nonisolated(unsafe) static var destroy: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
@@ -75,6 +76,7 @@ private enum Audio {
         clear = bind("SDL_ClearAudioStream")
         setFormat = bind("SDL_SetAudioStreamFormat")
         setGain = bind("SDL_SetAudioStreamGain")
+        setRatio = bind("SDL_SetAudioStreamFrequencyRatio")
         pauseDevice = bind("SDL_PauseAudioStreamDevice")
         resumeDevice = bind("SDL_ResumeAudioStreamDevice")
         destroy = bind("SDL_DestroyAudioStream")
@@ -139,9 +141,23 @@ private final class Channel {
     var pushed = 0
     var waiting: [(mark: Int, command: SoundCommand)] = []
     var running = true
+    var paused = false
+    /// The volume and the rate multiplier asked for, which a channel has
+    /// from before its first buffer opens its stream.
+    var gain: Float = 1
+    var ratio: Float = 1
     var lock = pthread_mutex_t()
     var thread = pthread_t()
     nonisolated(unsafe) static var described = false
+    /// Held while a callback runs: the Sound Manager calls them at
+    /// interrupt time, one at a time, and programs count on it (MacSoft's
+    /// Halo's returns at once when another channel's is running, and its
+    /// sound never goes on).
+    nonisolated(unsafe) static var callbacks: pthread_mutex_t = {
+        var mutex = pthread_mutex_t()
+        pthread_mutex_init(&mutex, nil)
+        return mutex
+    }()
 
     init(memory: UnsafeMutableRawPointer, ownsMemory: Bool) {
         self.memory = memory
@@ -155,7 +171,15 @@ private final class Channel {
     }
 
     /// Bytes of the stream played so far: put in, less what's still queued.
-    var played: Int { pushed - Int(stream.map { Audio.queued!($0) } ?? 0) }
+    /// SDL keeps a stream's last few frames back for its resampler until
+    /// more come (7 of them from 44.1 kHz to a 48 kHz device), so what is
+    /// queued never comes down to nothing: up to 64 frames left count as
+    /// played, or a sound's end, and the callback after it, never come.
+    var played: Int {
+        let queued = Int(stream.map { Audio.queued!($0) } ?? 0)
+        let frame = spec.map { Int($0.channels) * (($0.format & 0xFF) == 16 ? 2 : 1) } ?? 4
+        return pushed - (queued <= 64 * frame ? 0 : queued)
+    }
 
     func play(_ samples: Samples) -> Int16 {
         if stream == nil {
@@ -166,6 +190,8 @@ private final class Channel {
             }
             stream = opened
             self.spec = spec
+            if gain != 1 { _ = Audio.setGain?(opened, gain) }
+            if ratio != 1 { _ = Audio.setRatio?(opened, ratio) }
             _ = Audio.resumeDevice?(opened)
         } else if spec != samples.spec {
             var spec = samples.spec
@@ -205,13 +231,22 @@ private final class Channel {
         case .flush:
             waiting.removeAll()
         case .pause:
+            paused = true
             if let stream { _ = Audio.pauseDevice?(stream) }
         case .resume:
+            paused = false
             if let stream { _ = Audio.resumeDevice?(stream) }
         case .volume:
             // Left in the low word, right in the high; 0x100 is full.
             let level = max(command.param2 & 0xFFFF, (command.param2 >> 16) & 0xFFFF)
-            if let stream { _ = Audio.setGain?(stream, Float(level) / 256) }
+            gain = Float(level) / 256
+            if let stream { _ = Audio.setGain?(stream, gain) }
+        case .rateMultiplier:
+            // A Fixed: 1.0 plays at the sound's own rate.
+            let multiplier = Float(UInt32(bitPattern: command.param2)) / 65536
+            guard multiplier >= 0.01, multiplier <= 100 else { break }
+            ratio = multiplier
+            if let stream { _ = Audio.setRatio?(stream, ratio) }
         default:
             break
         }
@@ -222,7 +257,14 @@ private final class Channel {
     func due() -> [SoundCommand] {
         pthread_mutex_lock(&lock)
         defer { pthread_mutex_unlock(&lock) }
-        let played = self.played
+        // A callback is called a little before its place has played, 40 ms
+        // of sound ahead: the Sound Manager goes from one buffer to the next
+        // at interrupt time, with no gap, and a program that streams a sound
+        // in short buffers, each queued by the callback after the one before
+        // (MacSoft's Halo, 12 ms at a time), has gaps between them if each
+        // callback waits for the stream to run dry.
+        let lead = spec.map { Int($0.frequency) * Int($0.channels) * (($0.format & 0xFF) == 16 ? 2 : 1) * 40 / 1000 } ?? 0
+        let played = self.played + lead
         var due: [SoundCommand] = []
         while let first = waiting.first, first.mark <= played {
             due.append(first.command)
@@ -231,7 +273,7 @@ private final class Channel {
         return due
     }
 
-    /// Calls the callbacks as their places play, every 5 ms, until the
+    /// Calls the callbacks as their places play, every 2 ms, until the
     /// channel goes.
     func run() {
         while true {
@@ -245,9 +287,11 @@ private final class Channel {
                 pthread_mutex_unlock(&lock)
                 if disposed { return }
                 var argument = command
+                pthread_mutex_lock(&Channel.callbacks)
                 callback?(memory, &argument)
+                pthread_mutex_unlock(&Channel.callbacks)
             }
-            usleep(5000)
+            usleep(2000)
         }
     }
 
@@ -256,6 +300,15 @@ private final class Channel {
         pthread_mutex_lock(&lock)
         defer { pthread_mutex_unlock(&lock) }
         return played >= pushed
+    }
+
+    /// Whether the channel is making sound or has commands still to come
+    /// to, and whether it is paused: an SCStatus's scChannelBusy and
+    /// scChannelPaused.
+    var status: (busy: Bool, paused: Bool) {
+        pthread_mutex_lock(&lock)
+        defer { pthread_mutex_unlock(&lock) }
+        return (played < pushed || !waiting.isEmpty, paused)
     }
 }
 
@@ -340,10 +393,18 @@ public func SndDoImmediate(_ channel: UnsafeMutableRawPointer?, _ command: Unsaf
     return state.perform(command.loadUnaligned(as: SoundCommand.self))
 }
 
+/// OSErr SndChannelStatus(SndChannelPtr, short length, SCStatusPtr): an
+/// SCStatus, 24 bytes, whose scChannelBusy is at 12 and scChannelPaused at
+/// 14. A program with a pool of channels takes one that isn't busy for its
+/// next sound, and quiets it first.
 @c(_SndChannelStatus)
 public func SndChannelStatus(_ channel: UnsafeMutableRawPointer?, _ length: Int16, _ status: UnsafeMutableRawPointer?) -> Int16 {
-    guard Channels.find(channel) != nil else { return badChannel }
-    if let status, length > 0 { memset(status, 0, Int(length)) }
+    guard let state = Channels.find(channel) else { return badChannel }
+    guard let status, length > 0 else { return 0 }
+    memset(status, 0, Int(length))
+    let (busy, paused) = state.status
+    if length > 12 { status.storeBytes(of: busy ? 1 : 0, toByteOffset: 12, as: UInt8.self) }
+    if length > 14 { status.storeBytes(of: paused ? 1 : 0, toByteOffset: 14, as: UInt8.self) }
     return 0
 }
 
