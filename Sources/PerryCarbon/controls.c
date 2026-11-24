@@ -434,6 +434,20 @@ OSErr carbon_GetControlData(ControlRef control, int16_t part, OSType tag, size_t
     return -30583;   // errDataNotSupported
 }
 
+/// A pop-up button's menu, which an application fills and counts to set
+/// the button's range.
+MenuRef carbon_GetControlPopupMenuHandle(ControlRef control) CARBON_SYMBOL(GetControlPopupMenuHandle);
+MenuRef carbon_GetControlPopupMenuHandle(ControlRef control) { return (control = control_from(control)) ? control->menu : NULL; }
+
+MenuRef carbon_GetControlPopupMenuRef(ControlRef control) CARBON_SYMBOL(GetControlPopupMenuRef);
+MenuRef carbon_GetControlPopupMenuRef(ControlRef control) { return carbon_GetControlPopupMenuHandle(control); }
+
+int16_t carbon_GetControlPopupMenuID(ControlRef control) CARBON_SYMBOL(GetControlPopupMenuID);
+int16_t carbon_GetControlPopupMenuID(ControlRef control) {
+    extern int16_t menu_identifier(MenuRef) __asm__("_GetMenuID");
+    return (control = control_from(control)) && control->menu ? menu_identifier(control->menu) : 0;
+}
+
 OSErr carbon_GetControlDataSize(ControlRef control, int16_t part, OSType tag, size_t *size) CARBON_SYMBOL(GetControlDataSize);
 OSErr carbon_GetControlDataSize(ControlRef control, int16_t part, OSType tag, size_t *size) {
     return carbon_GetControlData(control, part, tag, 0, NULL, size);
@@ -489,7 +503,43 @@ static id choice_button(id title, unsigned long type, bool small) {
 }
 
 /// A pop-up button over a Carbon menu, whose items choose.
-ControlRef carbon_popup_control(WindowRef window, const Rect *bounds, MenuRef menu, int32_t value, uint32_t command) {
+/// A label's size for its text, on one line.
+static NSSize label_size(id field) { return ((NSSize (*)(id, SEL))objc_send)(SEND(field, "cell"), SELECTOR("cellSize")); }
+
+/// Fits a label to its control's bounds as Carbon's static text does: in
+/// bounds of more than a line's height its text wraps, and on one line it
+/// is never cut short with an ellipsis: a font a little wider than the
+/// Mac's gets a size smaller until the text fits.
+void carbon_label_fit(id field, const Rect *bounds, bool small) {
+    if (!field || !bounds) return;
+    CGFloat width = bounds->right - bounds->left, size = small ? 11 : 13;
+    if (bounds->bottom - bounds->top >= (small ? 26 : 30)) {
+        ((void (*)(id, SEL, long))objc_send)(field, SELECTOR("setLineBreakMode:"), 0);   // NSLineBreakByWordWrapping
+        return;
+    }
+    ((void (*)(id, SEL, long))objc_send)(field, SELECTOR("setLineBreakMode:"), 2);   // NSLineBreakByClipping
+    while (size > 9 && label_size(field).width > width) {
+        id font = ((id (*)(id, SEL, CGFloat))objc_send)(CLASS("NSFont"), SELECTOR("systemFontOfSize:"), --size);
+        if (!font) break;
+        SEND1(field, "setFont:", font);
+    }
+}
+
+/// A pop-up button. Its title is drawn at the left of its bounds, as wide
+/// as its text, and the button takes the rest: titles of different
+/// lengths give buttons of different widths that end together.
+ControlRef carbon_popup_control(WindowRef window, const Rect *whole, MenuRef menu, int32_t value, uint32_t command, id title) {
+    Rect rest = *whole, *bounds = &rest;
+    if (title && ((unsigned long (*)(id, SEL))objc_send)(title, SELECTOR("length")) && carbon_window_from(window)) {
+        id label = carbon_label_view(title, false);
+        int width = (int)(label_size(label).width + 0.5) + 4;
+        if (width < whole->right - whole->left - 40) {
+            Rect beside = *whole;
+            beside.right = rest.left = (int16_t)(whole->left + width);
+            beside.top += 2;
+            carbon_control_new(window, NULL, label, &beside, FOUR('s', 't', 'x', 't'));
+        }
+    }
     id button = SEND(SEND(CLASS("NSPopUpButton"), "alloc"), "init");
     SEND1(button, "setMenu:", carbon_menu_object(menu));
     SEND1(button, "setTarget:", carbon_action_target());
@@ -597,7 +647,9 @@ OSStatus carbon_CreateStaticTextControl(WindowRef window, const Rect *bounds, id
 OSStatus carbon_CreateStaticTextControl(WindowRef window, const Rect *bounds, id text, const void *style, ControlRef *out) {
     (void)style;
     if (!(window = carbon_window_from(window)) || !bounds || !out) return paramErr;
-    *out = carbon_control_new(window, NULL, carbon_label_view(text, false), bounds, FOUR('s', 't', 'x', 't'));
+    id label = carbon_label_view(text, false);
+    carbon_label_fit(label, bounds, false);
+    *out = carbon_control_new(window, NULL, label, bounds, FOUR('s', 't', 'x', 't'));
     return *out ? noErr : memFullErr;
 }
 
