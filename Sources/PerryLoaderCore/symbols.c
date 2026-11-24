@@ -1359,6 +1359,21 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     perry_symbol sym = { 0 };
     const char *library;
 
+    // A Mac Catalyst image's classes that both UIKit and AppKit define
+    // (NSLayoutConstraint and its anchors, NSParagraphStyle), which newer
+    // SDKs bind to Foundation, are UIKit's: its code is UIKit code, and
+    // AppKit's, which a bridge framework it links brings in, would be found
+    // first in the image's libraries. UIKit's provider answers only for
+    // classes it defines.
+    if (image->platform == PLATFORM_MACCATALYST &&
+        (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0)) {
+        perry_provider *uikit = perry_find_provider(loader, "/System/Library/Frameworks/UIKit.framework/UIKit");
+        if (uikit && uikit->handle && provider_lookup(loader, uikit, name, &sym)) {
+            perry_record_import(image, "UIKit", name, PERRY_IMPORT_RESOLVED);
+            return sym;
+        }
+    }
+
     if (ordinal > 0) {
         if ((uint32_t)ordinal > image->dep_count)
             perry_fatal("%s: library ordinal %d out of range for %s", image->path, ordinal, name);
