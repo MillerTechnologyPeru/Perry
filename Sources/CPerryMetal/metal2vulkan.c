@@ -13,7 +13,7 @@
 
 /// The ABI these declarations are of, and the oldest that still serves:
 /// what a later version adds is bound where the library has it.
-#define ABI_VERSION 10
+#define ABI_VERSION 11
 #define ABI_VERSION_OLDEST 9
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -192,6 +192,7 @@ static void load(void) {
     BIND_FROM(10, sampler_state_gpu_resource_id)
     BIND_FROM(10, render_encoder_use_resource)
     BIND_FROM(10, compute_encoder_use_resource)
+    BIND_FROM(11, device_new_dma_buf_texture)
 #undef BIND_FROM
     loaded = &table;
 }
