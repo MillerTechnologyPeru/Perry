@@ -147,7 +147,6 @@ private final class Channel {
     var gain: Float = 1
     var ratio: Float = 1
     var lock = pthread_mutex_t()
-    var thread = pthread_t()
     nonisolated(unsafe) static var described = false
     /// Held while a callback runs: the Sound Manager calls them at
     /// interrupt time, one at a time, and programs count on it (MacSoft's
@@ -224,6 +223,7 @@ private final class Channel {
             return play(samples)
         case .callBack:
             waiting.append((pushed, command))
+            Channels.wake()
         case .quiet:
             if let stream { _ = Audio.clear!(stream) }
             pushed = played
@@ -263,6 +263,7 @@ private final class Channel {
         // in short buffers, each queued by the callback after the one before
         // (MacSoft's Halo, 12 ms at a time), has gaps between them if each
         // callback waits for the stream to run dry.
+        guard running, !waiting.isEmpty else { return [] }
         let lead = spec.map { Int($0.frequency) * Int($0.channels) * (($0.format & 0xFF) == 16 ? 2 : 1) * 40 / 1000 } ?? 0
         let played = self.played + lead
         var due: [SoundCommand] = []
@@ -273,26 +274,22 @@ private final class Channel {
         return due
     }
 
-    /// Calls the callbacks as their places play, every 2 ms, until the
-    /// channel goes.
-    func run() {
-        while true {
+    /// Calls the callbacks whose places have played; whether more wait.
+    func callDue() -> Bool {
+        for command in due() {
+            var argument = command
+            // One at a time, and none once the channel is disposed of:
+            // SndDisposeChannel takes this lock after it stops the channel.
+            pthread_mutex_lock(&Channel.callbacks)
             pthread_mutex_lock(&lock)
             let running = self.running
             pthread_mutex_unlock(&lock)
-            guard running else { return }
-            for command in due() {
-                pthread_mutex_lock(&lock)
-                let disposed = !self.running
-                pthread_mutex_unlock(&lock)
-                if disposed { return }
-                var argument = command
-                pthread_mutex_lock(&Channel.callbacks)
-                callback?(memory, &argument)
-                pthread_mutex_unlock(&Channel.callbacks)
-            }
-            usleep(2000)
+            if running { callback?(memory, &argument) }
+            pthread_mutex_unlock(&Channel.callbacks)
         }
+        pthread_mutex_lock(&lock)
+        defer { pthread_mutex_unlock(&lock) }
+        return running && !waiting.isEmpty
     }
 
     /// Whether everything put in has played.
@@ -317,6 +314,8 @@ private enum Channels {
     nonisolated(unsafe) static var lock = pthread_mutex_t()
     nonisolated(unsafe) static let initialized: Bool = {
         pthread_mutex_init(&lock, nil)
+        pthread_mutex_init(&waking, nil)
+        pthread_cond_init(&woken, nil)
         return true
     }()
 
@@ -325,6 +324,49 @@ private enum Channels {
         pthread_mutex_lock(&lock)
         defer { pthread_mutex_unlock(&lock) }
         return all[memory]
+    }
+
+    // One thread calls every channel's callbacks, as the Sound Manager's
+    // interrupt did: it looks every 2 ms while a callback waits for its
+    // place to play, and sleeps while none does. A thread for each channel
+    // woke 500 times a second whether its channel played or not, and a
+    // program with a pool of channels has dozens (MacSoft's Halo, 48).
+    nonisolated(unsafe) static var thread = pthread_t()
+    nonisolated(unsafe) static var waking = pthread_mutex_t()
+    nonisolated(unsafe) static var woken = pthread_cond_t()
+    nonisolated(unsafe) static var requested = false
+    nonisolated(unsafe) static let started: Bool = {
+        guard initialized else { return false }
+        return pthread_create(&thread, nil, { _ in
+            Channels.serve()
+            return nil
+        }, nil) == 0
+    }()
+
+    /// A callback now waits: the thread looks for it.
+    static func wake() {
+        pthread_mutex_lock(&waking)
+        requested = true
+        pthread_cond_signal(&woken)
+        pthread_mutex_unlock(&waking)
+    }
+
+    private static func serve() {
+        while true {
+            pthread_mutex_lock(&lock)
+            let channels = Array(all.values)
+            pthread_mutex_unlock(&lock)
+            var waiting = false
+            for channel in channels where channel.callDue() { waiting = true }
+            if waiting {
+                usleep(2000)
+            } else {
+                pthread_mutex_lock(&waking)
+                while !requested { pthread_cond_wait(&woken, &waking) }
+                requested = false
+                pthread_mutex_unlock(&waking)
+            }
+        }
     }
 }
 
@@ -335,21 +377,12 @@ private enum Channels {
 public func SndNewChannel(_ channel: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, _ synth: Int16, _ initialize: Int,
                           _ callback: UnsafeRawPointer?) -> Int16 {
     guard let channel else { return badChannel }
-    guard Audio.available, Channels.initialized else { return notEnoughHardwareErr }
+    guard Audio.available, Channels.initialized, Channels.started else { return notEnoughHardwareErr }
     let owns = channel.pointee == nil
     let memory = channel.pointee ?? calloc(1, ChannelLayout.size)!
     if owns { memory.storeBytes(of: Int16(128), toByteOffset: ChannelLayout.queueLength, as: Int16.self) }
     memory.storeBytes(of: UInt(bitPattern: callback), toByteOffset: ChannelLayout.callBack, as: UInt.self)
     let state = Channel(memory: memory, ownsMemory: owns)
-    let unmanaged = Unmanaged.passRetained(state)
-    guard pthread_create(&state.thread, nil, { argument in
-        Unmanaged<Channel>.fromOpaque(argument!).takeRetainedValue().run()
-        return nil
-    }, unmanaged.toOpaque()) == 0 else {
-        unmanaged.release()
-        if owns { free(memory) }
-        return notEnoughHardwareErr
-    }
     pthread_mutex_lock(&Channels.lock)
     Channels.all[memory] = state
     pthread_mutex_unlock(&Channels.lock)
@@ -372,8 +405,12 @@ public func SndDisposeChannel(_ channel: UnsafeMutableRawPointer?, _ quietNow: U
     state.running = false
     state.waiting.removeAll()
     pthread_mutex_unlock(&state.lock)
-    // A callback disposing of its own channel can't wait for its thread.
-    if pthread_equal(pthread_self(), state.thread) == 0 { pthread_join(state.thread, nil) } else { pthread_detach(state.thread) }
+    // A callback of this channel's that is running ends before its memory
+    // goes; one disposing of a channel is that callback, and can't wait.
+    if pthread_equal(pthread_self(), Channels.thread) == 0 {
+        pthread_mutex_lock(&Channel.callbacks)
+        pthread_mutex_unlock(&Channel.callbacks)
+    }
     if let stream = state.stream { Audio.destroy!(stream) }
     if state.ownsMemory { free(state.memory) }
     return 0
