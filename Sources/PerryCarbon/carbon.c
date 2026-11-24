@@ -148,6 +148,12 @@ void carbon_SecondsToDate(uint32_t seconds, DateTimeRec *date) {
     if (date) date_from(seconds, date);
 }
 
+/// The date and time now, in local time.
+void carbon_GetTime(DateTimeRec *date) CARBON_SYMBOL(GetTime);
+void carbon_GetTime(DateTimeRec *date) {
+    if (date) date_from(mac_seconds(time(NULL)), date);
+}
+
 #pragma pack(push, 2)
 typedef struct {
     int16_t era, year, month, day, hour, minute, second, dayOfWeek, dayOfYear, weekOfYear, pm, res1, res2, res3;
@@ -433,6 +439,84 @@ void carbon_SetCursor(const void *cursor) CARBON_SYMBOL(SetCursor);
 void carbon_SetCursor(const void *cursor) {
     (void)cursor;
     SEND(SEND(CLASS("NSCursor"), "arrowCursor"), "set");
+}
+
+// Cursors a program makes of its own pixels and sets by name. The pixels
+// are 32-bit ARGB, a world's pixel map; the mask, for displays that had no
+// alpha, isn't needed.
+static struct named_cursor { char name[128]; id cursor; } named_cursors[16];
+
+static struct named_cursor *named_cursor(const char *name, bool make) {
+    struct named_cursor *spare = NULL;
+    if (!name) return NULL;
+    for (size_t index = 0; index < sizeof named_cursors / sizeof named_cursors[0]; index++) {
+        if (named_cursors[index].cursor && strncmp(named_cursors[index].name, name, 127) == 0) return &named_cursors[index];
+        if (!named_cursors[index].cursor && !spare) spare = &named_cursors[index];
+    }
+    return make ? spare : NULL;
+}
+
+OSStatus carbon_QDRegisterNamedPixMapCursor(PixMapHandle pixels, PixMapHandle mask, Point hotSpot, const char *name)
+    CARBON_SYMBOL(QDRegisterNamedPixMapCursor);
+OSStatus carbon_QDRegisterNamedPixMapCursor(PixMapHandle pixels, PixMapHandle mask, Point hotSpot, const char *name) {
+    (void)mask;
+    if (!pixels || !*pixels || !name || !name[0]) return paramErr;
+    PixMap *pixmap = *pixels;
+    int width = pixmap->bounds.right - pixmap->bounds.left, height = pixmap->bounds.bottom - pixmap->bounds.top;
+    size_t stride = (size_t)(pixmap->rowBytes & 0x3fff);
+    if (pixmap->pixelSize != 32 || width <= 0 || height <= 0 || !pixmap->baseAddr || stride < (size_t)width * 4) return paramErr;
+    struct named_cursor *entry = named_cursor(name, true);
+    if (!entry) return memFullErr;
+
+    const char *library = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
+    void *(*color_space)(void) = (void *(*)(void))carbon_function(library, "_CGColorSpaceCreateDeviceRGB");
+    void *(*provider)(void *, const void *, size_t, void *) =
+        (void *(*)(void *, const void *, size_t, void *))carbon_function(library, "_CGDataProviderCreateWithData");
+    void *(*image)(size_t, size_t, size_t, size_t, size_t, void *, uint32_t, void *, const void *, bool, int) =
+        (void *(*)(size_t, size_t, size_t, size_t, size_t, void *, uint32_t, void *, const void *, bool, int))carbon_function(
+            library, "_CGImageCreate");
+    void (*release_provider)(void *) = (void (*)(void *))carbon_function(library, "_CGDataProviderRelease");
+    void (*release_image)(void *) = (void (*)(void *))carbon_function(library, "_CGImageRelease");
+    if (!color_space || !provider || !image || !release_provider || !release_image) return paramErr;
+    // A copy, which the image keeps: the program goes on to free its world.
+    void *copy = malloc(stride * (size_t)height);
+    if (!copy) return memFullErr;
+    memcpy(copy, pixmap->baseAddr, stride * (size_t)height);
+    void *data = provider(copy, copy, stride * (size_t)height, (void *)free);
+    // kCGImageAlphaFirst, big-endian: ARGB as the bytes come.
+    void *picture = image((size_t)width, (size_t)height, 8, 32, stride, color_space(), 4 | (4u << 12), data, NULL, false, 0);
+    release_provider(data);
+    if (!picture) return paramErr;
+    NSSize size = {(CGFloat)width, (CGFloat)height};
+    id made = ((id (*)(id, SEL, void *, NSSize))objc_send)(SEND(CLASS("NSImage"), "alloc"), SELECTOR("initWithCGImage:size:"), picture, size);
+    release_image(picture);
+    if (!made) return paramErr;
+    NSPoint spot = {(CGFloat)hotSpot.h, (CGFloat)hotSpot.v};
+    id cursor = ((id (*)(id, SEL, id, NSPoint))objc_send)(SEND(CLASS("NSCursor"), "alloc"), SELECTOR("initWithImage:hotSpot:"), made, spot);
+    SEND(made, "release");
+    if (!cursor) return paramErr;
+    if (entry->cursor) SEND(entry->cursor, "release");
+    strncpy(entry->name, name, sizeof entry->name - 1);
+    entry->name[sizeof entry->name - 1] = 0;
+    entry->cursor = cursor;
+    return noErr;
+}
+
+OSStatus carbon_QDSetNamedPixMapCursor(const char *name) CARBON_SYMBOL(QDSetNamedPixMapCursor);
+OSStatus carbon_QDSetNamedPixMapCursor(const char *name) {
+    struct named_cursor *entry = named_cursor(name, false);
+    if (!entry) return paramErr;
+    SEND(entry->cursor, "set");
+    return noErr;
+}
+
+OSStatus carbon_QDUnregisterNamedPixMapCursor(const char *name) CARBON_SYMBOL(QDUnregisterNamedPixMapCursor);
+OSStatus carbon_QDUnregisterNamedPixMapCursor(const char *name) {
+    struct named_cursor *entry = named_cursor(name, false);
+    if (!entry) return paramErr;
+    SEND(entry->cursor, "release");
+    entry->cursor = NULL;
+    return noErr;
 }
 
 static uint32_t ui_mode, ui_options;
