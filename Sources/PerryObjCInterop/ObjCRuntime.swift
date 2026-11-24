@@ -140,6 +140,7 @@ public enum ObjCRuntime {
             weakFunctions = (store: store, loadRetained: load)
         }
         addIvarFunction = bind("_class_addIvar", as: AddIvar.self)
+        classAliasFunction = bind("_perry_objc_set_class_alias", as: ClassAlias.self)
         if let get = bind("_class_getInstanceVariable", as: GetIvar.self), let offset = bind("_ivar_getOffset", as: IvarOffset.self) {
             ivarFunctions = (get, offset)
         }
@@ -217,6 +218,14 @@ public enum ObjCRuntime {
     /// UIKit stands in for its CoreText. The provider still finds them by
     /// their public names. Set before the classes are defined.
     nonisolated(unsafe) public static var privateClassNames: [String: String] = [:]
+
+    typealias ClassAlias = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+    nonisolated(unsafe) static var classAliasFunction: ClassAlias?
+
+    /// Makes looking up `name` find the class registered as `target`.
+    public static func setClassAlias(_ name: String, to target: String) {
+        name.withCString { name in target.withCString { target in classAliasFunction?(name, target) } }
+    }
 
     /// Defines a class: in the provider's exported storage when it has
     /// some, otherwise on the heap; installs `registrations`, then registers
