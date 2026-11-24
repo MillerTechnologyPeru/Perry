@@ -126,6 +126,7 @@ PERRY_SETTING(UIKIT_TOUCH_TRACE, flag, "UIKit", detail, "gesture recognizers' st
 PERRY_SETTING(UIKIT_LAYOUT_TRACE, flag, "UIKit", detail, "views laid out each second, and layouts that keep asking for another")
 PERRY_SETTING(UIKIT_PRESENT_TRACE, flag, "UIKit", detail, "modal presentations and dismissals")
 PERRY_SETTING(UIKIT_COLLECTION_TRACE, flag, "UIKit", detail, "what collection views are asked and told")
+PERRY_SETTING(UIKIT_CONSTRAINT_TRACE, string, "UIKit", detail, "part of a class name: each activation, deactivation and removal of a constraint with an item of such a class")
 PERRY_SETTING(UIKIT_IMAGE_TRACE, flag, "UIKit", detail, "images and data assets loaded, and those not found")
 PERRY_SETTING(UIKIT_GL_TRACE, flag, "UIKit", detail, "OpenGL ES presents: the first few and every 300th")
 PERRY_SETTING(UIKIT_SYMBOL_TRACE, flag, "UIKit", detail, "say once which SF Symbol an app asked for has no drawing")
