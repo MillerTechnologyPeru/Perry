@@ -1,8 +1,11 @@
 #ifndef PERRY_SETTINGS_H
 #define PERRY_SETTINGS_H
 
-// The PERRY_* environment variables, from perry_settings.def: an id for
-// each, and a table of their names, kinds, groups and summaries.
+// The PERRY_* environment variables, from Sources/PerryInterface/
+// perry_settings.def: an id for each, and a table of their names, kinds,
+// groups and summaries. The table is kept out of include/, whose files
+// SwiftPM makes the PerryInterface module: there clang would import it as
+// part of the module, not read it here with PERRY_SETTING defined.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,7 +23,7 @@ typedef enum perry_setting_kind {
 
 typedef enum perry_setting_id {
 #define PERRY_SETTING(name, kind, group, help, summary) PERRY_SETTING_##name,
-#include "perry_settings.def"
+#include "../perry_settings.def"
 #undef PERRY_SETTING
     PERRY_SETTING_COUNT
 } perry_setting_id;
@@ -39,7 +42,7 @@ typedef struct perry_setting {
 static const perry_setting perry_settings[PERRY_SETTING_COUNT] = {
 #define PERRY_SETTING(name, kind, group, help, summary) \
     {"PERRY_" #name, perry_setting_##kind, group, perry_setting_##help, summary},
-#include "perry_settings.def"
+#include "../perry_settings.def"
 #undef PERRY_SETTING
 };
 
