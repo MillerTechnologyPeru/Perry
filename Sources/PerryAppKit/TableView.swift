@@ -885,7 +885,7 @@ open class NSTableView: NSControl {
                     CG.restoreGState(context)
                 }
                 for (index, entry) in rects.enumerated() {
-                    guard let cell = entry.column.dataCell(forRow: row) else { continue }
+                    guard let cell = entry.column.cell(forRow: row) else { continue }
                     // Through -setObjectValue:, which a button cell takes as
                     // its state and subclasses (Xcode's) override.
                     let value = objectValue(column: entry.column, row: row)
@@ -1364,8 +1364,14 @@ open class NSTableColumn: NSObject {
     @ObjCMethod("setHeaderCell:") func setHeaderCell(_ cell: NSCell?) { headerCell = cell }
     @ObjCMethod("dataCell") func columnDataCell() -> NSCell? { dataCell }
     @ObjCMethod("setDataCell:") func setDataCell(_ cell: NSCell?) { dataCell = cell }
+    /// AppKit's: the column's cell. A subclass's override may call it as
+    /// super, so it never sends the message itself.
     @ObjCMethod("dataCellForRow:")
-    func dataCell(forRow row: Int) -> NSCell? {
+    func dataCell(forRow row: Int) -> NSCell? { dataCell }
+
+    /// The cell the table draws the row with: a subclass's
+    /// -dataCellForRow:, else the column's cell.
+    func cell(forRow row: Int) -> NSCell? {
         if Methods.overrides(objcObject, "dataCellForRow:", of: NSTableColumn.objCClass.pointer) {
             return Send.objectRow(objcObject, "dataCellForRow:", row).map { NSCell.objCInstance($0, ownership: .retain) }
         }
