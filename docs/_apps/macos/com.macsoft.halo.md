@@ -4,7 +4,7 @@ bundle_id: "com.macsoft.halo"
 platform: macos
 kind: game
 developer: MacSoft
-tags: [C++, Carbon]
+tags: [C++]
 reports:
   - pr: 348
     date: 2026-11-23
