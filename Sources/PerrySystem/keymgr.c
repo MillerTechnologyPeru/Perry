@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef struct key_entry {
@@ -22,6 +23,24 @@ typedef struct key_entry {
     pthread_mutex_t lock;
     struct key_entry *next;
 } key_entry;
+
+// __keymgr_global, which the startup code of programs GCC 3 and 4 built
+// (crt2) reads to see whether keymgr keeps the list of objects with frame
+// data itself, as libSystem's has since Tiger: when its information's major
+// version is 3 or later. Otherwise that code sets the list up through
+// keymgr's old hooks.
+struct darwin_keymgr_info {
+    uint32_t size;
+    uint16_t major_version;
+    uint16_t minor_version;
+};
+struct darwin_keymgr_global {
+    void *mutex;
+    void *globals;
+    const struct darwin_keymgr_info *info;
+};
+static const struct darwin_keymgr_info keymgr_info = { sizeof(struct darwin_keymgr_info), 4, 0 };
+const struct darwin_keymgr_global darwin_keymgr_global DARWIN_SYMBOL(__keymgr_global) = { NULL, NULL, &keymgr_info };
 
 static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
 static key_entry *entries;
