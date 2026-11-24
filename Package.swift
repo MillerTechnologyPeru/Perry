@@ -113,6 +113,8 @@ let package = Package(
         .library(name: "PerryAppKit", type: .dynamic, targets: ["PerryAppKit"]),
         // Metal, on Vulkan.
         .library(name: "PerryMetal", type: .dynamic, targets: ["PerryMetal"]),
+        // Model I/O: meshes, their vertex layouts and generators, OBJ assets.
+        .library(name: "PerryModelIO", type: .dynamic, targets: ["PerryModelIO"]),
     ],
     dependencies: [
         // CoreModel's macros need swift-syntax 603; Perry's work with 603 and 604.
@@ -576,6 +578,16 @@ let package = Package(
         .target(
             name: "PerryMetal",
             dependencies: ["CPerryGeometry", "CPerryMetal", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Model I/O's simd values, as its methods pass them.
+        .target(name: "CPerryModelIO"),
+        // Model I/O: vertex descriptors, mesh buffers, meshes and their
+        // generators, materials, transforms, animated values and assets,
+        // which load and export Wavefront OBJ files.
+        .target(
+            name: "PerryModelIO",
+            dependencies: ["CPerryModelIO", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Generates a provider's perry_provider_startup and perry_provider_symbol
