@@ -25,6 +25,14 @@ typedef struct _NSRange {
     uintptr_t length;
 } NSRange;
 
+// NSDecimal: a word of bit fields (exponent:8, length:4, isNegative:1,
+// isCompact:1, reserved:18) and eight 16-bit mantissa words, least first.
+// 20 bytes, passed and returned by value as Darwin's.
+typedef struct {
+    uint32_t _flags;
+    uint16_t _mantissa[8];
+} NSDecimal;
+
 typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSString,
     PERRY_CLASS_NSConstantString,   // ___CFConstantStringClassReference
@@ -185,6 +193,19 @@ void *perry_foundation_empty_dictionary(void);
 void perry_imp_stringWithFormat(void);      // + (id)stringWithFormat:(NSString *)format, ...
 void perry_imp_initWithFormat(void);        // - (id)initWithFormat:(NSString *)format, ...
 void perry_imp_stringByAppendingFormat(void);
+void perry_imp_encodeValuesOfObjCTypes(void);
+void perry_imp_decodeValuesOfObjCTypes(void);
+void perry_imp_initWithFormatLocale(void);
+void perry_imp_localizedAttributedStringWithFormat(void);
+void perry_imp_localizedAttributedStringWithFormatOptions(void);
+void perry_imp_localizedAttributedStringWithFormatContext(void);
+void perry_imp_appendLocalizedFormat(void);
+void perry_imp_stringWithValidatedFormat(void);
+void perry_imp_initWithValidatedFormat(void);
+void perry_imp_localizedAttributedStringWithFormatOptionsContext(void);
+void perry_imp_attributedInitWithFormat(void);
+void perry_imp_initWithValidatedFormatLocale(void);
+void perry_imp_attributedInitWithFormatContext(void);
 void perry_imp_arrayWithObjects(void);      // + (id)arrayWithObjects:(id)first, ... nil
 void perry_imp_setWithObjects(void);        // + (id)setWithObjects:(id)first, ... nil
 void perry_imp_orderedSetWithObjects(void); // + (id)orderedSetWithObjects:(id)first, ... nil
