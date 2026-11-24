@@ -1,2 +1,4 @@
-GLIBC_2.1 { global: capget; capset; };
-GLIBC_2.38 { global: __isoc23_strtoul; __isoc23_vfscanf; __isoc23_vscanf; __isoc23_vsscanf; __isoc23_vswscanf; local: *; } GLIBC_2.1;
+GLIBC_2.0 { global: tsearch; tfind; tdelete; twalk; };
+GLIBC_2.1 { global: capget; capset; } GLIBC_2.0;
+GLIBC_2.34 { global: openpty; } GLIBC_2.1;
+GLIBC_2.38 { global: __isoc23_strtoul; __isoc23_vfscanf; __isoc23_vscanf; __isoc23_vsscanf; __isoc23_vswscanf; local: *; } GLIBC_2.34;
