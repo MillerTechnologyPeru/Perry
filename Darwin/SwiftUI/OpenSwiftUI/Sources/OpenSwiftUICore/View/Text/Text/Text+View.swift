@@ -307,9 +307,10 @@ package struct StyledTextContentView: UnaryView, PrimitiveView, ShapeStyledLeafV
                 outputs = .init()
             } else {
                 let group = _ShapeStyle_InterpolatorGroup()
-                if inputs.needsGeometry {
-                    newInputs.position = inputs.animatedPosition()
-                }
+                // The leaf view animates its position itself: animating it
+                // here as well put one animated position behind another, and
+                // text then kept its old place while its position changed
+                // without its view changing (pins on a map being dragged).
                 outputs = makeLeafView(
                     view: view,
                     inputs: newInputs,

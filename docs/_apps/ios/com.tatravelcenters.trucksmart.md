@@ -86,4 +86,20 @@ reports:
     level: 3
     source: body
     notes: "Run as an iOS 26 app on master's compositor with the pull request's SwiftUI: the Locations sheet is frosted over the map and the tab bar floats as a glass capsule. The sheet's rounded corners still come out square, and a scripted tap on the site card did not open its detail screen in this run."
+  - pr: 355
+    date: 2026-11-23
+    perry: "92eec0df"
+    platform: ios
+    cpu: arm64
+    app_version: "6.3"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    env:
+      - "PERRY_OS_VERSION=26.0"
+    level: 3
+    source: body
+    notes: "Dragging the Locations map by hand, each pin's distance and title now stay with its marker; before, the text kept its place until the finger lifted. A drag still manages only about nine updates a second."
+    screenshots:
+      - url: https://github.com/user-attachments/assets/37aa78af-4038-4545-b616-039e1a56322b
+        caption: Locations, with each pin's text at its marker
 ---
