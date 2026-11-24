@@ -408,7 +408,7 @@ public func dispatch_after(_ when: UInt64, _ queue: Object?, _ block: UnsafeMuta
     linux_dispatch_after_f(DarwinTime.linux(when), Objects.linux(queue), Blocks.copy(block), Blocks.runOnce)
 }
 
-@DarwinC("perry_native_dispatch_after_f")
+@DarwinC("_dispatch_after_f")
 public func dispatch_after_f(_ when: UInt64, _ queue: Object?, _ context: UnsafeMutableRawPointer?,
                              _ work: Function?) {
     guard let work else { dispatchFatal("dispatch_after_f called with a NULL function") }
