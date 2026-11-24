@@ -25,6 +25,15 @@ indirect enum ExpressionNode {
     /// FUNCTION(operand, 'selector:', arguments...): the selector sent to
     /// the operand's value.
     case method(ExpressionNode, String, [ExpressionNode])
+    /// ANYKEY: Spotlight's any attribute, which has no value in memory.
+    case anyKey
+    /// UNION, INTERSECT or MINUS (NSExpressionType 5, 6, 7) of two
+    /// collections' members.
+    case setOperation(UInt, ExpressionNode, ExpressionNode)
+    /// expressionForBlock:arguments:'s block, given the arguments' values.
+    case block(BlockReference, [ExpressionNode])
+    /// initWithExpressionType:'s bare expression of a type.
+    case placeholder(UInt)
 
     /// NSExpressionType.
     var type: UInt {
@@ -37,6 +46,10 @@ indirect enum ExpressionNode {
         case .variable: return 2
         case .subquery: return 13
         case .conditional: return 20
+        case .anyKey: return 15
+        case .setOperation(let type, _, _): return type
+        case .block: return 19
+        case .placeholder(let type): return type
         }
     }
 }
@@ -55,6 +68,9 @@ indirect enum PredicateNode {
         var operation: UInt
         var modifier: UInt
         var options: UInt
+        /// NSCustomSelectorPredicateOperatorType's selector, sent to the
+        /// left value with the right one.
+        var selector: String? = nil
     }
 }
 
@@ -123,7 +139,7 @@ enum PredicateArithmetic {
 enum PredicateOperator {
     static let lessThan: UInt = 0, lessThanOrEqualTo: UInt = 1, greaterThan: UInt = 2, greaterThanOrEqualTo: UInt = 3
     static let equalTo: UInt = 4, notEqualTo: UInt = 5, matches: UInt = 6, like: UInt = 7, beginsWith: UInt = 8
-    static let endsWith: UInt = 9, `in`: UInt = 10, contains: UInt = 99, between: UInt = 100
+    static let endsWith: UInt = 9, `in`: UInt = 10, customSelector: UInt = 11, contains: UInt = 99, between: UInt = 100
 
     static let names: [UInt: String] = [
         lessThan: "<", lessThanOrEqualTo: "<=", greaterThan: ">", greaterThanOrEqualTo: ">=", equalTo: "==",
@@ -160,6 +176,16 @@ enum PredicateFormat {
                 return expression(arguments[0]) + " " + String(name.dropFirst(6)) + " " + expression(arguments[1])
             }
             return String(name.prefix { $0 != ":" }) + "(" + arguments.map(expression).joined(separator: ", ") + ")"
+        case .anyKey:
+            return "ANYKEY"
+        case .setOperation(let type, let left, let right):
+            let name = type == 5 ? "UNION" : type == 6 ? "INTERSECT" : "MINUS"
+            return expression(left) + " " + name + " " + expression(right)
+        case .block(let reference, let arguments):
+            return "BLOCK(\(reference.block), "
+                + Describe.list(arguments.map(Predicates.expression), open: "(", close: ")", indent: 0) + ")"
+        case .placeholder:
+            return ""
         }
     }
 
@@ -185,6 +211,9 @@ enum PredicateFormat {
             if c.options & PredicateOptions.caseInsensitive != 0 { flags += "c" }
             if c.options & PredicateOptions.diacriticInsensitive != 0 { flags += "d" }
             if c.options & PredicateOptions.normalized != 0 { flags += "n" }
+            if c.operation == PredicateOperator.customSelector {
+                return "\(modifier)\(expression(c.left)) \(c.selector ?? "") \(expression(c.right))"
+            }
             let operation = (PredicateOperator.names[c.operation] ?? "?") + (flags.isEmpty ? "" : "[\(flags)]")
             return "\(modifier)\(expression(c.left)) \(operation) \(expression(c.right))"
         case .compound(let type, let subpredicates):
@@ -732,11 +761,34 @@ enum PredicateEvaluation {
                 variables[name] = item
                 return evaluate(predicate, object)
             })
+        case .anyKey, .placeholder:
+            // Darwin raises: ANYKEY is for Spotlight's queries only.
+            return nil
+        case .setOperation(let type, let left, let right):
+            // A mutable set, as Darwin's, of the members of either collection.
+            let mine = elements(value(left, object)) ?? [], theirs = elements(value(right, object)) ?? []
+            let others = Set(theirs.map { ObjectKey(object: $0) })
+            let members: [id]
+            switch type {
+            case 5: members = mine + theirs
+            case 6: members = mine.filter { others.contains(ObjectKey(object: $0)) }
+            default: members = mine.filter { !others.contains(ObjectKey(object: $0)) }
+            }
+            return Sets.autoreleased(members, cls: UnsafeMutableRawPointer(Sets.mutableClass))
+        case .block(let reference, let arguments):
+            // The block gets the arguments' values, NSNull for nil, and the context.
+            let values = Arrays.autoreleased(arguments.map { value($0, object) ?? Nulls.null })
+            typealias Invoke = @convention(c) (id, id?, id?, id?) -> id?
+            return Blocks.invoke(reference.block, as: Invoke.self)(reference.block, object, values, context)
         }
     }
 
     /// The variables subqueries have bound, while they evaluate.
     nonisolated(unsafe) static var variables: [String: id] = [:]
+
+    /// The context expressionValueWithObject:context: was given, for block
+    /// expressions, while it evaluates.
+    nonisolated(unsafe) static var context: id?
 
     /// The aggregate functions over an argument's collection, and the case
     /// changes over a string.
@@ -770,6 +822,7 @@ enum PredicateEvaluation {
         guard let value else { return nil }
         if ObjC.isKind(value, of: Arrays.arrayClass) { return Arrays.elements(value) }
         if ObjC.isKind(value, of: Sets.setClass) { return Sets.elements(value) }
+        if ObjC.isKind(value, of: OrderedSets.setClass) { return OrderedSets.storage(value).members }
         return nil
     }
 
@@ -843,6 +896,9 @@ enum PredicateEvaluation {
         case PredicateOperator.like:
             guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
             return wildcard(Array(l), Array(r))
+        case PredicateOperator.customSelector:
+            guard let left, let selector = c.selector else { return false }
+            return ObjC.sendBool(left, ObjC.selector(selector), right)
         case PredicateOperator.matches:
             guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
             // The whole string, by ICU's regular expressions as Foundation's:
@@ -1005,6 +1061,22 @@ public class NSPredicate: NSObject {
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSPredicate { self }
 
+    /// For a securely decoded predicate, which Darwin keeps from evaluating
+    /// until this is sent; any predicate evaluates here.
+    @ObjCMethod("allowEvaluation") func allowEvaluation() {}
+
+    /// iOS 26.4's: walks the tree as Darwin does, offering the validator each
+    /// predicate, operator, expression and key path key it implements a visit
+    /// for, and allows evaluation unless a visit answers NO with an error.
+    @ObjCMethod("allowEvaluationWithValidator:error:")
+    func allowEvaluation(validator: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let validator else { return true }
+        var visitor = PredicateValidation(validator: validator.objcObject)
+        if visitor.visit(node) { return true }
+        error?.pointee = visitor.error
+        return false
+    }
+
     @ObjCMethod("isEqual:")
     func isEqual(_ other: ObjCObject?) -> Bool {
         guard let other else { return false }
@@ -1048,6 +1120,40 @@ public class NSComparisonPredicate: NSPredicate {
                                                         operation: type, modifier: modifier, options: options))))
     }
 
+    /// NSCustomSelectorPredicateOperatorType (11): the left value is sent
+    /// the selector with the right value, and the predicate holds when it
+    /// answers YES.
+    @ObjCClassMethod("predicateWithLeftExpression:rightExpression:customSelector:")
+    static func predicate(left: ObjCObject, right: ObjCObject, customSelector: ObjCSelector) -> ObjCObject {
+        ObjCObject(Predicates.object(.comparison(.init(left: Predicates.expressionNode(left.objcObject),
+                                                        right: Predicates.expressionNode(right.objcObject),
+                                                        operation: PredicateOperator.customSelector, modifier: PredicateModifier.direct,
+                                                        options: 0, selector: customSelector.name))))
+    }
+
+    @ObjCMethod("initWithLeftExpression:rightExpression:customSelector:")
+    func initialize(left: ObjCObject, right: ObjCObject, customSelector: ObjCSelector) -> Self {
+        Storage.set(objcObject, PredicateStorage(.comparison(.init(left: Predicates.expressionNode(left.objcObject),
+                                                                   right: Predicates.expressionNode(right.objcObject),
+                                                                   operation: PredicateOperator.customSelector,
+                                                                   modifier: PredicateModifier.direct, options: 0,
+                                                                   selector: customSelector.name))))
+        return self
+    }
+
+    @ObjCMethod("initWithLeftExpression:rightExpression:modifier:type:options:")
+    func initialize(left: ObjCObject, right: ObjCObject, modifier: UInt, type: UInt, options: UInt) -> Self {
+        Storage.set(objcObject, PredicateStorage(.comparison(.init(left: Predicates.expressionNode(left.objcObject),
+                                                                   right: Predicates.expressionNode(right.objcObject),
+                                                                   operation: type, modifier: modifier, options: options))))
+        return self
+    }
+
+    /// The custom selector; NULL for the other operators here, where Darwin
+    /// answers isEqual: for ==.
+    @ObjCMethod("customSelector")
+    func customSelector() -> ObjCSelector? { comparison?.selector.map { ObjCSelector($0) } }
+
     @ObjCMethod("leftExpression")
     func leftExpression() -> ObjCObject? { comparison.map { ObjCObject(Predicates.expression($0.left)) } }
     @ObjCMethod("rightExpression")
@@ -1075,6 +1181,15 @@ public class NSCompoundPredicate: NSPredicate {
     @ObjCClassMethod("notPredicateWithSubpredicate:")
     static func not(_ subpredicate: ObjCObject) -> ObjCObject {
         ObjCObject(Predicates.object(.compound(CompoundType.not, [Predicates.node(subpredicate.objcObject)])))
+    }
+
+    /// NSNotPredicateType (0) takes the first subpredicate.
+    @ObjCMethod("initWithType:subpredicates:")
+    func initialize(type: UInt, subpredicates: ObjCObject?) -> Self {
+        var nodes = (subpredicates.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.node)
+        if type == CompoundType.not { nodes = Array(nodes.prefix(1)) }
+        Storage.set(objcObject, PredicateStorage(.compound(type, nodes)))
+        return self
     }
 
     @ObjCMethod("compoundPredicateType")
@@ -1154,6 +1269,7 @@ public class NSExpression: NSObject {
     @ObjCMethod("arguments")
     func arguments() -> ObjCObject? {
         Predicates.trace(".arguments of \(PredicateFormat.expression(node))")
+        if case .block(_, let arguments) = node { return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression))) }
         if case .method(_, _, let arguments) = node { return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression))) }
         guard case .function(_, let arguments) = node else { return nil }
         return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression)))
@@ -1161,6 +1277,84 @@ public class NSExpression: NSObject {
 
     @ObjCClassMethod("expressionForEvaluatedObject")
     static func evaluatedObject() -> ObjCObject { ObjCObject(Predicates.expression(.evaluatedObject)) }
+
+    /// ANYKEY, for Spotlight's queries: Darwin raises when one is evaluated
+    /// in memory; here its value is nil.
+    @ObjCClassMethod("expressionForAnyKey")
+    static func anyKey() -> ObjCObject { ObjCObject(Predicates.expression(.anyKey)) }
+
+    /// The block is copied; it gets the evaluated object, the arguments'
+    /// values (as Darwin passes them, not the expressions) and the context.
+    @ObjCClassMethod("expressionForBlock:arguments:")
+    static func block(_ block: ObjCObject?, arguments: ObjCObject?) -> ObjCObject? {
+        guard let reference = BlockReference(block?.objcObject) else { return nil }
+        let nodes = (arguments.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.expressionNode)
+        return ObjCObject(Predicates.expression(.block(reference, nodes)))
+    }
+
+    /// The members of either collection, as a mutable set when evaluated.
+    @ObjCClassMethod("expressionForUnionSet:with:")
+    static func union(_ left: ObjCObject, with right: ObjCObject) -> ObjCObject { setOperation(5, left, right) }
+
+    /// The left collection's members the right one has.
+    @ObjCClassMethod("expressionForIntersectSet:with:")
+    static func intersect(_ left: ObjCObject, with right: ObjCObject) -> ObjCObject { setOperation(6, left, right) }
+
+    /// The left collection's members the right one lacks.
+    @ObjCClassMethod("expressionForMinusSet:with:")
+    static func minus(_ left: ObjCObject, with right: ObjCObject) -> ObjCObject { setOperation(7, left, right) }
+
+    private static func setOperation(_ type: UInt, _ left: ObjCObject, _ right: ObjCObject) -> ObjCObject {
+        ObjCObject(Predicates.expression(.setOperation(type, Predicates.expressionNode(left.objcObject),
+                                                       Predicates.expressionNode(right.objcObject))))
+    }
+
+    /// SUBQUERY(collection, $variable, predicate): the members the predicate
+    /// holds for with the variable bound to each.
+    @ObjCClassMethod("expressionForSubquery:usingIteratorVariable:predicate:")
+    static func subquery(_ collection: ObjCObject, variable: String, predicate: ObjCObject) -> ObjCObject {
+        ObjCObject(Predicates.expression(.subquery(Predicates.expressionNode(collection.objcObject), variable,
+                                                   Predicates.node(predicate.objcObject))))
+    }
+
+    /// An expression of a type with nothing more to it: the evaluated
+    /// object's and ANYKEY's are whole; any other has no value here, where
+    /// Darwin raises when it is asked for one.
+    @ObjCMethod("initWithExpressionType:")
+    func initialize(type: UInt) -> Self {
+        let made: ExpressionNode
+        switch type {
+        case 1: made = .evaluatedObject
+        case 15: made = .anyKey
+        default: made = .placeholder(type)
+        }
+        Storage.set(objcObject, ExpressionStorage(made))
+        return self
+    }
+
+    /// For a securely decoded expression, which Darwin keeps from
+    /// evaluating until this is sent; any expression evaluates here.
+    @ObjCMethod("allowEvaluation") func allowEvaluation() {}
+
+    /// A set expression's sides; nil for other expressions, where Darwin raises.
+    @ObjCMethod("leftExpression")
+    func leftExpression() -> ObjCObject? {
+        guard case .setOperation(_, let left, _) = node else { return nil }
+        return ObjCObject(Predicates.expression(left))
+    }
+
+    @ObjCMethod("rightExpression")
+    func rightExpression() -> ObjCObject? {
+        guard case .setOperation(_, _, let right) = node else { return nil }
+        return ObjCObject(Predicates.expression(right))
+    }
+
+    /// A block expression's block.
+    @ObjCMethod("expressionBlock")
+    func expressionBlock() -> UnsafeMutableRawPointer? {
+        guard case .block(let reference, _) = node else { return nil }
+        return reference.block
+    }
 
     @ObjCClassMethod("expressionForAggregate:")
     static func aggregate(_ expressions: ObjCObject?) -> ObjCObject {
@@ -1189,8 +1383,10 @@ public class NSExpression: NSObject {
                                                      Predicates.expressionNode(falseExpression.objcObject))))
     }
 
+    /// A conditional's or a subquery's predicate.
     @ObjCMethod("predicate")
     func conditionalPredicate() -> ObjCObject? {
+        if case .subquery(_, _, let predicate) = node { return ObjCObject(Predicates.object(predicate)) }
         guard case .conditional(let predicate, _, _) = node else { return nil }
         return ObjCObject(Predicates.object(predicate))
     }
@@ -1210,9 +1406,11 @@ public class NSExpression: NSObject {
     @ObjCClassMethod("expressionForVariable:")
     static func variable(_ name: String) -> ObjCObject { ObjCObject(Predicates.expression(.variable(name))) }
 
+    /// A variable's name, or a subquery's iterator variable.
     @ObjCMethod("variable")
     func variable() -> String? {
         if case .variable(let name) = node { return name }
+        if case .subquery(_, let name, _) = node { return name }
         return nil
     }
 
@@ -1226,21 +1424,118 @@ public class NSExpression: NSObject {
         return nil
     }
 
-    /// An aggregate's expressions.
+    /// An aggregate's expressions; a subquery's collection expression.
     @ObjCMethod("collection")
     func collection() -> ObjCObject? {
         Predicates.trace(".collection of \(PredicateFormat.expression(node))")
+        if case .subquery(let collection, _, _) = node { return ObjCObject(Predicates.expression(collection)) }
         guard case .aggregate(let elements) = node else { return nil }
         return ObjCObject(Arrays.autoreleased(elements.map(Predicates.expression)))
     }
 
     @ObjCMethod("expressionValueWithObject:context:")
     func value(with object: ObjCObject?, context: ObjCObject?) -> ObjCObject? {
-        PredicateEvaluation.value(node, object?.objcObject).map(ObjCObject.init)
+        let saved = PredicateEvaluation.context
+        PredicateEvaluation.context = context?.objcObject
+        defer { PredicateEvaluation.context = saved }
+        return PredicateEvaluation.value(node, object?.objcObject).map(ObjCObject.init)
     }
 
     @ObjCMethod("description") func description() -> String { PredicateFormat.expression(node) }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSExpression { self }
+}
+
+// MARK: - Validation
+
+/// allowEvaluationWithValidator:error:'s walk, in Darwin's order: a
+/// predicate, then a comparison's operator and expressions or a compound's
+/// subpredicates; an expression, then what it is made of, a key path's
+/// operand (the evaluated object) and each key with the keys before it as
+/// its scope. A visit that answers NO with an error ends the walk.
+struct PredicateValidation {
+    let validator: id
+    var error: id?
+
+    init(validator: id) { self.validator = validator }
+
+    private func responds(_ selector: SEL) -> Bool {
+        ObjC.sendBool(validator, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector))
+    }
+
+    /// Whether the walk goes on after a visit's answer.
+    private mutating func goesOn(_ answer: Bool, _ found: id?) -> Bool {
+        if answer || found == nil { return true }
+        error = found
+        return false
+    }
+
+    private mutating func visit(object: id, _ name: String) -> Bool {
+        let selector = ObjC.selector(name)
+        guard responds(selector) else { return true }
+        var found: id?
+        typealias Visit = @convention(c) (id, SEL, id?, UnsafeMutablePointer<id?>?) -> Bool
+        let answer = unsafeBitCast(ObjC.msgSend, to: Visit.self)(validator, selector, object, &found)
+        return goesOn(answer, found)
+    }
+
+    mutating func visit(_ node: PredicateNode) -> Bool {
+        guard visit(object: Predicates.object(node), "visitPredicate:error:") else { return false }
+        switch node {
+        case .truth, .block:
+            return true
+        case .compound(_, let parts):
+            for part in parts { if !visit(part) { return false } }
+            return true
+        case .comparison(let c):
+            let selector = ObjC.selector("visitOperatorType:error:")
+            if responds(selector) {
+                var found: id?
+                typealias Visit = @convention(c) (id, SEL, UInt, UnsafeMutablePointer<id?>?) -> Bool
+                let answer = unsafeBitCast(ObjC.msgSend, to: Visit.self)(validator, selector, c.operation, &found)
+                guard goesOn(answer, found) else { return false }
+            }
+            guard visit(c.left) else { return false }
+            return visit(c.right)
+        }
+    }
+
+    mutating func visit(_ node: ExpressionNode) -> Bool {
+        let object = Predicates.expression(node)
+        guard visit(object: object, "visitExpression:error:") else { return false }
+        switch node {
+        case .keyPath(let path):
+            guard visit(.evaluatedObject) else { return false }
+            let selector = ObjC.selector("visitExpressionKeyPath:scope:key:error:")
+            guard responds(selector) else { return true }
+            let keys = path.split(separator: ".").map(String.init)
+            typealias Visit = @convention(c) (id, SEL, id?, id?, id?, UnsafeMutablePointer<id?>?) -> Bool
+            for (index, key) in keys.enumerated() {
+                var found: id?
+                let scope = Strings.autoreleased(keys.prefix(index).joined(separator: "."))
+                let answer = unsafeBitCast(ObjC.msgSend, to: Visit.self)(validator, selector, object, scope, Strings.autoreleased(key), &found)
+                guard goesOn(answer, found) else { return false }
+            }
+            return true
+        case .constant, .evaluatedObject, .variable, .anyKey, .placeholder:
+            return true
+        case .aggregate(let members), .function(_, let members), .block(_, let members):
+            for member in members { if !visit(member) { return false } }
+            return true
+        case .method(let operand, _, let arguments):
+            guard visit(operand) else { return false }
+            for argument in arguments { if !visit(argument) { return false } }
+            return true
+        case .subquery(let collection, let variable, let predicate):
+            guard visit(collection), visit(.variable(variable)) else { return false }
+            return visit(predicate)
+        case .conditional(let predicate, let whenTrue, let whenFalse):
+            guard visit(predicate), visit(whenTrue) else { return false }
+            return visit(whenFalse)
+        case .setOperation(_, let left, let right):
+            guard visit(left) else { return false }
+            return visit(right)
+        }
+    }
 }
 
 // MARK: - Variadic methods
@@ -1303,7 +1598,11 @@ enum Substitution {
 
     static func expression(_ node: ExpressionNode, _ variables: id?, shadowed: Set<String>) -> ExpressionNode {
         switch node {
-        case .keyPath, .constant, .evaluatedObject: return node
+        case .keyPath, .constant, .evaluatedObject, .anyKey, .placeholder: return node
+        case .setOperation(let type, let left, let right):
+            return .setOperation(type, expression(left, variables, shadowed: shadowed), expression(right, variables, shadowed: shadowed))
+        case .block(let reference, let arguments):
+            return .block(reference, arguments.map { expression($0, variables, shadowed: shadowed) })
         case .variable(let name):
             guard !shadowed.contains(name), let variables else { return node }
             let key = Strings.make(name)
