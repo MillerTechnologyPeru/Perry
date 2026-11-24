@@ -372,6 +372,13 @@ private func realizedClass(_ name: UnsafePointer<CChar>?) -> Class? {
     return cls
 }
 
+/// Makes `name` find the class registered as `target` (Perry's own).
+@c(_perry_objc_set_class_alias)
+public func perry_objc_set_class_alias(_ name: UnsafePointer<CChar>?, _ target: UnsafePointer<CChar>?) {
+    guard let name, let target else { return }
+    Runtime.setClassAlias(String(cString: name), to: String(cString: target))
+}
+
 @c(_objc_getClass)
 public func objc_getClass(_ name: UnsafePointer<CChar>?) -> Class? {
     realizedClass(name)
