@@ -37,6 +37,13 @@ cmake .. -DSD865=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 make -j6
 ```
 
+`box86-mmap-base.patch` is applied first (`git apply`). It adds a setting,
+`BOX86_MMAP_BASE=0x…`: the address box86 places mappings from when none is
+asked for, its own bridges into wrapped libraries among them, in place of
+0x40000000. A Mac program may map a block at a fixed address, where on the
+Mac nothing is, and that maps over whatever box86 put there: Halo keeps its
+game state at 0x40000000, and its launcher sets `BOX86_MMAP_BASE=0x48000000`.
+
 ROCKNIX's own box86 (0.3.9, built on 1 November 2026) crashes in libc as
 Perry starts, so on ROCKNIX launchers run a copy of that build from the
 runtime folder (`$PERRY_ROOT/box86`) rather than `/usr/bin/box86`.
