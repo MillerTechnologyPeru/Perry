@@ -275,6 +275,7 @@ open class NSApplication: NSResponder {
 
     func end() -> Never {
         notify("applicationWillTerminate:", Constants.NSApplicationWillTerminateNotification)
+        DesktopMenus.stop()
         exit(0)
     }
 
