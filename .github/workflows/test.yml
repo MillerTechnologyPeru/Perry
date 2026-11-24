@@ -116,3 +116,24 @@ jobs:
             ${{ matrix.fixtures && '-e PERRY_REQUIRE_FIXTURES=1' || '' }} \
             perry-dev \
             swift test --skip-build --scratch-path .build/linux
+
+      # The Stopwatch fixture's timings, compared with
+      # Tests/Benchmarks/baseline.json in the job's summary. Report only:
+      # hosted runners are too noisy to fail a build on.
+      - name: Benchmark
+        if: matrix.fixtures && !cancelled()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          docker run --rm -v "$PWD:/perry" perry-dev \
+            Scripts/perry-bench.sh -c Tests/Benchmarks/baseline.json > benchmarks.json 2> benchmarks.md
+          cat benchmarks.json
+          { echo "## Benchmarks (ns per operation)"; echo; cat benchmarks.md; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the benchmarks
+        if: matrix.fixtures && !cancelled()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmarks-${{ matrix.arch }}
+          path: benchmarks.json
