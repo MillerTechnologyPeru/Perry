@@ -36,6 +36,9 @@ open class NSColor: NSObject {
     convenience init(named name: String, red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat = 1) {
         self.init(red: red, green: green, blue: blue, alpha: alpha)
         (catalogName, colorName) = ("System", name)
+        // Its components are for this appearance, as a system color's are
+        // on macOS: kept, it takes another's when drawn.
+        markResolved()
     }
 
     /// NSColor's keyed archive: NSColorSpace 1 and 2 are RGB ("NSRGB": "r g
@@ -63,7 +66,7 @@ open class NSColor: NSObject {
             colorName = decoded.string("NSColorName")
             if let name = colorName, let system = NSColor.system(name) {
                 (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
-                resolvedDark = Appearances.currentIsDark
+                markResolved()
             } else if let fallback = decoded.object("NSColor")?.as(NSColor.self) {
                 (red, green, blue, alpha) = (fallback.red, fallback.green, fallback.blue, fallback.alpha)
             }
@@ -106,10 +109,21 @@ open class NSColor: NSObject {
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
-    /// For a system color from a nib, the appearance its components are
-    /// for: it takes the current one's when drawn, as AppKit's dynamic
-    /// colors do.
+    /// For a system color, the appearance its components are for: it takes
+    /// the current one's when drawn, as AppKit's dynamic colors do.
     var resolvedDark: Bool?
+    /// The desktop's appearance its components are for, counted by
+    /// Appearances.generation: its accent changes system colors too.
+    var resolvedGeneration = 0
+
+    /// Whether the components are for another appearance than the one
+    /// drawing happens in, or for the desktop's before it changed.
+    var isStale: Bool { resolvedDark != Appearances.currentIsDark || resolvedGeneration != Appearances.generation }
+
+    func markResolved() {
+        resolvedDark = Appearances.currentIsDark
+        resolvedGeneration = Appearances.generation
+    }
 
     /// A dynamic color's block (+colorWithName:dynamicProvider:), which
     /// gives its color for an appearance.
@@ -119,7 +133,7 @@ open class NSColor: NSObject {
     func resolveProvider() {
         guard let provider else { return }
         typealias Provider = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
-        resolvedDark = Appearances.currentIsDark
+        markResolved()
         guard let made = provider.function(as: Provider.self)(provider.object, NSAppearance.currentAppearance().objcObject),
               let color = NSObject(objcObject: made, ownership: .retain).as(NSColor.self) else { return }
         if color.provider != nil, color !== self { color.resolveProvider() }
@@ -130,13 +144,13 @@ open class NSColor: NSObject {
     /// The color as a CGColor, made once (again when a system or dynamic
     /// color's appearance changes).
     var cgColorRef: CGRef? {
-        if provider != nil, resolvedDark != Appearances.currentIsDark {
+        if provider != nil, isStale {
             resolveProvider()
             if let cgColor { CG.release(cgColor) }
             cgColor = nil
-        } else if let dark = resolvedDark, dark != Appearances.currentIsDark, let name = colorName, let system = NSColor.system(name) {
+        } else if resolvedDark != nil, isStale, let name = colorName, let system = NSColor.system(name) {
             (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
-            resolvedDark = Appearances.currentIsDark
+            markResolved()
             if let cgColor { CG.release(cgColor) }
             cgColor = nil
         }
@@ -251,8 +265,12 @@ open class NSColor: NSObject {
     }()
 
     /// The system's named colors, in the current appearance: macOS's light
-    /// one, or its dark one when the desktop prefers dark.
+    /// one, or its dark one when the desktop prefers dark; those the accent
+    /// tints in the desktop's accent, when it has one.
     static func system(_ name: String) -> NSColor? {
+        if let accent = Appearances.desktop.accentColor(named: name, dark: Appearances.currentIsDark) {
+            return NSColor(named: name, red: CGFloat(accent.red), green: CGFloat(accent.green), blue: CGFloat(accent.blue), alpha: CGFloat(accent.alpha))
+        }
         if Appearances.currentIsDark, let value = darkSystemColors[name] {
             return NSColor(named: name, red: value.0, green: value.1, blue: value.2, alpha: value.3)
         }
@@ -369,7 +387,8 @@ open class NSColor: NSObject {
     static func alternatingContentBackgroundColors() -> NSObject { NSMutableArray.of([whiteColor(), NSColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)]) }
     @ObjCClassMethod("controlAlternatingRowBackgroundColors")
     static func controlAlternatingRowBackgroundColors() -> NSObject { alternatingContentBackgroundColors() }
-    @ObjCClassMethod("currentControlTint") static func currentControlTint() -> UInt { 1 }
+    /// Blue, or graphite for a gray accent.
+    @ObjCClassMethod("currentControlTint") static func currentControlTint() -> UInt { UInt(Appearances.desktop.controlTint) }
 
     @ObjCMethod("redComponent") func redComponent() -> CGFloat { red }
     @ObjCMethod("greenComponent") func greenComponent() -> CGFloat { green }
