@@ -385,7 +385,13 @@ open class CALayer: NSObject {
     /// pixels and contents.
     @ObjCMethod("_perrySetSharedBuffers:count:")
     func setSharedBuffers(_ records: UnsafeRawPointer?, count: Int) {
-        let frames = records.flatMap { count > 0 ? SharedFrames(records: $0, count: count) : nil }
+        setSharedBuffers(records, count: count, topFirst: false)
+    }
+
+    /// As -_perrySetSharedBuffers:count:, for frames whose rows are top
+    /// first (Metal's) or bottom first (GL's).
+    func setSharedBuffers(_ records: UnsafeRawPointer?, count: Int, topFirst: Bool) {
+        let frames = records.flatMap { count > 0 ? SharedFrames(records: $0, count: count, topFirst: topFirst) : nil }
         changed {
             state.sharedFrames = frames
             if frames != nil { state.livePixels = nil }
