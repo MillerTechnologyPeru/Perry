@@ -79,6 +79,9 @@ open class NSApplication: NSResponder {
         guard !launched else { return }
         launched = true
         Signals.install()
+        // The desktop's appearance, and with it AppleInterfaceStyle, before
+        // the delegate looks: the first window needs it anyway.
+        _ = Appearances.desktop
         notify("applicationWillFinishLaunching:", Constants.NSApplicationWillFinishLaunchingNotification)
         let info = NSMutableDictionary.empty()
         info.set(NSNumber.make(bool: true), forKey: Constants.NSApplicationLaunchIsDefaultLaunchKey)

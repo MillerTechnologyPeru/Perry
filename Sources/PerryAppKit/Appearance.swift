@@ -16,7 +16,8 @@ import PerryObjCInterop
 // of NSApp's and the windows' effectiveAppearance, views'
 // -viewDidChangeEffectiveAppearance, NSSystemColorsDidChangeNotification,
 // and the distributed AppleInterfaceThemeChangedNotification, and every
-// window draws again.
+// window draws again. NSGlobalDomain's AppleInterfaceStyle is "Dark" while
+// it is dark.
 //
 // As on macOS, a program built with an SDK before 10.14's, which predates
 // Dark Aqua and draws for light only, or whose Info.plist sets
@@ -55,6 +56,7 @@ enum Appearances {
         let portal = monitor?.current(waitingAtMost: firstReadWait)
         let desktop = resolve(portal)
         resolved = desktop
+        publishInterfaceStyle(desktop)
         Trace.log("appearance: \(desktop.appearanceName), accent \(desktop.accent.map { "\($0.red) \($0.green) \($0.blue)" } ?? "none")"
                   + (portal == nil ? ", no portal" : ""))
         return desktop
@@ -131,6 +133,7 @@ enum Appearances {
         for object in observed { Send.void(object.objcObject, "willChangeValueForKey:", key.objCArgument()) }
         resolved = new
         generation += 1
+        if changes.contains(.colorScheme) { publishInterfaceStyle(new) }
         for object in observed { Send.void(object.objcObject, "didChangeValueForKey:", key.objCArgument()) }
         for window in Windows.all { window.systemAppearanceChanged() }
         Windows.layersChanged()
@@ -143,6 +146,18 @@ enum Appearances {
             Send.void(center.objcObject, "postNotificationName:object:",
                       "NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification".objCArgument(), workspace.objcObject)
         }
+    }
+
+    /// NSGlobalDomain's AppleInterfaceStyle, which apps read to tell dark
+    /// from light: "Dark" while windows are dark, absent when they are
+    /// light, as macOS keeps it. An app held to Aqua never sees "Dark", as
+    /// it draws light whatever the desktop is. Set through Foundation's
+    /// perry_foundation_set_global_default, where Foundation has it.
+    private static func publishInterfaceStyle(_ desktop: DesktopAppearance) {
+        typealias SetDefault = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+        let foundation = "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"
+        guard let symbol = Symbols.symbol(foundation, "perry_foundation_set_global_default") else { return }
+        unsafeBitCast(symbol, to: SetDefault.self)("AppleInterfaceStyle", desktop.dark ? "Dark" : nil)
     }
 
     /// Posts to CoreFoundation's distributed center, whose observers are
