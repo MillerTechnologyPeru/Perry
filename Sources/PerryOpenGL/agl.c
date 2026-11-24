@@ -6,6 +6,7 @@
 // of a window AppKit's Carbon covers the screen with. The renderer is the
 // one CGL describes.
 
+#include "PerryOpenGL.h"
 #include "perry_interface.h"
 
 #include <stdint.h>
@@ -291,7 +292,9 @@ void perry_aglSwapBuffers(id context) {
         last_error = AGL_BAD_CONTEXT;
         return;
     }
+    perry_aux_before_swap();
     msg_send(context, SELECTOR("flushBuffer"));
+    perry_aux_after_swap();
 }
 
 GLboolean perry_aglUpdateContext(id context) AGL_SYMBOL(aglUpdateContext);
