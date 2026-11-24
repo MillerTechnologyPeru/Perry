@@ -147,6 +147,30 @@ open class NSTableView: NSControl {
     @ObjCMethod("isFlipped") override func isFlipped() -> Bool { true }
     @ObjCMethod("acceptsFirstResponder") override func acceptsFirstResponder() -> Bool { true }
 
+    /// Whether the selection shows in the accent color, as AppKit draws it:
+    /// while the table, or a view in it, is the key window's first
+    /// responder; otherwise it is gray.
+    var drawsEmphasized: Bool {
+        guard let window, window.isKeyWindow(), let responder = window.firstResponderObject else { return false }
+        var view = NSObject(responder).as(NSView.self)
+        while let current = view {
+            if current.objcObject == objcObject { return true }
+            view = current.superview
+        }
+        return false
+    }
+
+    /// The tables a responder is in, whose selections change color as it
+    /// takes or leaves the keyboard.
+    static func refreshEmphasis(around responder: UnsafeMutableRawPointer?) {
+        guard let responder else { return }
+        var view = NSObject(responder).as(NSView.self)
+        while let current = view {
+            current.as(NSTableView.self)?.refreshSelection()
+            view = current.superview
+        }
+    }
+
     var dataSource: NSObject? { dataSourceObject.map(NSObject.init) }
     var delegate: NSObject? { delegateObject.map(NSObject.init) }
     var visibleColumns: [NSTableColumn] { columns.filter { !$0.hidden } }
@@ -855,8 +879,8 @@ open class NSTableView: NSControl {
             for row in Int(range.location)..<Int(range.location + range.length) {
                 if selection.contains(row), selectionHighlightStyle != -1 {
                     CG.saveGState(context)
-                    CG.setFillColorWithColor(context, (window?.isKeyWindow() == false ? NSColor.unemphasizedSelectedContentBackgroundColor()
-                        : NSColor.selectedContentBackgroundColor()).cgColorRef)
+                    CG.setFillColorWithColor(context, (drawsEmphasized ? NSColor.selectedContentBackgroundColor()
+                        : NSColor.unemphasizedSelectedContentBackgroundColor()).cgColorRef)
                     CG.fillRect(context, self.rect(ofRow: row))
                     CG.restoreGState(context)
                 }
@@ -867,7 +891,7 @@ open class NSTableView: NSControl {
                     let value = objectValue(column: entry.column, row: row)
                     typealias SetValue = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?) -> Void
                     unsafeBitCast(ObjCRuntime.msgSend, to: SetValue.self)(cell.objcObject, ObjCRuntime.selector("setObjectValue:"), value?.objcObject)
-                    cell.backgroundStyle = selection.contains(row) && window?.isKeyWindow() != false ? 1 : 0
+                    cell.backgroundStyle = selection.contains(row) && drawsEmphasized ? 1 : 0
                     willDisplay(cell: cell, column: entry.column, row: row)
                     drawDisclosure(row: row, column: entry.column, context: context)
                     typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect, UnsafeMutableRawPointer?) -> Void
@@ -1497,9 +1521,10 @@ open class NSTableRowView: NSView {
     @ObjCMethod("viewAtColumn:") func view(atColumn column: Int) -> NSView? { cellViews.indices.contains(column) ? cellViews[column] : nil }
     @ObjCMethod("interiorBackgroundStyle") func interiorBackgroundStyle() -> Int { selected && emphasized && rowSelectionHighlightStyle() != -1 ? 1 : 0 }
 
-    /// Cell views show light text on a selected row's emphasized color.
+    /// Cell views show light text on a selected row's emphasized color,
+    /// which the table's focus decides.
     func updateBackgroundStyle() {
-        emphasized = window?.isKeyWindow() != false
+        emphasized = tableView?.drawsEmphasized ?? (window?.isKeyWindow() != false)
         let style = interiorBackgroundStyle()
         for cell in cellViews where Send.responds(cell.objcObject, "setBackgroundStyle:") {
             typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Int) -> Void
