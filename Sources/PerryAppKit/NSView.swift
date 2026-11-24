@@ -424,7 +424,7 @@ open class NSView: NSResponder {
         if moving { view.willMoveToWindowTree(windowObject) }
         subviews.insert(view, at: min(index, subviews.count))
         view.superviewObject = objcObject
-        view.nextResponderObject = objcObject
+        view.linkResponder(to: objcObject)
         view.setWindowTree(windowObject)
         if windowObject != nil || layer != nil {
             ensureLayer()
@@ -459,8 +459,30 @@ open class NSView: NSResponder {
         withExtendedLifetime(self) {
             superview.subviews.removeAll { $0 === self }
             superviewObject = nil
-            if nextResponderObject == superview.objcObject { nextResponderObject = nil }
+            if let controller = owningController, controller.nextResponderObject == superview.objcObject {
+                controller.nextResponderObject = nil
+            } else if nextResponderObject == superview.objcObject {
+                nextResponderObject = nil
+            }
             layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).removeFromSuperlayer() }
+        }
+    }
+
+    /// The view controller whose view this is, when it is this view's next
+    /// responder, as -[NSViewController setView:] makes it.
+    var owningController: NSViewController? {
+        guard let next = nextResponderObject, let controller = NSObject(next).as(NSViewController.self),
+              controller.viewObject === self else { return nil }
+        return controller
+    }
+
+    /// The responder after this view, now in `superview`: the superview, or
+    /// after the view's own controller, which AppKit keeps between them.
+    func linkResponder(to superview: UnsafeMutableRawPointer) {
+        if let controller = owningController {
+            controller.nextResponderObject = superview
+        } else {
+            nextResponderObject = superview
         }
     }
 
