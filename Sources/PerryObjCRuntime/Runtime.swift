@@ -188,9 +188,24 @@ public enum Runtime {
         }
     }
 
+    /// Public names that find another class: in a Mac Catalyst app with
+    /// an AppKit bridge, AppKit's provider has the public names of the
+    /// classes both frameworks define, and UIKit's own go by private names;
+    /// the app's code is UIKit code, so looking one up by name (as Swift
+    /// does for an imported class in a generic type) finds UIKit's.
+    nonisolated(unsafe) static var classAliases: [String: String] = [:]
+
+    public static func setClassAlias(_ name: String, to target: String) {
+        lock.withLock { classAliases[name] = target }
+    }
+
     public static func lookUpClass(_ name: UnsafePointer<CChar>) -> ClassPointer? {
         // Other providers may start before libobjc and look up NSObject.
         RootClasses.bootstrap()
+        if let target = lock.withLock({ classAliases.isEmpty ? nil : classAliases[String(cString: name)] }),
+           let cls = target.withCString({ target in lock.withLock { classesByName[CStringKey(pointer: target)] } }) {
+            return cls
+        }
         if let cls = lock.withLock({ classesByName[CStringKey(pointer: name)] }) {
             return cls
         }
