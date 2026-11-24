@@ -175,6 +175,8 @@ open class WKPreferences: NSObject {
     var javaScriptEnabled = true
     var javaScriptCanOpenWindowsAutomatically = false
     var minimumFontSize: CGFloat = 0
+    /// Kept: no element goes full screen here.
+    var elementFullscreenEnabled = false
     /// WebKit's private preferences, which apps set by key, kept.
     var others: [String: NSObject] = [:]
 
@@ -194,6 +196,8 @@ open class WKPreferences: NSObject {
     func setJavaScriptCanOpenWindowsAutomatically(_ value: Bool) { javaScriptCanOpenWindowsAutomatically = value }
     @ObjCMethod("minimumFontSize") func minimumFontSizeValue() -> CGFloat { minimumFontSize }
     @ObjCMethod("setMinimumFontSize:") func setMinimumFontSize(_ value: CGFloat) { minimumFontSize = value }
+    @ObjCMethod("isElementFullscreenEnabled") func isElementFullscreenEnabled() -> Bool { elementFullscreenEnabled }
+    @ObjCMethod("setElementFullscreenEnabled:") func setElementFullscreenEnabled(_ value: Bool) { elementFullscreenEnabled = value }
 }
 
 /// Scripts and message handlers, kept; no page runs them.
