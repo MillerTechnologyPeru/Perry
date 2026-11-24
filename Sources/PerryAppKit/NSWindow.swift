@@ -659,6 +659,7 @@ open class NSWindow: NSResponder {
             // text view a window opens to edit in.
             if let responder = initialFirstResponder ?? rootView.flatMap(NSWindow.firstTextView) { _ = makeFirstResponder(responder) }
         }
+        NSTableView.refreshEmphasis(around: firstResponderObject)
         notify("windowDidBecomeKey:", Constants.NSWindowDidBecomeKeyNotification)
     }
 
@@ -677,6 +678,7 @@ open class NSWindow: NSResponder {
     @ObjCMethod("resignKeyWindow")
     func resignKeyWindow() {
         if Windows.key === self { Windows.key = nil }
+        NSTableView.refreshEmphasis(around: firstResponderObject)
         notify("windowDidResignKey:", Constants.NSWindowDidResignKeyNotification)
     }
 
@@ -987,12 +989,15 @@ open class NSWindow: NSResponder {
     func makeFirstResponder(_ responder: NSObject?) -> Bool {
         let new = responder?.objcObject ?? objcObject
         guard new != firstResponderObject else { return true }
-        if let current = firstResponderObject, current != objcObject, !Send.bool(current, "resignFirstResponder") { return false }
+        let old = firstResponderObject
+        if let current = old, current != objcObject, !Send.bool(current, "resignFirstResponder") { return false }
         firstResponderObject = objcObject
+        if old != objcObject { NSTableView.refreshEmphasis(around: old) }
         guard new != objcObject else { return true }
         if Send.bool(new, "acceptsFirstResponder"), Send.bool(new, "becomeFirstResponder") {
             firstResponderObject = new
             Trace.log("window \(windowNumber): first responder \(NSObject(new).describedByObject() ?? "?")")
+            NSTableView.refreshEmphasis(around: new)
             return true
         }
         Trace.log("window \(windowNumber): \(NSObject(new).describedByObject() ?? "?") refused to be first responder")
@@ -1091,8 +1096,78 @@ open class NSWindow: NSResponder {
         }
     }
 
-    /// The window's own -mouseDown: and the like end the responder chain.
-    @ObjCMethod("keyDown:") override func keyDown(_ event: NSObject?) {}
+    /// The window's own -mouseDown: and the like end the responder chain;
+    /// a Tab no view took moves the keyboard to the next key view (Shift-Tab
+    /// to the one before), as AppKit's window does.
+    @ObjCMethod("keyDown:")
+    override func keyDown(_ eventObject: NSObject?) {
+        guard let event = eventObject?.as(NSEvent.self),
+              event.keyCode == 0x30 || event.charactersIgnoringModifiers == "\t" || event.charactersIgnoringModifiers == "\u{19}",
+              event.modifierFlags & (ModifierFlags.command | ModifierFlags.option) == 0 else { return }
+        selectKeyView(forward: event.modifierFlags & ModifierFlags.shift == 0)
+    }
+
+    // MARK: Key view loop
+
+    @ObjCMethod("selectNextKeyView:") func selectNextKeyView(_ sender: NSObject?) { selectKeyView(forward: true) }
+    @ObjCMethod("selectPreviousKeyView:") func selectPreviousKeyView(_ sender: NSObject?) { selectKeyView(forward: false) }
+    @ObjCMethod("selectKeyViewFollowingView:")
+    func selectKeyView(following view: NSView?) { selectKeyView(forward: true, from: view) }
+    @ObjCMethod("selectKeyViewPrecedingView:")
+    func selectKeyView(preceding view: NSView?) { selectKeyView(forward: false, from: view) }
+
+    /// The keyboard to the key view after (or before) `start`, the first
+    /// responder's view by default, round the loop.
+    func selectKeyView(forward: Bool, from start: NSView? = nil) {
+        let views = keyViews()
+        if Trace.enabled { Trace.log("window \(windowNumber): key views \(views.map { $0.describedByObject() ?? "?" })") }
+        guard !views.isEmpty else { return }
+        // The view that has the keyboard, or the one holding its responder
+        // (a field editor in a text field).
+        var current = start ?? firstResponderObject.flatMap { NSObject($0).as(NSView.self) }
+        var index: Int?
+        while let view = current, index == nil {
+            index = views.firstIndex { $0.objcObject == view.objcObject }
+            current = view.superview
+        }
+        let next: NSView
+        if let index {
+            next = views[(index + (forward ? 1 : views.count - 1)) % views.count]
+        } else {
+            next = forward ? views[0] : views[views.count - 1]
+        }
+        Trace.log("window \(windowNumber): key view \(next.describedByObject() ?? "?")")
+        _ = makeFirstResponder(next)
+    }
+
+    /// The views Tab goes through, as with macOS's default keyboard
+    /// navigation: those that take typing or a selection (text fields and
+    /// views, tables and outlines, web views), not buttons and other
+    /// controls; shown and
+    /// on screen; in reading order: rows from the top, and side by side
+    /// from the left where they share their height (a window's columns).
+    func keyViews() -> [NSView] {
+        guard let root = rootView else { return [] }
+        var found: [(view: NSView, frame: CGRect)] = []
+        func visit(_ view: NSView) {
+            guard !view.hidden else { return }
+            if Send.bool(view.objcObject, "canBecomeKeyView"),
+               view.as(NSControl.self) == nil || view.as(NSTextField.self) != nil || view.as(NSTableView.self) != nil {
+                // What shows of it: a table scrolled in its clip view by
+                // its visible rows, not its whole height.
+                let frame = view.convert(view.visibleRect(), to: nil)
+                if frame.width > 0, frame.height > 0 { found.append((view, frame)) }
+            }
+            for subview in view.subviews { visit(subview) }
+        }
+        visit(root)
+        // Base coordinates: a larger y is higher in the window.
+        return found.sorted { a, b in
+            let overlap = min(a.frame.maxY, b.frame.maxY) - max(a.frame.minY, b.frame.minY)
+            if overlap > min(a.frame.height, b.frame.height) / 2 { return a.frame.minX < b.frame.minX }
+            return a.frame.maxY > b.frame.maxY
+        }.map(\.view)
+    }
 }
 
 /// NSPanel: a window for auxiliary content.

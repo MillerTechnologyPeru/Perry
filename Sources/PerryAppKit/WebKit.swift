@@ -900,7 +900,18 @@ open class WKWebView: NSView {
     @ObjCMethod("mouseMoved:") override func mouseMoved(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.mouse(event, button: nil, pressed: false) } }
     @ObjCMethod("mouseDragged:") override func mouseDragged(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.mouse(event, button: nil, pressed: false) } }
     @ObjCMethod("scrollWheel:") override func scrollWheel(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.scroll(event) } }
-    @ObjCMethod("keyDown:") override func keyDown(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.key(event, pressed: true) } }
+    /// Keys go to the page, but Tab, which moves the keyboard to the next
+    /// key view, as Safari's default (pressing Tab doesn't go through a
+    /// page's links) has it on macOS.
+    @ObjCMethod("keyDown:")
+    override func keyDown(_ eventObject: NSObject?) {
+        guard let event = eventObject?.as(NSEvent.self) else { return }
+        if event.keyCode == 0x30, event.modifierFlags & (ModifierFlags.command | ModifierFlags.option | ModifierFlags.control) == 0, let window {
+            window.selectKeyView(forward: event.modifierFlags & ModifierFlags.shift == 0, from: self)
+            return
+        }
+        content.key(event, pressed: true)
+    }
     @ObjCMethod("keyUp:") override func keyUp(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.key(event, pressed: false) } }
 
     // MARK: Callbacks from the page
@@ -1365,7 +1376,18 @@ open class WebView: NSView {
     @ObjCMethod("mouseMoved:") override func mouseMoved(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.mouse(event, button: nil, pressed: false) } }
     @ObjCMethod("mouseDragged:") override func mouseDragged(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.mouse(event, button: nil, pressed: false) } }
     @ObjCMethod("scrollWheel:") override func scrollWheel(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.scroll(event) } }
-    @ObjCMethod("keyDown:") override func keyDown(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.key(event, pressed: true) } }
+    /// Keys go to the page, but Tab, which moves the keyboard to the next
+    /// key view, as Safari's default (pressing Tab doesn't go through a
+    /// page's links) has it on macOS.
+    @ObjCMethod("keyDown:")
+    override func keyDown(_ eventObject: NSObject?) {
+        guard let event = eventObject?.as(NSEvent.self) else { return }
+        if event.keyCode == 0x30, event.modifierFlags & (ModifierFlags.command | ModifierFlags.option | ModifierFlags.control) == 0, let window {
+            window.selectKeyView(forward: event.modifierFlags & ModifierFlags.shift == 0, from: self)
+            return
+        }
+        content.key(event, pressed: true)
+    }
     @ObjCMethod("keyUp:") override func keyUp(_ event: NSObject?) { if let event = event?.as(NSEvent.self) { content.key(event, pressed: false) } }
 
     // MARK: Callbacks from the page: WebFrameLoadDelegate's

@@ -204,10 +204,14 @@ open class NSViewController: NSResponder {
         return viewObject
     }
 
+    /// The controller goes between its view and what followed the view
+    /// (its superview), as AppKit links them.
     @ObjCMethod("setView:")
     func setView(_ view: NSView?) {
         viewObject = view
-        view?.nextResponderObject = objcObject
+        guard let view else { return }
+        if let previous = view.nextResponderObject, previous != objcObject { nextResponderObject = previous }
+        view.nextResponderObject = objcObject
     }
 
     @ObjCMethod("isViewLoaded") func isViewLoaded() -> Bool { viewObject != nil }
