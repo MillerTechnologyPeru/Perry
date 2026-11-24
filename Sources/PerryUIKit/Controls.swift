@@ -1600,6 +1600,7 @@ open class NSLayoutConstraint: NSObject {
         let changed = state.active != active
         state.active = active
         var added = false
+        ConstraintTrace.note(self, active ? (holder == nil ? "activated, no common ancestor" : "activated") : "deactivated")
         if active, let holder, !holder.state.constraints.contains(where: { $0.objcObject == objcObject }) {
             holder.state.constraints.append(self)
             added = true
@@ -2193,4 +2194,23 @@ extension NSObject {
     @ObjCMethod("encodeObject:forKey:") func sendEncode(object: NSObject?, forKey key: String)
     @ObjCMethod("encodeInteger:forKey:") func sendEncode(integer: Int, forKey key: String)
     @ObjCMethod("encodeDouble:forKey:") func sendEncode(double: Double, forKey key: String)
+}
+
+/// PERRY_UIKIT_CONSTRAINT_TRACE=<class name part>: each activation,
+/// deactivation and removal of a constraint with an item of such a class.
+enum ConstraintTrace {
+    static let filter: String? = getenv("PERRY_UIKIT_CONSTRAINT_TRACE").map { String(cString: $0) }
+
+    static func name(_ item: UnsafeMutableRawPointer?) -> String {
+        guard let item else { return "nil" }
+        return ObjCRuntime.objectClass(item).flatMap { NSObject($0).describedByObject() } ?? "?"
+    }
+
+    static func note(_ constraint: NSLayoutConstraint, _ what: String) {
+        guard let filter else { return }
+        let state = constraint.state
+        let first = name(state.firstItem), second = name(state.secondItem)
+        guard first.contains(filter) || second.contains(filter) else { return }
+        uikitWarning("constraint \(what): \(first).\(state.firstAttribute) \(second).\(state.secondAttribute) [\(constraint.objcObject)]")
+    }
 }
