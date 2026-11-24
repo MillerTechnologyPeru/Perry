@@ -8,7 +8,9 @@ import SwiftSyntaxMacros
 // structures of them. Its peer __darwin_<function> takes and returns those
 // as their ObjCType and ObjCResultType (PerryObjCInterop), which on arm64 are
 // the types themselves and on armv7 the words 32-bit Darwin passes; other
-// types pass through unchanged. A second peer, __native_<function>, exports
+// types pass through unchanged, except that a result narrower than 32 bits
+// returns as its ObjCResultType, which on arm64 extends it to 32 bits as
+// Darwin's callee must. A second peer, __native_<function>, exports
 // the function unchanged as perry_native_<name>, for other providers, which
 // call it as Swift would.
 //
@@ -29,6 +31,16 @@ public struct DarwinCMacro: PeerMacro {
         "CGFloat", "Double", "Float", "Int64", "UInt64", "TimeInterval", "NSRange",
         "CGPoint", "CGSize", "CGRect", "CGAffineTransform", "UIEdgeInsets", "CATransform3D", "CAFrameRateRange",
         "CLLocationCoordinate2D", "MKCoordinateSpan", "MKCoordinateRegion", "MKMapPoint", "MKMapSize", "MKMapRect",
+    ]
+
+    /// Results narrower than 32 bits, which arm64 Darwin's callee extends to
+    /// 32 and Linux's leaves with unspecified bits above: they return as
+    /// their ObjCResultType, the 32-bit value they extend to there, and as
+    /// themselves elsewhere. Arguments of these types need nothing, since
+    /// Darwin's caller extends them.
+    static let extended: Set<String> = [
+        "Bool", "Int8", "UInt8", "Int16", "UInt16", "CShort", "CUnsignedShort", "CSignedChar", "CUnsignedChar",
+        "UniChar", "unichar", "Boolean", "OSErr",
     ]
 
     public static func expansion(
@@ -74,7 +86,7 @@ public struct DarwinCMacro: PeerMacro {
         let call = "\(name)(\(darwinArguments.joined(separator: ", ")))"
         let darwinResult: String
         let darwinBody: String
-        if let result, converted.contains(result) {
+        if let result, converted.contains(result) || extended.contains(result) {
             darwinResult = " -> \(result).ObjCResultType"
             darwinBody = "\(result).objCResult(\(call).objCReturnValue())"
         } else {
