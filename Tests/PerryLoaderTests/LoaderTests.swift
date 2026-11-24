@@ -162,6 +162,21 @@ struct LoaderTests {
         ])
     }
 
+    @Test("Methods changed after sends cached them are the ones called")
+    func methodChanges() throws {
+        let exe = try FixtureBuilder.executable("methods.m", libraries: [FixtureBuilder.stub("libobjc")])
+        let result = try runPerry([exe.path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "cached 1 1 10",
+            "added 1 2",
+            "set 3 2",
+            "exchanged 10 3",
+            "replaced 10 4",
+            "custom releases 1",
+        ])
+    }
+
     @Test("Unrecognized selectors abort with Apple's message")
     func unrecognizedSelector() throws {
         let exe = try FixtureBuilder.executable("runtime.m", variant: "-unrecognized",
