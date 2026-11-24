@@ -214,6 +214,7 @@ public func CFNumberFormatterSetFormat(_ formatter: id?, _ format: id?) {
     guard let formatter, let format = Strings.value(of: format) else { return }
     let storage = NumberFormatters.storage(formatter)
     storage.pattern = format
+    storage.explicitNegative = nil
     storage.changed()
 }
 
@@ -323,14 +324,8 @@ public func CFNumberFormatterGetDecimalInfoForCurrencyCode(_ code: id?, _ digits
 extension DateFormatterStorage {
     /// The date at the start of `text`, and how many UTF-16 units it takes.
     func parse(_ text: String) -> (date: Date, length: Int)? {
-        guard !pattern.isEmpty, let handle else { return nil }
-        return ICU.withUChars(text) { chars, length in
-            var position: Int32 = 0
-            var status = U_ZERO_ERROR
-            let milliseconds = swift_udat_parse(handle, chars, length, &position, &status)
-            guard !ICU.failed(status), position > 0 else { return nil }
-            return (Date(timeIntervalSince1970: milliseconds / 1000), Int(position))
-        }
+        guard !pattern.isEmpty else { return nil }
+        return parseStart(text)
     }
 
     /// The styles' pattern, whatever format is set.
@@ -348,18 +343,17 @@ extension DateFormatterStorage {
 /// What a CFDateFormatter property is.
 enum DateFormatterProperty {
     case lenient, timeZone, calendarName, calendar, defaultFormat, relative
+    case twoDigitStart, defaultDate, gregorianStart
     case symbols(UDateFormatSymbolType)
     case amPM(Int32)
-    /// Kept as set, and given back, but not used.
-    case kept
 
     nonisolated(unsafe) static let byKey: [String: DateFormatterProperty] = [
         "kCFDateFormatterIsLenientKey": .lenient,
         "kCFDateFormatterTimeZoneKey": .timeZone,
         "kCFDateFormatterCalendarNameKey": .calendarName,
         "kCFDateFormatterDefaultFormatKey": .defaultFormat,
-        "kCFDateFormatterTwoDigitStartDateKey": .kept,
-        "kCFDateFormatterDefaultDateKey": .kept,
+        "kCFDateFormatterTwoDigitStartDateKey": .twoDigitStart,
+        "kCFDateFormatterDefaultDateKey": .defaultDate,
         "kCFDateFormatterCalendarKey": .calendar,
         "kCFDateFormatterEraSymbolsKey": .symbols(UDAT_ERAS),
         "kCFDateFormatterMonthSymbolsKey": .symbols(UDAT_MONTHS),
@@ -381,7 +375,7 @@ enum DateFormatterProperty {
         "kCFDateFormatterShortQuarterSymbolsKey": .symbols(UDAT_SHORT_QUARTERS),
         "kCFDateFormatterStandaloneQuarterSymbolsKey": .symbols(UDAT_STANDALONE_QUARTERS),
         "kCFDateFormatterShortStandaloneQuarterSymbolsKey": .symbols(UDAT_STANDALONE_SHORT_QUARTERS),
-        "kCFDateFormatterGregorianStartDateKey": .kept,
+        "kCFDateFormatterGregorianStartDateKey": .gregorianStart,
         "kCFDateFormatterDoesRelativeDateFormattingKey": .relative,
     ]
 }
@@ -531,9 +525,13 @@ public func CFDateFormatterSetProperty(_ formatter: id?, _ key: id?, _ value: id
         storage.calendar = Strings.value(of: value).flatMap(CalendarIdentifiers.identifier).map { Calendar(identifier: $0) }
     case .calendar: storage.calendar = Calendars.calendar(value)
     case .amPM(let index): storage.amPMSymbols[index] = Strings.value(of: value)
-    case .relative, .kept: storage.held.hold(name, value)
-    // Symbol lists are the locale's; setting them isn't kept.
-    case .symbols, .defaultFormat: break
+    case .relative: storage.relative = Numbers.storage(value).int64 != 0
+    case .twoDigitStart: storage.twoDigitStart = value.map { Dates.date($0) } ?? Date(timeIntervalSince1970: -631_152_000)
+    case .defaultDate: storage.defaultDate = value.map { Dates.date($0) }
+    case .gregorianStart: storage.gregorianStart = value.map { Dates.date($0) }
+    case .symbols(let type):
+        storage.symbolOverrides[type.rawValue] = value.map { Arrays.elements($0).map { Strings.value(of: $0) ?? "" } }
+    case .defaultFormat: break
     }
     storage.changed()
 }
@@ -557,7 +555,9 @@ public func CFDateFormatterCopyProperty(_ formatter: id?, _ key: id?) -> id? {
     case .amPM(let index):
         let symbols = storage.symbols(UDAT_AM_PMS)
         return Strings.make(storage.amPMSymbols[index] ?? (symbols.count > Int(index) ? symbols[Int(index)] : (index == 0 ? "AM" : "PM")))
-    case .relative: return storage.held[name].flatMap { ObjC.retain($0) } ?? CFFormatting.boolean(false)
-    case .kept: return storage.held[name].flatMap { ObjC.retain($0) }
+    case .relative: return CFFormatting.boolean(storage.relative)
+    case .twoDigitStart: return ObjC.retain(Dates.autoreleased(storage.twoDigitStart))
+    case .defaultDate: return storage.defaultDate.flatMap { ObjC.retain(Dates.autoreleased($0)) }
+    case .gregorianStart: return ObjC.retain(Dates.autoreleased(storage.gregorianStart ?? Date(timeIntervalSince1970: -12_219_292_800)))
     }
 }
