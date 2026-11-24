@@ -1,40 +1,86 @@
+import CacaoDBus
 import Glibc
+import PerryDesktopAppearance
 import PerryObjCInterop
 
-// NSAppearance: Aqua or Dark Aqua, as the desktop prefers. The system's is
-// the desktop's color scheme: the freedesktop portal's
-// org.freedesktop.appearance color-scheme (1 dark, 2 light), else GNOME's
-// org.gnome.desktop.interface color-scheme setting, else light.
-// PERRY_APPKIT_APPEARANCE=dark or light overrides both.
+// NSAppearance: Aqua or Dark Aqua, as the desktop prefers, followed live.
+// The system's is the freedesktop settings portal's org.freedesktop.appearance
+// keys, read over D-Bus with Cacao's portal client: color-scheme, the
+// accent-color NSColor's controlAccentColor takes, and contrast, which
+// Increase Contrast's high-contrast appearances follow. Without a portal it
+// is GNOME's org.gnome.desktop.interface color-scheme setting, else light.
+// PERRY_APPKIT_APPEARANCE=dark or light fixes light or dark whatever the
+// desktop says.
+//
+// When the desktop's appearance changes, the app hears it as on macOS: KVO
+// of NSApp's and the windows' effectiveAppearance, views'
+// -viewDidChangeEffectiveAppearance, NSSystemColorsDidChangeNotification,
+// and the distributed AppleInterfaceThemeChangedNotification, and every
+// window draws again.
 //
 // As on macOS, a program built with an SDK before 10.14's, which predates
 // Dark Aqua and draws for light only, or whose Info.plist sets
 // NSRequiresAquaSystemAppearance, is always in Aqua.
 
 enum Appearances {
-    static let aqua = "NSAppearanceNameAqua"
-    static let darkAqua = "NSAppearanceNameDarkAqua"
+    static let aqua = DesktopAppearance.aqua
+    static let darkAqua = DesktopAppearance.darkAqua
 
-    /// Whether the desktop prefers dark, read once.
-    nonisolated(unsafe) static let systemIsDark: Bool = {
-        if let setting = getenv("PERRY_APPKIT_APPEARANCE").map({ String(cString: $0).lowercased() }), !setting.isEmpty {
-            return setting.contains("dark")
+    /// How long the first look at the appearance waits for the portal's
+    /// answer, which follow() asked for as AppKit started. One later than
+    /// that is taken as a change.
+    static let firstReadWait = 1.5
+
+    /// The portal's appearance and its changes.
+    nonisolated(unsafe) private static var monitor: DesktopAppearanceMonitor?
+    /// The desktop's appearance, once something asked for it.
+    nonisolated(unsafe) private static var resolved: DesktopAppearance?
+    /// Counts the desktop's changes, so colors resolved before one resolve
+    /// again.
+    nonisolated(unsafe) private(set) static var generation = 0
+
+    /// Starts reading the portal as AppKit starts, so its answer is there
+    /// by the time anything is drawn, and hearing its changes.
+    static func follow() {
+        guard monitor == nil else { return }
+        monitor = DesktopAppearanceMonitor.start { portal in
+            Dispatch.onMain { Appearances.portalChanged(portal) }
         }
-        if requiresAqua { return false }
-        let portal = run("gdbus call --session --timeout 2 --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop "
-                         + "--method org.freedesktop.portal.Settings.ReadOne org.freedesktop.appearance color-scheme")
-        if portal.contains("uint32 1") { return true }
-        if portal.contains("uint32 2") { return false }
-        let gnome = run("gsettings get org.gnome.desktop.interface color-scheme")
-        if gnome.contains("prefer-dark") { return true }
-        if gnome.contains("prefer-light") || gnome.contains("default") { return false }
-        return false
+    }
+
+    /// The desktop's appearance: read when first asked for, then kept as
+    /// the portal changes it.
+    static var desktop: DesktopAppearance {
+        if let resolved { return resolved }
+        let portal = monitor?.current(waitingAtMost: firstReadWait)
+        let desktop = resolve(portal)
+        resolved = desktop
+        Trace.log("appearance: \(desktop.appearanceName), accent \(desktop.accent.map { "\($0.red) \($0.green) \($0.blue)" } ?? "none")"
+                  + (portal == nil ? ", no portal" : ""))
+        return desktop
+    }
+
+    /// Whether the desktop prefers dark.
+    static var systemIsDark: Bool { desktop.dark }
+
+    private static func resolve(_ portal: PortalAppearance?) -> DesktopAppearance {
+        DesktopAppearance(portal: portal, override: getenv("PERRY_APPKIT_APPEARANCE").map { String(cString: $0) },
+                          requiresAqua: requiresAqua,
+                          gnomeColorScheme: { run((userHome.map { "HOME='\($0)' " } ?? "") + "gsettings get org.gnome.desktop.interface color-scheme") })
+    }
+
+    /// The user's home, from the password database: HOME is the app's
+    /// container here, where dconf finds none of the user's settings.
+    nonisolated(unsafe) private static let userHome: String? = {
+        guard let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir else { return nil }
+        let home = String(cString: directory)
+        return home.isEmpty || home.contains("'") ? nil : home
     }()
 
     /// Whether the program is held to Aqua: built with an SDK before macOS
     /// 10.14 (or before SDKs were recorded, 0), or asking for it in its
     /// Info.plist.
-    static var requiresAqua: Bool {
+    nonisolated(unsafe) static let requiresAqua: Bool = {
         if let value = NSBundle.main().infoObject(forKey: "NSRequiresAquaSystemAppearance") {
             let asked = Send.bool(value.objcObject, "boolValue")
             if asked { return true }
@@ -43,7 +89,7 @@ enum Appearances {
               let symbol = dlsym(system, "_dyld_get_program_sdk_version") else { return false }
         let sdk = unsafeBitCast(symbol, to: (@convention(c) () -> UInt32).self)()
         return sdk < 0x000A_0E00   // 10.14
-    }
+    }()
 
     /// A command's output, or "" when it can't run.
     private static func run(_ command: String) -> String {
@@ -59,6 +105,56 @@ enum Appearances {
     static var currentIsDark: Bool {
         if let current = NSAppearance.current { return current.name == darkAqua || current.name.contains("Dark") }
         return systemIsDark
+    }
+
+    // MARK: Changes
+
+    /// The portal said something new: on the main thread.
+    private static func portalChanged(_ portal: PortalAppearance) {
+        // Not asked for yet: the first look takes the portal's latest.
+        guard let old = resolved else { return }
+        let new = resolve(portal)
+        guard new != old else { return }
+        changed(from: old, to: new)
+    }
+
+    /// Shows the desktop's new appearance and tells the app, as macOS does.
+    static func changed(from old: DesktopAppearance, to new: DesktopAppearance) {
+        let changes = new.changes(from: old)
+        Trace.log("appearance changed to \(new.appearanceName), accent \(new.accent.map { "\($0.red) \($0.green) \($0.blue)" } ?? "none")")
+        // The application's and the windows' effective appearance, where
+        // they take the system's.
+        let appTakesSystem = App.shared?.appearance == nil
+        var observed: [NSObject] = appTakesSystem ? Windows.all.filter { $0.appearance == nil } : []
+        if appTakesSystem, let app = App.shared { observed.insert(app, at: 0) }
+        let key = "effectiveAppearance"
+        for object in observed { Send.void(object.objcObject, "willChangeValueForKey:", key.objCArgument()) }
+        resolved = new
+        generation += 1
+        for object in observed { Send.void(object.objcObject, "didChangeValueForKey:", key.objCArgument()) }
+        for window in Windows.all { window.systemAppearanceChanged() }
+        Windows.layersChanged()
+
+        post(Constants.NSSystemColorsDidChangeNotification, object: nil)
+        if new.controlTint != old.controlTint { post("NSControlTintDidChangeNotification", object: nil) }
+        if changes.contains(.colorScheme) { postDistributed("AppleInterfaceThemeChangedNotification") }
+        if changes.contains(.accent) { postDistributed("AppleColorPreferencesChangedNotification") }
+        if changes.contains(.contrast), let workspace = NSWorkspace.shared, let center = workspace.notificationCenter {
+            Send.void(center.objcObject, "postNotificationName:object:",
+                      "NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification".objCArgument(), workspace.objcObject)
+        }
+    }
+
+    /// Posts to CoreFoundation's distributed center, whose observers are
+    /// this process's: there are no other Mac apps to hear it.
+    private static func postDistributed(_ name: String) {
+        typealias Center = @convention(c) () -> UnsafeMutableRawPointer?
+        typealias Post = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                         UnsafeMutableRawPointer?, UInt8) -> Void
+        let coreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+        guard let center = Symbols.symbol(coreFoundation, "_CFNotificationCenterGetDistributedCenter"),
+              let post = Symbols.symbol(coreFoundation, "_CFNotificationCenterPostNotification") else { return }
+        unsafeBitCast(post, to: Post.self)(unsafeBitCast(center, to: Center.self)(), name.objCArgument(), nil, nil, 1)
     }
 }
 
@@ -80,7 +176,7 @@ open class NSAppearance: NSObject {
     }
 
     /// The desktop's appearance.
-    static var system: NSAppearance { appearance(named: Appearances.systemIsDark ? Appearances.darkAqua : Appearances.aqua) }
+    static var system: NSAppearance { appearance(named: Appearances.desktop.appearanceName) }
 
     @ObjCClassMethod("appearanceNamed:")
     static func appearanceNamed(_ name: String?) -> NSAppearance? {
