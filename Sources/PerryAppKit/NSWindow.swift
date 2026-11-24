@@ -879,6 +879,7 @@ open class NSWindow: NSResponder {
         }
         sdlWindow = window
         sdlID = UInt32(window.id)
+        DesktopMenus.windowMade(self)
         // Once the renderer's made: making it can make the X window again,
         // which would be made without a border, and wait for a map.
         defer {
@@ -931,6 +932,7 @@ open class NSWindow: NSResponder {
         // The renderer goes before its window; SDL makes its context
         // current to destroy it.
         GLCurrent.preserving { renderer = nil }
+        DesktopMenus.windowGoing(self)
         sdlWindow = nil
         sdlID = 0
     }
