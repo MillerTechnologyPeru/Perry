@@ -137,8 +137,10 @@ enum DarwinFixtures {
     /// Fixtures with a recorded Darwin output.
     static var withReference: [String] {
         [
-            "Abacus", "Almanac", "Anvil", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cobweb", "Cornerstone", "Courier", "Darkroom", "Easel", "Foreman", "Forge", "Foundry", "Gatekeeper", "Gossamer", "Grafter", "Herald", "Inventory", "Itinerary", "Keyring", "Lantern", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Orchard", "Panorama", "Parsley",
-            "Quill", "Relay", "Roster", "Satchel", "Scribe", "Scroll", "Scriptorium", "Sentinel", "Shelf", "Sketchbook", "Sluice", "Tally", "Telegraph", "Typecast", "Vault", "Viewport", "Whittle",
+            "Abacus", "Almanac", "Anvil", "Archivist", "Atlas", "Attic", "Babel", "Bedrock", "Cartographer", "Chronicle", "Cipher", "Clock", "Cobweb", "Cornerstone", "Courier", "Darkroom", "Easel",
+            "Etiquette", "Foreman", "Forge", "Foundry", "Gatekeeper", "Gauge", "Glossary", "Gossamer", "Grafter", "Herald", "Inventory", "Itinerary", "Keyring", "Lantern", "Launchpad", "Ledger", "Lexicon",
+            "Logbook", "Menagerie", "Orchard", "Panorama", "Parsley", "Quill", "Quiver", "Relay", "Roster", "Satchel", "Scribe", "Scriptorium", "Scrivener", "Scroll", "Semaphore", "Sentinel", "Shelf",
+            "Sketchbook", "Sluice", "Sundial", "Tally", "Telegraph", "Typecast", "Vault", "Viewport", "Whittle",
         ].filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path)
         } + swift.filter {
