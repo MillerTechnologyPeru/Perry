@@ -220,12 +220,20 @@ public enum Runtime {
         return Hooks.getClass(name, &found) ? found : nil
     }
 
-    /// Empties every method cache, after methods change.
+    /// Classes with something cached: methods, or whether they use
+    /// NSObject's retain and release. Guarded by `lock`.
+    nonisolated(unsafe) static var cachedClasses: [ClassInfo] = []
+
+    /// Empties every method cache, after methods change. Only classes that
+    /// have cached something are visited: while images load, which adds
+    /// thousands of methods, no class has, and visiting every class for
+    /// each method made loading cost methods times classes.
     static func flushCaches() {
         lock.withLock {
-            for info in allClasses {
+            for info in cachedClasses {
                 info.flushCache()
             }
+            cachedClasses.removeAll(keepingCapacity: true)
         }
     }
 

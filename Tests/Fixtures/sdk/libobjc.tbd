@@ -15,6 +15,8 @@ exports:
                _objc_release, _objc_retain, _objc_retainAutoreleasedReturnValue,
                _objc_retainBlock, _objc_setAssociatedObject, _objc_storeStrong,
                _objc_storeWeak, _objc_unsafeClaimAutoreleasedReturnValue,
-               _object_getClassName ]
+               _object_getClassName, _class_addMethod, _class_getInstanceMethod,
+               _class_replaceMethod, _method_exchangeImplementations, _method_getImplementation,
+               _method_setImplementation, _objc_getClass, _sel_registerName ]
     objc-classes: [ NSObject ]
 ...

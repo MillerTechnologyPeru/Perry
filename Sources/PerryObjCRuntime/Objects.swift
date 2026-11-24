@@ -147,11 +147,16 @@ public enum Objects {
         case 1: return true
         case 2: return false
         default:
-            let isDefault = Runtime.findMethod(info, Sel.retain)?.pointee.imp == defaultRetain
-                && Runtime.findMethod(info, Sel.release)?.pointee.imp == defaultRelease
-                && Runtime.findMethod(info, Sel.autorelease)?.pointee.imp == defaultAutorelease
-            info.retainRelease.store(isDefault ? 1 : 2, ordering: .relaxed)
-            return isDefault
+            // Under the lock, so a flush, which forgets the answer, comes
+            // wholly before or after it is worked out and kept.
+            return Runtime.lock.withLock {
+                let isDefault = Runtime.findMethod(info, Sel.retain)?.pointee.imp == defaultRetain
+                    && Runtime.findMethod(info, Sel.release)?.pointee.imp == defaultRelease
+                    && Runtime.findMethod(info, Sel.autorelease)?.pointee.imp == defaultAutorelease
+                info.retainRelease.store(isDefault ? 1 : 2, ordering: .relaxed)
+                info.noteCached()
+                return isDefault
+            }
         }
     }
 
