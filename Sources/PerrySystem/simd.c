@@ -243,6 +243,9 @@ const perry_half2x2 darwin_matrix_identity_half2x2 DARWIN_SYMBOL(matrix_identity
 const perry_half3x3 darwin_matrix_identity_half3x3 DARWIN_SYMBOL(matrix_identity_half3x3) = {{ {HALF_ONE, 0, 0}, {0, HALF_ONE, 0}, {0, 0, HALF_ONE} }};
 const perry_half4x4 darwin_matrix_identity_half4x4 DARWIN_SYMBOL(matrix_identity_half4x4) = {{
     {HALF_ONE, 0, 0, 0}, {0, HALF_ONE, 0, 0}, {0, 0, HALF_ONE, 0}, {0, 0, 0, HALF_ONE} }};
+// The float and double matrices' types are the 64-bit architectures'
+// (above); i386 and armv7 apps of simd's years don't link these.
+#if defined(__x86_64__) || defined(__aarch64__)
 const simd_float2x2 darwin_matrix_identity_float2x2 DARWIN_SYMBOL(matrix_identity_float2x2) = {{ {1, 0}, {0, 1} }};
 const simd_float3x3 darwin_matrix_identity_float3x3 DARWIN_SYMBOL(matrix_identity_float3x3) = {{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} }};
 const simd_float4x4 darwin_matrix_identity_float4x4 DARWIN_SYMBOL(matrix_identity_float4x4) = {{
@@ -251,3 +254,4 @@ const simd_double2x2 darwin_matrix_identity_double2x2 DARWIN_SYMBOL(matrix_ident
 const simd_double3x3 darwin_matrix_identity_double3x3 DARWIN_SYMBOL(matrix_identity_double3x3) = {{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} }};
 const simd_double4x4 darwin_matrix_identity_double4x4 DARWIN_SYMBOL(matrix_identity_double4x4) = {{
     {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1} }};
+#endif
