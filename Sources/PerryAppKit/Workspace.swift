@@ -361,7 +361,8 @@ open class NSWorkspace: NSObject {
     @ObjCMethod("isFilePackageAtPath:") func isFilePackage(atPath path: String?) -> Bool { path?.hasSuffix(".app") ?? false }
     @ObjCMethod("accessibilityDisplayShouldReduceMotion") func reduceMotion() -> Bool { false }
     @ObjCMethod("accessibilityDisplayShouldReduceTransparency") func reduceTransparency() -> Bool { false }
-    @ObjCMethod("accessibilityDisplayShouldIncreaseContrast") func increaseContrast() -> Bool { false }
+    /// The desktop's contrast setting, from the settings portal.
+    @ObjCMethod("accessibilityDisplayShouldIncreaseContrast") func increaseContrast() -> Bool { Appearances.desktop.increasedContrast }
     @ObjCMethod("accessibilityDisplayShouldDifferentiateWithoutColor") func differentiateWithoutColor() -> Bool { false }
     @ObjCMethod("accessibilityDisplayShouldInvertColors") func invertColors() -> Bool { false }
     @ObjCMethod("isVoiceOverEnabled") func isVoiceOverEnabled() -> Bool { false }

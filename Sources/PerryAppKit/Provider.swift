@@ -50,6 +50,8 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 func providerDidStart(_ info: perry_startup_info) {
     NSAlert.registerLegacyConstructor()
     StandInClasses.register()
+    // The desktop's appearance, read in the background from here.
+    Appearances.follow()
     guard isMacCatalystApp(info.main_header), let cls = Classes.named("NSApplication") else { return }
     _ = Send.object(cls.pointer, "sharedApplication")
     App.shared?.active = true

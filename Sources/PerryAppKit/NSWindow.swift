@@ -463,6 +463,14 @@ open class NSWindow: NSResponder {
     @ObjCMethod("appearance") func windowAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
     @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance ?? App.shared?.effectiveAppearance() ?? NSAppearance.system }
+
+    /// The desktop's appearance changed: the window's views that take it
+    /// hear so, and every view and the background draw again, as the
+    /// accent shows in every appearance.
+    func systemAppearanceChanged() {
+        drawnBackground = nil
+        rootView?.systemAppearanceChanged(inherited: appearance == nil && App.shared?.appearance == nil)
+    }
     @ObjCMethod("collectionBehavior") func windowCollectionBehavior() -> UInt { collectionBehavior }
     @ObjCMethod("setCollectionBehavior:") func setCollectionBehavior(_ behavior: UInt) { collectionBehavior = behavior }
     @ObjCMethod("isReleasedWhenClosed") func isReleasedWhenClosed() -> Bool { releasedWhenClosed }

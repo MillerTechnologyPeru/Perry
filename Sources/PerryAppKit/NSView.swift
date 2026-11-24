@@ -301,6 +301,19 @@ open class NSView: NSResponder {
     func effectiveAppearance() -> NSObject? {
         appearance ?? superview?.effectiveAppearance() ?? window?.effectiveAppearance() ?? App.shared?.effectiveAppearance() ?? NSAppearance.system
     }
+    /// Overridden to update what a view keeps for its appearance, such as
+    /// its layer's colors.
+    @ObjCMethod("viewDidChangeEffectiveAppearance") func viewDidChangeEffectiveAppearance() {}
+
+    /// The desktop's appearance changed: this view and those below it draw
+    /// again, and those whose effective appearance is the system's
+    /// (`inherited`, and none of their own) hear that it changed.
+    func systemAppearanceChanged(inherited: Bool) {
+        let takesSystem = inherited && appearance == nil
+        if takesSystem { Send.void(objcObject, "viewDidChangeEffectiveAppearance") }
+        setNeedsDisplay(true)
+        for subview in subviews { subview.systemAppearanceChanged(inherited: takesSystem) }
+    }
     @ObjCMethod("nextKeyView") func viewNextKeyView() -> NSObject? { nextKeyView }
     @ObjCMethod("setNextKeyView:") func setNextKeyView(_ view: NSObject?) { nextKeyView = view }
     @ObjCMethod("inLiveResize") func inLiveResize() -> Bool { false }

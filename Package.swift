@@ -131,7 +131,8 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
         // Cacao's engine: the display list QuartzCore's layers are drawn as,
-        // and its compositor on an SDL renderer.
+        // and its compositor on an SDL renderer; and its settings portal
+        // client, which AppKit's appearance follows.
         .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop"),
         // WPE WebKit's engine, shared with Cacao's web views: the pages
         // UIKit's web views show.
@@ -550,13 +551,21 @@ let package = Package(
                            "PerryScrollPhysics", .product(name: "SDL3Swift", package: "SDL"), .product(name: "WPEWebKit", package: "WebKit")],
             plugins: ["PerryProviderPlugin"]
         ),
+        // The desktop's appearance for AppKit: light or dark, accent and
+        // contrast, from the settings portal through Cacao's portal client,
+        // with its changes.
+        .target(
+            name: "PerryDesktopAppearance",
+            dependencies: [.product(name: "CacaoDBus", package: "Cacao")]
+        ),
         // AppKit: variadic entry points.
         .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics",
+            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryDesktopAppearance", "PerryInterface", "PerryLayoutSolver",
+                           "PerryObjCInterop", "PerryScrollPhysics", .product(name: "CacaoDBus", package: "Cacao"),
                            .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
@@ -586,6 +595,10 @@ let package = Package(
         .testTarget(
             name: "PerryLoaderTests",
             dependencies: ["PerryLoaderCore"]
+        ),
+        .testTarget(
+            name: "PerryDesktopAppearanceTests",
+            dependencies: ["PerryDesktopAppearance", .product(name: "CacaoDBus", package: "Cacao"), .product(name: "DBus", package: "DBus")]
         ),
     ]
 )
