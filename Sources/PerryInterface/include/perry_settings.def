@@ -1,0 +1,201 @@
+// Every PERRY_* environment variable Perry reads, one a line:
+//
+//   PERRY_SETTING(NAME, kind, "Group", help, "what it does")
+//
+// NAME is the variable without its PERRY_ prefix. The kind says how its
+// value is read:
+//
+//   flag     set or unset; the value is ignored
+//   bool01   set and not "0" is on
+//   number   an integer or a decimal, with a default when unset
+//   string   text, or one of the values the summary names
+//   path     a file or directory
+//   list     items separated as the summary says
+//   dynamic  set by Perry itself, and read again on each use
+//
+// "help" lines are the ones `perry --help` lists; `perry --settings` lists
+// them all, by group. A variable a provider reads by name must be here:
+// Tests/PerryLoaderTests/SettingsTests.swift checks Sources against it.
+//
+// Include it with PERRY_SETTING defined (perry_settings.h does).
+
+// MARK: Loader
+PERRY_SETTING(TRACE, list, "Loader", help, "comma-separated: load, bind, init, all")
+PERRY_SETTING(PROFILE, path, "Loader", help, "sample the main thread's stacks into this file (Scripts/perry-profile.py reports them)")
+PERRY_SETTING(PROFILE_HZ, number, "Loader", help, "samples a second of CPU time, 250 by default")
+PERRY_SETTING(PROFILE_ALL, bool01, "Loader", detail, "sample whichever thread runs, on the process's CPU clock, not only the main thread")
+PERRY_SETTING(CRASH_REPORT, bool01, "Loader", help, "on a fatal signal, print registers and frames")
+PERRY_SETTING(UNIMPLEMENTED, string, "Loader", help, "continue: an unresolved function reports itself once and returns 0 instead of aborting")
+PERRY_SETTING(LIBRARY_PATH, list, "Loader", help, "colon-separated directories with provider libraries")
+PERRY_SETTING(SWIFT_RUNTIME, path, "Loader", detail, "directory of Darwin's Swift runtime and overlays, such as the iOS Simulator's")
+PERRY_SETTING(SWIFT_TYPE_TRACE, flag, "Loader", detail, "report Swift type names the runtime can't make a type of")
+PERRY_SETTING(METAL, bool01, "Loader", detail, "0: no Metal device even with libPerryMetal there, so apps fall back to OpenGL ES")
+PERRY_SETTING(REEXECUTED, dynamic, "Loader", detail, "set by perry when it runs itself again to map low memory")
+PERRY_SETTING(GDB, string, "Loader", detail, "native: don't answer a debugger's GDB/MI session as gdb")
+PERRY_SETTING(GDB_LOG, path, "Loader", detail, "append the GDB/MI conversation to this file")
+
+// MARK: Container
+PERRY_SETTING(CONTAINER, path, "Container", help, "an app's home directory; ~/.perry/Containers/<bundle id> unless set")
+PERRY_SETTING(DOCUMENTS, path, "Container", help, "directory to keep the container's Documents in instead")
+PERRY_SETTING(LIBRARY, path, "Container", help, "directory to keep the container's Library in instead")
+PERRY_SETTING(CACHES, path, "Container", help, "directory to keep the container's Library/Caches in instead")
+PERRY_SETTING(PREFERENCES, path, "Container", help, "directory to keep the container's Library/Preferences in instead")
+PERRY_SETTING(TMP, path, "Container", help, "directory to keep the container's tmp in instead")
+
+// MARK: System
+PERRY_SETTING(OS_VERSION, string, "System", detail, "the OS version programs see, else the one the app was built for")
+PERRY_SETTING(DEVICE_MODEL, string, "System", detail, "the device model programs see; iPhone17,1 by default")
+PERRY_SETTING(KEEP_CRASH_HANDLERS, list, "System", help, "keep Perry's crash handler over the app's: all signals, or those named (segv,bus,ill,abrt,trap,fpe)")
+PERRY_SETTING(EXPOSE_HOST, bool01, "System", detail, "show programs the host-only paths (ssh, package managers, jailbreak files) Perry hides")
+PERRY_SETTING(DISCS, list, "System", detail, "more discs, as paths or Name=path pairs, colon-separated")
+PERRY_SETTING(DISC_TRACE, flag, "System", detail, "what a program asks about discs and volumes")
+PERRY_SETTING(ISA_TRACE, flag, "System", detail, "name each instruction rewritten")
+PERRY_SETTING(TRACE_THREADS, flag, "System", detail, "thread suspensions, and the threads they reach")
+PERRY_SETTING(LOADER, dynamic, "System", detail, "set by Perry for Linux programs a Mac program starts: the perry that runs Mac programs they start")
+
+// MARK: Objective-C
+PERRY_SETTING(OBJC_UNRECOGNIZED, string, "Objective-C", help, "continue: an unrecognized selector reports itself once and returns 0")
+PERRY_SETTING(OBJC_CALLER, flag, "Objective-C", detail, "with an unrecognized selector, say where it was sent from")
+PERRY_SETTING(OBJC_ZOMBIES, bool01, "Objective-C", detail, "keep deallocated objects as zombies that report messages sent to them")
+PERRY_SETTING(OBJC_TRACE, string, "Objective-C", detail, "a class name: report its objects' retains, releases and deallocations")
+PERRY_SETTING(OBJC_TRACE_FRAMES, bool01, "Objective-C", detail, "end each traced report with its return addresses")
+PERRY_SETTING(OBJC_TRAP, string, "Objective-C", detail, "1: raise SIGTRAP at each traced report; other text: at warnings containing it")
+PERRY_SETTING(OBJC_PROFILE, number, "Objective-C", detail, "count messages by class and selector, printing the most frequent every this many seconds")
+PERRY_SETTING(OBJC_NO_CLASS_RW, flag, "Objective-C", detail, "leave classes as their images have them, without read-write data")
+PERRY_SETTING(SWIFT_THROW_TRACE, bool01, "Objective-C", help, "print each Swift error thrown, its task's name and the frames that threw it")
+
+// MARK: Dispatch
+PERRY_SETTING(DISPATCH_THREAD_CLEANUP, string, "Dispatch", detail, "libdispatch: leave libdispatch's thread destructor where it is")
+PERRY_SETTING(OS_LOG_DEBUG, flag, "Dispatch", detail, "show os_log's debug messages, which Darwin keeps only when configured to")
+
+// MARK: Foundation
+PERRY_SETTING(BUNDLE_TRACE, flag, "Foundation", help, "print info dictionary lookups and missing resources")
+PERRY_SETTING(FOUNDATION_RANGE, string, "Foundation", detail, "continue: reading past an array's end gives nil with a warning instead of ending the process")
+PERRY_SETTING(JSON_TRACE, flag, "Foundation", detail, "the size and start of each JSON document parsed")
+PERRY_SETTING(KVO_TRACE, flag, "Foundation", detail, "each key-value observation registration added and removed")
+PERRY_SETTING(NSEXPRESSION_TRACE, flag, "Foundation", detail, "every NSExpression made")
+PERRY_SETTING(OPERATION_TRACE, flag, "Foundation", detail, "each operation a queue is given, starts and finishes")
+PERRY_SETTING(RUNLOOP_TRACE, flag, "Foundation", detail, "run loop observers created, added and called")
+PERRY_SETTING(STREAM_TRACE, flag, "Foundation", detail, "streams opened and read, and PKCS #12 imports")
+PERRY_SETTING(TASK_TRACE, flag, "Foundation", detail, "the tasks launched and how they end")
+
+// MARK: Networking
+PERRY_SETTING(URL_TRACE, flag, "Networking", help, "print each URL task as it completes, and who cancels one")
+PERRY_SETTING(URL_BODY, path, "Networking", detail, "directory to append each response's bytes to, a file for each request's last path component")
+PERRY_SETTING(URL_BLOCK_WRITES, list, "Networking", detail, "comma-separated URL parts: requests other than GET and HEAD to URLs with one fail")
+PERRY_SETTING(URL_MAP, list, "Networking", detail, "URL=path pairs separated by |: URLs read from local files instead")
+PERRY_SETTING(KEYCHAIN, path, "Networking", detail, "the keychain's file, in place of the one in the app's container")
+PERRY_SETTING(KEYCHAIN_TRACE, flag, "Networking", detail, "each SecItem call and the status it returns")
+PERRY_SETTING(CLOUDKIT_API_TOKEN, string, "Networking", detail, "CloudKit Web Services API token, for the MistKit backend")
+PERRY_SETTING(CLOUDKIT_WEB_AUTH_TOKEN, string, "Networking", detail, "CloudKit Web Services user token, for the MistKit backend")
+PERRY_SETTING(CLOUDKIT_CONTAINER, string, "Networking", detail, "the CloudKit container identifier to use, for the MistKit backend")
+PERRY_SETTING(CLOUDKIT_ENVIRONMENT, string, "Networking", detail, "development or production (the default), for the MistKit backend")
+PERRY_SETTING(CLOUDKIT_TRACE, flag, "Networking", detail, "each CloudKit request and the answer it gets")
+PERRY_SETTING(WIFI_TRACE, flag, "Networking", detail, "what CoreWLAN asks of NetworkManager and hears back")
+PERRY_SETTING(BLUETOOTH_TRACE, flag, "Networking", detail, "what CoreBluetooth's central managers ask of BlueZ and hear back")
+
+// MARK: UIKit
+PERRY_SETTING(UIKIT_DISPLAY, bool01, "UIKit", detail, "0: no live view, even with a display")
+PERRY_SETTING(UIKIT_RENDERER, string, "UIKit", detail, "software: composite in software, at scale 1")
+PERRY_SETTING(UIKIT_SCREEN, string, "UIKit", detail, "ipad, iphone, or points and a scale (1024x768@2): the screen the app gets")
+PERRY_SETTING(UIKIT_RESIZABLE, bool01, "UIKit", detail, "1 or 0: whether the app runs in a window of any size")
+PERRY_SETTING(UIKIT_ORIENTATION, string, "UIKit", detail, "landscape, portrait, landscapeleft or landscaperight: how an app that supports both is held")
+PERRY_SETTING(UIKIT_DISPLAY_ROTATION, number, "UIKit", detail, "90 or 270: show the screen turned a quarter on the display")
+PERRY_SETTING(UIKIT_DISPLAY_SCALE, number, "UIKit", detail, "the screen's scale, in place of the display's")
+PERRY_SETTING(UIKIT_STATUS_BAR_HEIGHT, number, "UIKit", detail, "the top safe area inset in portrait, 0 by default")
+PERRY_SETTING(UIKIT_SCREEN_BOUNDS_PORTRAIT, flag, "UIKit", detail, "report screen bounds upright, as iOS did before 8")
+PERRY_SETTING(UIKIT_APPEARANCE, string, "UIKit", detail, "the interface style: light or dark")
+PERRY_SETTING(UIKIT_ACCELEROMETER_ORIENTATION, number, "UIKit", detail, "the orientation (1 to 4) the device is held in, for the accelerometer")
+PERRY_SETTING(UIKIT_GL_SCALE, string, "UIKit", detail, "native, or a factor over 1: OpenGL ES drawables rendered larger")
+PERRY_SETTING(UIKIT_ASYNC_READBACK, bool01, "UIKit", detail, "1: read OpenGL ES frames back through pixel buffers, on OpenGL ES 3")
+PERRY_SETTING(UIKIT_ZERO_COPY, bool01, "UIKit", detail, "0: copy frames to the compositor instead of sharing them as dma-bufs")
+PERRY_SETTING(UIKIT_NO_BLUR, flag, "UIKit", detail, "show blurred backdrops as their tint")
+PERRY_SETTING(UIKIT_FPS, flag, "UIKit", detail, "frames composited and drawn each second, in the corner and on stderr")
+PERRY_SETTING(UIKIT_SNAPSHOT, path, "UIKit", detail, "write the visible windows here as a PNG after updates")
+PERRY_SETTING(UIKIT_SNAPSHOT_STEPS, flag, "UIKit", detail, "only write the snapshots of the tap script's steps")
+PERRY_SETTING(UIKIT_SNAPSHOT_VIEW, string, "UIKit", detail, "a class name: also write the first such view alone, as shot-view.png")
+PERRY_SETTING(UIKIT_SNAPSHOT_CONSTRAINTS, flag, "UIKit", detail, "list each view's constraints in the snapshot's view tree")
+PERRY_SETTING(UIKIT_FRAME_DUMP, path, "UIKit", detail, "write the composited frame here as a PNG about every second")
+PERRY_SETTING(UIKIT_FRAME_DUMP_INTERVAL, number, "UIKit", detail, "seconds between frame dumps, 1 by default")
+PERRY_SETTING(UIKIT_TAPS, list, "UIKit", detail, "semicolon-separated taps, drags, pinches, wheel turns, keys and text, done two seconds apart")
+PERRY_SETTING(UIKIT_GAMEPAD_TOUCH, path, "UIKit", detail, "a file placing sticks and buttons on the screen, so a gamepad plays a touch game")
+PERRY_SETTING(UIKIT_WEB_SCRIPT, path, "UIKit", detail, "a script file every web page runs at its end")
+PERRY_SETTING(UIKIT_WEB_CONSOLE, flag, "UIKit", detail, "print what web pages log (not available with the shared engine)")
+PERRY_SETTING(UIKIT_WEB_TRACE, flag, "UIKit", detail, "input sent to web pages")
+PERRY_SETTING(UIKIT_TOUCH_TRACE, flag, "UIKit", detail, "gesture recognizers' states, touches, and display links' ticks")
+PERRY_SETTING(UIKIT_LAYOUT_TRACE, flag, "UIKit", detail, "views laid out each second, and layouts that keep asking for another")
+PERRY_SETTING(UIKIT_PRESENT_TRACE, flag, "UIKit", detail, "modal presentations and dismissals")
+PERRY_SETTING(UIKIT_COLLECTION_TRACE, flag, "UIKit", detail, "what collection views are asked and told")
+PERRY_SETTING(UIKIT_IMAGE_TRACE, flag, "UIKit", detail, "images and data assets loaded, and those not found")
+PERRY_SETTING(UIKIT_GL_TRACE, flag, "UIKit", detail, "OpenGL ES presents: the first few and every 300th")
+PERRY_SETTING(UIKIT_SYMBOL_TRACE, flag, "UIKit", detail, "say once which SF Symbol an app asked for has no drawing")
+PERRY_SETTING(DESKTOP_ENTRY, bool01, "UIKit", detail, "0: don't install a desktop entry and icon for the app")
+PERRY_SETTING(SPRITEKIT_TRACE, flag, "UIKit", detail, "SpriteKit actions given, blocks run and scenes shown")
+PERRY_SETTING(SCENEKIT_TRACE, flag, "UIKit", detail, "SceneKit animations, textures and frames")
+PERRY_SETTING(SCENEKIT_NO_OVERLAY, flag, "UIKit", detail, "don't show SceneKit views' SpriteKit overlays")
+
+// MARK: AppKit
+PERRY_SETTING(APPKIT_DISPLAY, bool01, "AppKit", detail, "0: open no windows, even with a display")
+PERRY_SETTING(APPKIT_APPEARANCE, string, "AppKit", detail, "light or dark, in place of the desktop's")
+PERRY_SETTING(APPKIT_MENUBAR, string, "AppKit", detail, "off: leave the main menu out of windows")
+PERRY_SETTING(APPKIT_QUIET_ALERTS, flag, "AppKit", detail, "only log alerts with no choice to make, so the app runs on")
+PERRY_SETTING(APPKIT_OPEN, list, "AppKit", detail, "files to open at launch, in place of an untitled document")
+PERRY_SETTING(APPKIT_CLICKS, list, "AppKit", detail, "scripted clicks, scrolls, menu choices and text, done in turn")
+PERRY_SETTING(APPKIT_TYPE, string, "AppKit", detail, "text typed into the key window four seconds after launch")
+PERRY_SETTING(APPKIT_SNAPSHOT, path, "AppKit", detail, "write the frontmost window here as a PNG, with its view tree beside it")
+PERRY_SETTING(APPKIT_TRACE, flag, "AppKit", detail, "events and window changes, as they happen")
+PERRY_SETTING(APPKIT_SYMBOL_TRACE, flag, "AppKit", detail, "SF Symbols an app asked for that aren't rendered")
+PERRY_SETTING(CARBON_TRACE, flag, "AppKit", detail, "Carbon calls")
+PERRY_SETTING(QUICKTIME_TRACE, flag, "AppKit", detail, "QuickTime calls")
+PERRY_SETTING(BOM_TRACE, flag, "AppKit", detail, "each BOMCopierCopyWithOptions and its result")
+
+// MARK: Graphics
+PERRY_SETTING(ANIMATION_TRACE, flag, "Graphics", detail, "each animation that stops, and whether its delegate hears")
+PERRY_SETTING(QUARTZ_DISPLAY_TRACE, flag, "Graphics", detail, "why layers redraw")
+PERRY_SETTING(METAL_TRACE, flag, "Graphics", detail, "Metal layers made, and drawables asked for and presented")
+PERRY_SETTING(METAL_TRACE_ALL, list, "Graphics", detail, "comma-separated kinds of Metal call logged every time")
+PERRY_SETTING(METAL_FPS, number, "Graphics", detail, "Metal drawables' frame rate, 60 by default")
+PERRY_SETTING(METAL_WAIT, number, "Graphics", detail, "seconds to wait for a shader source not compiled yet, 0 by default")
+PERRY_SETTING(METAL_SOURCES, path, "Graphics", detail, "directory of Metal shader sources and their compiled libraries")
+PERRY_SETTING(METAL2VULKAN, path, "Graphics", detail, "the metal2vulkan library to load")
+PERRY_SETTING(METAL_DUMP, path, "Graphics", detail, "write a presented frame here as a PPM")
+PERRY_SETTING(METAL_DUMP_FRAME, number, "Graphics", detail, "which presented frame METAL_DUMP writes, 300 by default")
+PERRY_SETTING(METAL_DUMP_PASSES, path, "Graphics", detail, "directory for render passes' colour targets, as PPMs")
+PERRY_SETTING(METAL_DUMP_PASS, number, "Graphics", detail, "the first render pass METAL_DUMP_PASSES writes, 1000 by default, and 20 after it")
+PERRY_SETTING(METAL_DUMP_DISPATCH, list, "Graphics", detail, "comma-separated dispatches whose bound textures are written")
+PERRY_SETTING(METAL_DUMP_UPLOADS, path, "Graphics", detail, "directory for small RGBA8 uploads, as PPMs")
+PERRY_SETTING(METAL_DEBUG_BARRIERS, flag, "Graphics", detail, "a barrier on buffers and textures before every dispatch")
+PERRY_SETTING(METAL_DEBUG_CLEAR, flag, "Graphics", detail, "clear drawables to magenta and other targets to green")
+PERRY_SETTING(METAL_DEBUG_NO_CULL, flag, "Graphics", detail, "ignore culling")
+PERRY_SETTING(METAL_DEBUG_NO_SCISSOR, flag, "Graphics", detail, "ignore scissor rectangles")
+PERRY_SETTING(METAL_DEBUG_NO_MIPS, flag, "Graphics", detail, "samplers read only the base level")
+
+// MARK: Media
+PERRY_SETTING(AVFOUNDATION_TRACE, flag, "Media", detail, "what AVFoundation's players do")
+PERRY_SETTING(TRACE_AUDIO, flag, "Media", detail, "AudioToolbox calls")
+PERRY_SETTING(TRACE_MEDIA, flag, "Media", detail, "what an app asks of its media players")
+
+// MARK: Input
+PERRY_SETTING(GAMECONTROLLER_KEYBOARD, flag, "Input", detail, "play the gamepad from the keyboard")
+PERRY_SETTING(GAMECONTROLLER_DEADZONE, number, "Input", detail, "how far a stick may lean and still be at rest, 0.25 by default")
+PERRY_SETTING(GAMECONTROLLER_SENSITIVITY, number, "Input", detail, "a multiplier for sticks' lean, 1 by default")
+PERRY_SETTING(GAMECONTROLLER_TOUCHES, list, "Input", detail, "buttons as touches at screen points, for programs that only answer to touch")
+PERRY_SETTING(GAMECONTROLLER_STICK_TOUCH, list, "Input", detail, "sticks as a finger dragged from a resting point")
+PERRY_SETTING(GAMECONTROLLER_HOLD, list, "Input", detail, "buttons held from and until given times after start")
+PERRY_SETTING(GAMECONTROLLER_QUIT, list, "Input", detail, "button combinations that quit the app when held")
+PERRY_SETTING(GAMECONTROLLER_TRACE, flag, "Input", detail, "gamepads found and what they send")
+PERRY_SETTING(COREMOTION_SHAKE, string, "Input", detail, "a gamepad button whose press shakes the device")
+PERRY_SETTING(COREMOTION_STICK, list, "Input", detail, "x,y or x,y,seconds: a stick held there, to steer without a gamepad")
+PERRY_SETTING(COREMOTION_TILT, number, "Input", detail, "degrees of tilt at the stick's end, 30 by default")
+PERRY_SETTING(HID_TRACE, flag, "Input", detail, "IOKit's HID gamepads")
+PERRY_SETTING(IOKIT_TRACE, flag, "Input", detail, "what a program asks the IOKit registry")
+
+// MARK: Services
+PERRY_SETTING(LOCATION, list, "Services", detail, "latitude,longitude: where the device is")
+PERRY_SETTING(MAPLIBRE, path, "Services", detail, "the MapLibre library to load, libPerryMapLibre.so by default")
+PERRY_SETTING(MAP_STYLE, string, "Services", detail, "the map style URL, OpenFreeMap's Liberty by default")
+PERRY_SETTING(MAP_TRACE, flag, "Services", detail, "map tiles drawn")
+PERRY_SETTING(GAMEKIT_SIGN_IN, string, "Services", detail, "pending: Game Center's sign-in never finishes")
+PERRY_SETTING(STEAMCLIENT, path, "Services", detail, "the Linux Steam client's steamclient.so")
+PERRY_SETTING(STEAM_TRACE, flag, "Services", detail, "Steamworks calls")
+PERRY_SETTING(STEAM_TRACE_CALLS, flag, "Services", detail, "every call into steamclient.so")
