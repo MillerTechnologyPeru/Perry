@@ -364,6 +364,8 @@ final class WebContent {
 open class WKPreferences: NSObject {
     var javaScriptEnabled = true
     var values: [String: NSObject] = [:]
+    /// The Web Inspector's switch: kept, as there is no inspector.
+    var developerExtrasEnabled = false
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -376,6 +378,9 @@ open class WKPreferences: NSObject {
     @ObjCMethod("setMinimumFontSize:") func setMinimumFontSize(_ size: CGFloat) {}
     @ObjCMethod("isElementFullscreenEnabled") func isElementFullscreenEnabled() -> Bool { false }
     @ObjCMethod("setElementFullscreenEnabled:") func setElementFullscreenEnabled(_ value: Bool) {}
+
+    @ObjCMethod("_developerExtrasEnabled") func isDeveloperExtrasEnabled() -> Bool { developerExtrasEnabled }
+    @ObjCMethod("_setDeveloperExtrasEnabled:") func setDeveloperExtrasEnabled(_ value: Bool) { developerExtrasEnabled = value }
 
     /// Private preferences set by key (developerExtrasEnabled), kept.
     @ObjCMethod("setValue:forKey:") func setValue(_ value: NSObject?, forKey key: String?) { if let key { values[key] = value } }
@@ -676,6 +681,9 @@ open class WKNavigation: NSObject {
 @ObjCClass("WKWebView")
 open class WKWebView: NSView {
     var configuration = WKWebViewConfiguration()
+    /// The part of the view other views cover (macOS 26), which pages lay
+    /// out under: kept, as the page fills the view.
+    var obscuredContentInsets = NSEdgeInsets()
     /// Not retained, as WebKit's.
     var navigationDelegate: UnsafeMutableRawPointer?
     var uiDelegate: UnsafeMutableRawPointer?
@@ -842,6 +850,8 @@ open class WKWebView: NSView {
     func requestMediaPlaybackState(completionHandler: ObjCBlock?) { if let completionHandler { Dispatch.onMain { Blocks.call(completionHandler, 0) } } }
     @ObjCMethod("pageZoom") func pageZoom() -> CGFloat { 1 }
     @ObjCMethod("setPageZoom:") func setPageZoom(_ zoom: CGFloat) {}
+    @ObjCMethod("obscuredContentInsets") func webObscuredContentInsets() -> NSEdgeInsets { obscuredContentInsets }
+    @ObjCMethod("setObscuredContentInsets:") func setObscuredContentInsets(_ insets: NSEdgeInsets) { obscuredContentInsets = insets }
 
     /// Private settings set by key: drawsBackground, kept.
     @ObjCMethod("setValue:forKey:")
