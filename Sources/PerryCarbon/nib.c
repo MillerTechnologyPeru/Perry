@@ -328,13 +328,15 @@ static void make_controls(WindowRef window, xml_node *root) {
             if (control) set_command(control, command);
         } else if (strcmp(node->class, "IBCarbonStaticText") == 0) {
             id view = carbon_label_view(string_object(title), small);
+            carbon_label_fit(view, &bounds, small);
             control = carbon_control_new(window, NULL, view, &bounds, FOUR('s', 't', 'x', 't'));
         } else if (strcmp(node->class, "IBCarbonEditText") == 0) {
             control = carbon_edit_text_control(window, &bounds, string_object(title), small);
         } else if (strcmp(node->class, "IBCarbonPopupButton") == 0) {
             xml_node *menu = child(node, "menu");
             MenuRef items = menu ? make_menu(menu, true) : carbon_menu_new(0, NULL);
-            control = carbon_popup_control(window, &bounds, items, (int32_t)int_of(node, "selectedItem", 1), command);
+            control = carbon_popup_control(window, &bounds, items, (int32_t)int_of(node, "selectedItem", 1), command,
+                                           title ? string_object(title) : NULL);
         } else if (strcmp(node->class, "IBCarbonCheckBox") == 0) {
             control = carbon_checkbox_control(window, &bounds, string_object(title), (int32_t)int_of(node, "initialValue", 0),
                                               command, small);
