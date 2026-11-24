@@ -55,6 +55,44 @@ enum Requests {
     }
 }
 
+/// Loading hints corelibs has no use for, kept by request object to be
+/// read back (not in the request's properties, which would tag what goes
+/// to the server). Copies of the object keep them.
+final class RequestHintSet {
+    var flags: [String: Bool] = [:]
+    var cookiePartition: String?
+
+    func copy() -> RequestHintSet {
+        let copy = RequestHintSet()
+        copy.flags = flags
+        copy.cookiePartition = cookiePartition
+        return copy
+    }
+}
+
+enum RequestHints {
+    static let states = StateTable<RequestHintSet>()
+
+    static func hints(_ object: UnsafeMutableRawPointer) -> RequestHintSet {
+        if let hints = states.get(object) { return hints }
+        let hints = RequestHintSet()
+        states.set(object, hints)
+        return hints
+    }
+
+    /// The hint's value, else Darwin's default.
+    static func flag(_ object: UnsafeMutableRawPointer, _ name: String, default value: Bool) -> Bool {
+        states.get(object)?.flags[name] ?? value
+    }
+
+    static func setFlag(_ object: UnsafeMutableRawPointer, _ name: String, _ value: Bool) { hints(object).flags[name] = value }
+
+    /// A copy's hints are the original's.
+    static func copy(from source: UnsafeMutableRawPointer, to target: NSObject) {
+        if let hints = states.get(source) { states.set(target.objcObject, hints.copy()) }
+    }
+}
+
 /// NSURLRequest.
 @ObjCClass("NSURLRequest")
 open class NSURLRequest: NSObject {
@@ -63,6 +101,7 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         Requests.states.remove(objcObject)
+        RequestHints.states.remove(objcObject)
         if let stream = Requests.bodyStreams.removeValue(forKey: objcObject) { ObjCRuntime.release(stream) }
         ObjCRuntime.superDealloc(objcObject, definedOn: NSURLRequest.objCClass.pointer)
     }
@@ -112,10 +151,22 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("HTTPShouldUsePipelining") func httpShouldUsePipelining() -> Bool { request.usesPipelining }
     @ObjCMethod("mainDocumentURL") func mainDocumentURL() -> NSURL? { request.mainDocumentURL.flatMap(NSURL.of) }
     @ObjCMethod("allowsCellularAccess") func allowsCellularAccess() -> Bool { request.allowsCellularAccess }
-    @ObjCMethod("allowsExpensiveNetworkAccess") func allowsExpensiveNetworkAccess() -> Bool { true }
-    @ObjCMethod("allowsConstrainedNetworkAccess") func allowsConstrainedNetworkAccess() -> Bool { true }
     @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(request.networkServiceType) }
-    @ObjCMethod("assumesHTTP3Capable") func assumesHTTP3Capable() -> Bool { false }
+
+    // Hints about the network that the loader has no use for (there is no
+    // expensive, constrained or ultra-constrained network, HTTP/3, DNSSEC,
+    // persistent DNS or cookie partition here): kept and read back.
+    @ObjCMethod("allowsExpensiveNetworkAccess")
+    func allowsExpensiveNetworkAccess() -> Bool { RequestHints.flag(objcObject, "allowsExpensiveNetworkAccess", default: true) }
+    @ObjCMethod("allowsConstrainedNetworkAccess")
+    func allowsConstrainedNetworkAccess() -> Bool { RequestHints.flag(objcObject, "allowsConstrainedNetworkAccess", default: true) }
+    @ObjCMethod("allowsUltraConstrainedNetworkAccess")
+    func allowsUltraConstrainedNetworkAccess() -> Bool { RequestHints.flag(objcObject, "allowsUltraConstrainedNetworkAccess", default: false) }
+    @ObjCMethod("assumesHTTP3Capable") func assumesHTTP3Capable() -> Bool { RequestHints.flag(objcObject, "assumesHTTP3Capable", default: false) }
+    @ObjCMethod("requiresDNSSECValidation")
+    func requiresDNSSECValidation() -> Bool { RequestHints.flag(objcObject, "requiresDNSSECValidation", default: false) }
+    @ObjCMethod("allowsPersistentDNS") func allowsPersistentDNS() -> Bool { RequestHints.flag(objcObject, "allowsPersistentDNS", default: false) }
+    @ObjCMethod("cookiePartitionIdentifier") func cookiePartitionIdentifier() -> String? { RequestHints.states.get(objcObject)?.cookiePartition }
     /// Who a request is made for, the developer (0) or the user (1): only
     /// privacy reports read it, and there are none, so it isn't kept.
     @ObjCMethod("attribution") func attribution() -> UInt { 0 }
@@ -124,7 +175,9 @@ open class NSURLRequest: NSObject {
     /// request's copy is mutable, which Swift's URLRequest relies on.
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
-        ObjCRuntime.retain(Requests.object(request.copy(), mutable: isKind(of: NSMutableURLRequest.objCClass)).objcObject)!
+        let copy = Requests.object(request.copy(), mutable: isKind(of: NSMutableURLRequest.objCClass))
+        RequestHints.copy(from: objcObject, to: copy)
+        return ObjCRuntime.retain(copy.objcObject)!
     }
 
     // MARK: NSSecureCoding
@@ -164,7 +217,9 @@ open class NSURLRequest: NSObject {
 
     @ObjCMethod("mutableCopyWithZone:")
     func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
-        ObjCRuntime.retain(Requests.object(request.copy(), mutable: true).objcObject)!
+        let copy = Requests.object(request.copy(), mutable: true)
+        RequestHints.copy(from: objcObject, to: copy)
+        return ObjCRuntime.retain(copy.objcObject)!
     }
 
     @ObjCMethod("isEqual:")
@@ -218,11 +273,23 @@ open class NSMutableURLRequest: NSURLRequest {
     @ObjCMethod("setAllowsCellularAccess:") func setAllowsCellularAccess(_ value: Bool) { request.allowsCellularAccess = value }
     @ObjCMethod("setNetworkServiceType:") func setNetworkServiceType(_ value: UInt) { request.networkServiceType = Int(value) }
 
-    /// Hints about the network that the loader has no use for: the getters
-    /// answer what it does, so a program setting them is not refused.
-    @ObjCMethod("setAllowsExpensiveNetworkAccess:") func setAllowsExpensiveNetworkAccess(_ value: Bool) {}
-    @ObjCMethod("setAllowsConstrainedNetworkAccess:") func setAllowsConstrainedNetworkAccess(_ value: Bool) {}
-    @ObjCMethod("setAssumesHTTP3Capable:") func setAssumesHTTP3Capable(_ value: Bool) {}
+    /// Hints about the network that the loader has no use for, kept.
+    @ObjCMethod("setAllowsExpensiveNetworkAccess:")
+    func setAllowsExpensiveNetworkAccess(_ value: Bool) { RequestHints.setFlag(objcObject, "allowsExpensiveNetworkAccess", value) }
+    @ObjCMethod("setAllowsConstrainedNetworkAccess:")
+    func setAllowsConstrainedNetworkAccess(_ value: Bool) { RequestHints.setFlag(objcObject, "allowsConstrainedNetworkAccess", value) }
+    @ObjCMethod("setAllowsUltraConstrainedNetworkAccess:")
+    func setAllowsUltraConstrainedNetworkAccess(_ value: Bool) {
+        RequestHints.setFlag(objcObject, "allowsUltraConstrainedNetworkAccess", value)
+    }
+    @ObjCMethod("setAssumesHTTP3Capable:")
+    func setAssumesHTTP3Capable(_ value: Bool) { RequestHints.setFlag(objcObject, "assumesHTTP3Capable", value) }
+    @ObjCMethod("setRequiresDNSSECValidation:")
+    func setRequiresDNSSECValidation(_ value: Bool) { RequestHints.setFlag(objcObject, "requiresDNSSECValidation", value) }
+    @ObjCMethod("setAllowsPersistentDNS:")
+    func setAllowsPersistentDNS(_ value: Bool) { RequestHints.setFlag(objcObject, "allowsPersistentDNS", value) }
+    @ObjCMethod("setCookiePartitionIdentifier:")
+    func setCookiePartitionIdentifier(_ value: String?) { RequestHints.hints(objcObject).cookiePartition = value }
 }
 
 /// NSCoder's keyed messages.
