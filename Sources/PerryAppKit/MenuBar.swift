@@ -14,6 +14,10 @@ import PerryObjCInterop
 // item's key equivalent with Command chooses it, before the focused view
 // sees the key.
 //
+// Where the desktop has a global menu bar that shows the app's menus
+// (DesktopMenus), windows leave this one out, and the application menu
+// keeps its items, as the bar shows the main menu as the app built it.
+//
 // PERRY_APPKIT_MENUBAR=off leaves the menu out.
 
 enum MenuBar {
@@ -26,7 +30,7 @@ enum MenuBar {
     /// has one, not its panels. An OpenGL window has no renderer to draw it.
     static func shows(in window: NSWindow) -> Bool {
         enabled && mainMenu != nil && window.styleMask & StyleMask.titled != 0 && !(window is NSPanel)
-            && window.styleMask & StyleMask.fullScreen == 0 && window.openGLView == nil
+            && window.styleMask & StyleMask.fullScreen == 0 && window.openGLView == nil && !DesktopMenus.shownByDesktop
     }
 
     private static func title(of item: NSMenuItem) -> String {
@@ -36,6 +40,9 @@ enum MenuBar {
 
     nonisolated(unsafe) private static var adapted: UnsafeMutableRawPointer?
     nonisolated(unsafe) private static var appMenuShown = false
+    /// The items moved out of the application menu: where each was, and
+    /// the separator added before it, so they can go back.
+    nonisolated(unsafe) private static var moves: [(item: NSMenuItem, from: NSMenu, index: Int, to: NSMenu, separator: NSMenuItem?)] = []
 
     /// The menus the bar shows, titled: the main menu's, past the
     /// application menu (shown only when its items had nowhere to go) and
@@ -57,20 +64,41 @@ enum MenuBar {
     /// application menu in the bar.
     private static func adapt(_ main: NSMenu) {
         guard adapted != main.objcObject else { return }
+        restore()
         adapted = main.objcObject
         guard let appMenu = main.items.first?.submenu else { return }
         func menu(named name: String) -> NSMenu? { main.items.dropFirst().first { title(of: $0) == name }?.submenu }
-        let moves: [(prefixes: [String], to: String)] = [(["About "], "Help"), (["Preferences", "Settings"], "Edit"), (["Quit "], "File")]
-        for (prefixes, name) in moves {
+        let places: [(prefixes: [String], to: String)] = [(["About "], "Help"), (["Preferences", "Settings"], "Edit"), (["Quit "], "File")]
+        for (prefixes, name) in places {
             guard let item = appMenu.items.first(where: { item in prefixes.contains { item.title.hasPrefix($0) } }) else { continue }
             guard let destination = menu(named: name) else { appMenuShown = true; continue }
+            let index = appMenu.index(of: item)
             appMenu.removeItem(item)
-            if let last = destination.items.last, !last.separator { destination.addItem(NSMenuItem.separatorItem()) }
+            var separator: NSMenuItem?
+            if let last = destination.items.last, !last.separator {
+                let added = NSMenuItem.separatorItem()
+                destination.addItem(added)
+                separator = added
+            }
             destination.addItem(item)
+            Self.moves.append((item: item, from: appMenu, index: index, to: destination, separator: separator))
         }
         // The rest of the application menu isn't shown without a place for
         // its items (a menu with nothing to move stays out of the bar).
         if appMenuShown { return }
+    }
+
+    /// Puts the application menu's items back where the app put them, for
+    /// a menu bar that shows the main menu as it is.
+    static func restore() {
+        for move in moves.reversed() {
+            move.to.removeItem(move.item)
+            if let separator = move.separator { move.to.removeItem(separator) }
+            move.from.insertItem(move.item, at: move.index)
+        }
+        moves = []
+        adapted = nil
+        appMenuShown = false
     }
 
     // MARK: Key equivalents
@@ -81,7 +109,7 @@ enum MenuBar {
     /// Control standing for Command; whether there was one.
     static func performKeyEquivalent(_ event: NSEvent) -> Bool {
         guard !MenuTracking.tracking, let main = mainMenu else { return false }
-        adapt(main)
+        if !DesktopMenus.shownByDesktop { adapt(main) }
         var modifiers = event.modifierFlags & significant
         if modifiers & ModifierFlags.control != 0, modifiers & ModifierFlags.command == 0 {
             modifiers = (modifiers & ~ModifierFlags.control) | ModifierFlags.command
