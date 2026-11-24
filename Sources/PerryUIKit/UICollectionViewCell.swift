@@ -3,7 +3,8 @@ import PerryObjCInterop
 
 // UICollectionReusableView and UICollectionViewCell: a cell's content view
 // fills it, in front of its background view, and the selected background
-// view shows while it is selected or highlighted.
+// view shows while it is selected or highlighted. Its configuration is
+// updated in its layout when asked for (CellConfiguration.swift).
 
 final class ReusableViewState: ObjectState {
     var reuseIdentifier: String?
@@ -66,6 +67,7 @@ open class UICollectionViewCell: UICollectionReusableView {
     override func initialize(frame: CGRect) -> Self {
         _ = super.initialize(frame: frame)
         makeContentView()
+        CellConfigurations.setNeeded(self)
         return self
     }
 
@@ -78,6 +80,7 @@ open class UICollectionViewCell: UICollectionReusableView {
         cell.backgroundView = decoded.object("UIBackgroundView")?.as(UIView.self)
         cell.selectedBackgroundView = decoded.object("UISelectedBackgroundView")?.as(UIView.self)
         if cell.contentView == nil { makeContentView() }
+        CellConfigurations.setNeeded(self)
         return self
     }
 
@@ -101,6 +104,7 @@ open class UICollectionViewCell: UICollectionReusableView {
     @ObjCMethod("dealloc")
     override func dealloc() {
         UICollectionViewCell.cellStates.remove(objcObject)
+        CellConfigurations.forget(self)
         super.dealloc()
     }
 
@@ -121,9 +125,30 @@ open class UICollectionViewCell: UICollectionReusableView {
         showSelection()
     }
     @ObjCMethod("isSelected") func isSelected() -> Bool { collectionCell.selected }
-    @ObjCMethod("setSelected:") func setSelected(_ selected: Bool) { collectionCell.selected = selected; showSelection() }
+    @ObjCMethod("setSelected:")
+    func setSelected(_ selected: Bool) {
+        if collectionCell.selected != selected { CellConfigurations.setNeeded(self) }
+        collectionCell.selected = selected
+        showSelection()
+    }
     @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { collectionCell.highlighted }
-    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { collectionCell.highlighted = highlighted; showSelection() }
+    @ObjCMethod("setHighlighted:")
+    func setHighlighted(_ highlighted: Bool) {
+        if collectionCell.highlighted != highlighted { CellConfigurations.setNeeded(self) }
+        collectionCell.highlighted = highlighted
+        showSelection()
+    }
+
+    // MARK: Configuration
+
+    @ObjCMethod("configurationState")
+    func configurationState() -> UICellConfigurationState {
+        UICellConfigurationState.of(self, selected: collectionCell.selected, highlighted: collectionCell.highlighted)
+    }
+    @ObjCMethod("setNeedsUpdateConfiguration") func setNeedsUpdateConfiguration() { CellConfigurations.setNeeded(self) }
+    /// What an Objective-C subclass overrides; Swift ones override the
+    /// overlay's bridged method instead.
+    @ObjCMethod("updateConfigurationUsingState:") func updateConfiguration(using state: UICellConfigurationState?) {}
 
     /// The selected background view, behind the content, while selected or highlighted.
     private func showSelection() {
@@ -142,6 +167,7 @@ open class UICollectionViewCell: UICollectionReusableView {
         collectionCell.backgroundView?.sendSetFrame(bounds)
         collectionCell.selectedBackgroundView?.sendSetFrame(bounds)
         collectionCell.contentView?.sendSetFrame(bounds)
+        CellConfigurations.updateIfNeeded(self, selected: collectionCell.selected, highlighted: collectionCell.highlighted)
         super.layoutSubviews()
     }
 }

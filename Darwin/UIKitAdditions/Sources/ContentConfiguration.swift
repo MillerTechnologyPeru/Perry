@@ -5,8 +5,9 @@
 // and background configurations, and the collection view's cell and
 // supplementary registrations. Declarations are the SDK interface's, for
 // its ABI. A cell keeps its configurations with it and shows the content
-// configuration's view over its content view; it does not ask for a new
-// configuration when its state changes.
+// configuration's view over its content view. Perry's UIKit sends a cell
+// -_bridgedUpdateConfigurationUsingState: when its configuration is to be
+// updated, which Swift cells override as updateConfiguration(using:).
 
 public import Foundation
 public import CoreGraphics
@@ -459,6 +460,18 @@ final class _PerryListContentView : UIView, UIKit.UIContentView {
     box.contentView = view
   }
 
+  /// The content and background configurations updated for the state, as
+  /// a cell does when its subclass doesn't override the update.
+  static func update(_ cell: UIView, for state: UIKit.UICellConfigurationState) {
+    let box = box(of: cell)
+    if let content = box.content, let view = box.contentView {
+      let updated = content.updated(for: state)
+      box.content = updated
+      view.configuration = updated
+    }
+    if let background = box.background { setBackground(background.updated(for: state), of: cell) }
+  }
+
   /// Keeps the background configuration and shows its color and corners on the cell.
   static func setBackground(_ configuration: UIKit.UIBackgroundConfiguration?, of cell: UIView) {
     box(of: cell).background = configuration
@@ -498,6 +511,44 @@ extension UITableViewCell {
     set { _PerryCellConfigurations.setBackground(newValue, of: self) }
   }
   @_Concurrency.MainActor @preconcurrency public func defaultBackgroundConfiguration() -> UIKit.UIBackgroundConfiguration { .listCell() }
+}
+
+// MARK: - Configuration updates
+
+@available(iOS 14.0, tvOS 14.0, *)
+@available(watchOS, unavailable)
+extension UICollectionViewCell {
+  /// The cell's trait collection, selection and highlight.
+  @objc(_bridgedConfigurationState) @_Concurrency.MainActor @preconcurrency dynamic open var configurationState: UIKit.UICellConfigurationState {
+    @objc get {
+      var state = UICellConfigurationState(traitCollection: traitCollection)
+      state.isSelected = isSelected
+      state.isHighlighted = isHighlighted
+      return state
+    }
+  }
+  /// Brings the cell's configurations up to date with the state.
+  @objc(_bridgedUpdateConfigurationUsingState:) @_Concurrency.MainActor @preconcurrency dynamic open func updateConfiguration(using state: UIKit.UICellConfigurationState) {
+    _PerryCellConfigurations.update(self, for: state)
+  }
+}
+
+@available(iOS 14.0, tvOS 14.0, *)
+@available(watchOS, unavailable)
+extension UITableViewCell {
+  /// The cell's trait collection, selection and highlight.
+  @objc(_bridgedConfigurationState) @_Concurrency.MainActor @preconcurrency dynamic open var configurationState: UIKit.UICellConfigurationState {
+    @objc get {
+      var state = UICellConfigurationState(traitCollection: traitCollection)
+      state.isSelected = isSelected
+      state.isHighlighted = isHighlighted
+      return state
+    }
+  }
+  /// Brings the cell's configurations up to date with the state.
+  @objc(_bridgedUpdateConfigurationUsingState:) @_Concurrency.MainActor @preconcurrency dynamic open func updateConfiguration(using state: UIKit.UICellConfigurationState) {
+    _PerryCellConfigurations.update(self, for: state)
+  }
 }
 
 // MARK: - Registrations

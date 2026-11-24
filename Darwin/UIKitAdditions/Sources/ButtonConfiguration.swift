@@ -52,10 +52,14 @@ public struct UIBackgroundConfiguration : Swift.Hashable {
   }
   public static func listHeader() -> UIKit.UIBackgroundConfiguration { .init() }
   public static func listFooter() -> UIKit.UIBackgroundConfiguration { .init() }
+  public static func listAccompaniedSidebarCell() -> UIKit.UIBackgroundConfiguration { .init() }
+  /// The same in every state here.
+  public func updated(for state: any UIKit.UIConfigurationState) -> UIKit.UIBackgroundConfiguration { self }
 
   public var customView: UIView?
   public var cornerRadius: CoreFoundation.CGFloat = 0
   public var backgroundInsets: NSDirectionalEdgeInsets = .zero
+  public var edgesAddingLayoutMarginsToBackgroundInsets: NSDirectionalRectEdge = []
   public var backgroundColor: UIColor?
   public var backgroundColorTransformer: UIKit.UIConfigurationColorTransformer?
   public func resolvedBackgroundColor(for tintColor: UIColor) -> UIColor {
@@ -79,6 +83,21 @@ public struct UIBackgroundConfiguration : Swift.Hashable {
     hasher.combine(backgroundColor)
     hasher.combine(strokeWidth)
   }
+}
+
+@available(iOS 14.0, tvOS 14.0, *)
+@available(watchOS, unavailable)
+extension UIKit.UIBackgroundConfiguration {
+  /// A plain list's cell: the system background.
+  public static func listPlainCell() -> UIKit.UIBackgroundConfiguration {
+    var configuration = UIBackgroundConfiguration()
+    configuration.backgroundColor = .systemBackground
+    return configuration
+  }
+  /// A grouped list's cell: the secondary grouped background.
+  public static func listGroupedCell() -> UIKit.UIBackgroundConfiguration { listCell() }
+  /// A sidebar's cell: clear.
+  public static func listSidebarCell() -> UIKit.UIBackgroundConfiguration { .init() }
 }
 
 // MARK: - Button
