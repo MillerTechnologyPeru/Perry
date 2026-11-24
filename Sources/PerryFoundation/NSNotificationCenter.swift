@@ -280,8 +280,8 @@ public final class NSDistributedNotificationCenter: NSNotificationCenter {
         post(name: name, object: object, userInfo: userInfo)
     }
 
-    @ObjCMethod("suspended") func suspended() -> Bool { false }
-    @ObjCMethod("setSuspended:") func setSuspended(_ suspended: Bool) {}
+    @ObjCMethod("suspended") func suspended() -> Bool { CFNotificationCenterIsSuspended(objcObject) }
+    @ObjCMethod("setSuspended:") func setSuspended(_ suspended: Bool) { CFNotificationCenterSetSuspended(objcObject, suspended ? 1 : 0) }
 }
 
 // MARK: - CFNotificationCenter
