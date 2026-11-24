@@ -106,7 +106,10 @@ jobs:
           docker run --rm -v "$PWD:/perry" perry-dev \
             swift build --build-tests --scratch-path .build/linux
 
+      # The tests take under a minute; one that hangs fails the job here,
+      # not hours later at the job's own limit.
       - name: Test
+        timeout-minutes: 20
         run: |
           docker run --rm -v "$PWD:/perry" \
             -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
