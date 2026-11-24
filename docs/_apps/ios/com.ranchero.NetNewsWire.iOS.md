@@ -25,4 +25,18 @@ reports:
     level: 3
     source: body
     notes: Its feed list draws separators and rounded cards as iOS does.
+  - pr: 371
+    date: 2026-11-24
+    perry: "27336eab"
+    platform: ios
+    cpu: arm64
+    app_version: "7.2"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    level: 3
+    source: body
+    notes: "The App Store build shows its Feeds list: the smart feeds and a subscription list's feeds with their icons and unread counts. Opening a feed and selection weren't tried; the bottom toolbar isn't drawn."
+    screenshots:
+      - url: https://github.com/user-attachments/assets/3c05f1f5-606f-4778-9c49-3220a00c0703
+        caption: Feeds list
 ---
