@@ -42,6 +42,15 @@ struct SocketSignature {
 extension Sockets {
     static let typeID: UInt = 61
 
+    /// SO_SNDTIMEO, which glibc defines by time_t's size where it can be
+    /// either, past what Swift imports: on the 32-bit loaders time_t is 32
+    /// bits, the option's old form.
+    #if _pointerBitWidth(_32)
+    static let sendTimeoutOption = SO_SNDTIMEO_OLD
+    #else
+    static let sendTimeoutOption = SO_SNDTIMEO
+    #endif
+
     /// Every CFSocket made, by its native socket.
     nonisolated(unsafe) static var byNative: [Int32: WeakSocket] = [:]
 
@@ -224,7 +233,7 @@ public func CFSocketSendData(_ socket: id?, _ address: id?, _ data: id?, _ timeo
     let forever = seconds <= 0 || seconds >= Double(Int32.max)
     limit.tv_sec = forever ? time_t(Int32.max) : time_t(seconds.rounded(.down))
     limit.tv_usec = forever ? 0 : suseconds_t((1e6 * (seconds - seconds.rounded(.down))).rounded(.down))
-    _ = setsockopt(file, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+    _ = setsockopt(file, SOL_SOCKET, Sockets.sendTimeoutOption, &limit, socklen_t(MemoryLayout<timeval>.size))
     let length = CFDataGetLength(data)
     let bytes = CFDataGetBytePtr(data)
     let sent: Int
