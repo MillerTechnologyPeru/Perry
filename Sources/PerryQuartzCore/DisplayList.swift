@@ -458,6 +458,15 @@ final class DisplayListCompositor {
 
     // MARK: Images
 
+    /// The most pixels a layer's image has: a bitmap of 128 MB, and its
+    /// copy, in a 32-bit process's address space; 1 GB where there's room.
+    /// A layer larger than that, a long document's, draws nothing.
+    #if _pointerBitWidth(_32)
+    static let maximumImagePixels: CGFloat = 32 * 1024 * 1024
+    #else
+    static let maximumImagePixels: CGFloat = 256 * 1024 * 1024
+    #endif
+
     /// An image of premultiplied RGBA pixels from CoreGraphics' ARGB ones.
     private func makeImage(width: Int, height: Int, pixels: UnsafeRawPointer, pitch: Int) -> ImageSource {
         var data = Data(count: width * height * 4)
@@ -509,7 +518,8 @@ final class DisplayListCompositor {
         // A layer laid out to a size that is not a number, or is endless,
         // has nothing to draw (and Int() of it would trap).
         let pixels = (extent.width * scale, extent.height * scale)
-        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576,
+              pixels.0 * pixels.1 <= DisplayListCompositor.maximumImagePixels else { return nil }
         let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
         guard width > 0, height > 0, let context = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
         defer { CG.release(context) }
@@ -555,7 +565,8 @@ final class DisplayListCompositor {
         let shown = (toScreen.a * toScreen.d - toScreen.b * toScreen.c).magnitude.squareRoot()
         let renderScale = scale * min(1, shown.isFinite ? max(shown, 0.05) : 1)
         let pixels = (extent.width * renderScale, extent.height * renderScale)
-        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576,
+              pixels.0 * pixels.1 <= DisplayListCompositor.maximumImagePixels else { return nil }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
         // A masked layer's image is made at this size: its pixels are the
         // image's. Drawing it again would shrink
