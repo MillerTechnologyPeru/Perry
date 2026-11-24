@@ -22,6 +22,10 @@ final class UserActivityStorage {
     var eligibleForSearch = false
     var eligibleForPublicIndexing = false
     var eligibleForPrediction = false
+    /// Intents' and CoreSpotlight's additions: kept, as nothing reads them.
+    var suggestedInvocationPhrase: String?
+    var shortcutAvailability: UInt = 0
+    var contentAttributeSet: ObjCObject?
 
     init(activityType: String) {
         self.activityType = activityType
@@ -130,6 +134,17 @@ public final class NSUserActivity: NSObject {
 
     @ObjCMethod("isEligibleForPrediction") func isEligibleForPrediction() -> Bool { storage.eligibleForPrediction }
     @ObjCMethod("setEligibleForPrediction:") func setEligibleForPrediction(_ value: Bool) { storage.eligibleForPrediction = value }
+
+    // Declared by Intents (Siri's phrase and shortcut availability) and
+    // CoreSpotlight (the attributes searched): there is neither here, so
+    // they are only kept.
+    @ObjCMethod("suggestedInvocationPhrase") func suggestedInvocationPhrase() -> String? { storage.suggestedInvocationPhrase }
+    @ObjCMethod("setSuggestedInvocationPhrase:")
+    func setSuggestedInvocationPhrase(_ phrase: String?) { storage.suggestedInvocationPhrase = phrase }
+    @ObjCMethod("shortcutAvailability") func shortcutAvailability() -> UInt { storage.shortcutAvailability }
+    @ObjCMethod("setShortcutAvailability:") func setShortcutAvailability(_ value: UInt) { storage.shortcutAvailability = value }
+    @ObjCMethod("contentAttributeSet") func contentAttributeSet() -> UnsafeMutableRawPointer? { storage.contentAttributeSet?.id }
+    @ObjCMethod("setContentAttributeSet:") func setContentAttributeSet(_ set: ObjCObject?) { storage.contentAttributeSet = set }
 
     /// Advertising the activity to other devices, which nothing does here.
     @ObjCMethod("becomeCurrent") func becomeCurrent() {}
