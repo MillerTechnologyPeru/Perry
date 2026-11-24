@@ -68,6 +68,27 @@ reports:
     level: 3
     source: body
     notes: The main menu's music plays through the Sound Manager's channels, without gaps in a recording of the output. Sound in a level and play are untested.
+  - pr: 361
+    date: 2026-11-24
+    perry: "c604b8e2"
+    platform: macos
+    cpu: i386
+    app_version: "2.0"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    resolution: "800x600"
+    graphics: OpenGL
+    env:
+      - "PERRY_DISCS=Halo Universal=~/perry-halo/cd/mnt"
+      - "PERRY_CONTAINER=~/perry-halo/container-ub"
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 4
+    source: maintainer
+    notes: Its loading picture, a TIFF in a PICT resource, shows while it starts, and none of Carbon's functions it calls are missing. The maintainer played it and found sound and play working. Multiplayer is untested, and its libcrypto.0.9.7 is not available.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1d43b507-bd94-4760-b118-c32ee6ed9c5b
+        caption: The loading picture
 ---
 
 A Carbon application for PowerPC and Intel, run with the 32-bit Perry. It

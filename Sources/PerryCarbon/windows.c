@@ -311,7 +311,18 @@ void carbon_port_flush(CGrafPtr port) {
 void carbon_QDFlushPortBuffer(CGrafPtr port, RgnHandle region) CARBON_SYMBOL(QDFlushPortBuffer);
 void carbon_QDFlushPortBuffer(CGrafPtr port, RgnHandle region) {
     (void)region;
-    if (port && port->magic == CARBON_PORT_MAGIC) carbon_port_flush(port);
+    if (!port || port->magic != CARBON_PORT_MAGIC) return;
+    carbon_port_flush(port);
+    // On the screen now, not when the event loop next runs: a program
+    // flushes what it drew before work that keeps it from its events (a
+    // picture to look at while it loads).
+    if (port->window && port->window->view) {
+        id window = SEND(port->window->view, "window");
+        if (window) {
+            SEND(window, "display");
+            SEND(window, "displayIfNeeded");
+        }
+    }
 }
 
 // MARK: - Bounds
