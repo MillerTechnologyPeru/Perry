@@ -155,6 +155,7 @@ PERRY_SETTING(QUARTZ_DISPLAY_TRACE, flag, "Graphics", detail, "why layers redraw
 PERRY_SETTING(METAL_TRACE, flag, "Graphics", detail, "Metal layers made, and drawables asked for and presented")
 PERRY_SETTING(METAL_TRACE_ALL, list, "Graphics", detail, "comma-separated kinds of Metal call logged every time")
 PERRY_SETTING(METAL_FPS, number, "Graphics", detail, "Metal drawables' frame rate, 60 by default")
+PERRY_SETTING(METAL_SHARED, bool01, "Graphics", detail, "0: read Metal drawables back instead of sharing them with the compositor as dma-bufs")
 PERRY_SETTING(METAL_WAIT, number, "Graphics", detail, "seconds to wait for a shader source not compiled yet, 0 by default")
 PERRY_SETTING(METAL_SOURCES, path, "Graphics", detail, "directory of Metal shader sources and their compiled libraries")
 PERRY_SETTING(METAL2VULKAN, path, "Graphics", detail, "the metal2vulkan library to load")
