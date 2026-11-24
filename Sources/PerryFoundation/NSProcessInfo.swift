@@ -142,6 +142,9 @@ public final class NSProcessInfo: NSObject {
     }
 
     @ObjCMethod("processName") func processName() -> String { Process.name }
+    /// The name the process goes by for Foundation (defaults domains and
+    /// the like); nil leaves it as it is.
+    @ObjCMethod("setProcessName:") func setProcessName(_ name: String?) { if let name { Process.name = name } }
     @ObjCMethod("processIdentifier") func processIdentifier() -> Int32 { getpid() }
     @ObjCMethod("globallyUniqueString") func globallyUniqueString() -> String { Self.info.globallyUniqueString }
     @ObjCMethod("hostName") func hostName() -> String { Self.info.hostName }
@@ -161,6 +164,25 @@ public final class NSProcessInfo: NSObject {
     @ObjCMethod("isLowPowerModeEnabled") func isLowPowerModeEnabled() -> Bool { false }
     @ObjCMethod("isMacCatalystApp") func isMacCatalystApp() -> Bool { false }
     @ObjCMethod("isiOSAppOnMac") func isiOSAppOnMac() -> Bool { false }
+    /// iOS 26.1's: an iPhone or iPad app running on visionOS; it never is.
+    @ObjCMethod("isiOSAppOnVision") func isiOSAppOnVision() -> Bool { false }
+
+    /// NSMACHOperatingSystem (5), which Darwin always answers.
+    @ObjCMethod("operatingSystem") func operatingSystem() -> UInt { 5 }
+    @ObjCMethod("operatingSystemName") func operatingSystemName() -> String { "NSMACHOperatingSystem" }
+
+    /// macOS's: the user's short and full names, as NSUserName and
+    /// NSFullUserName give them.
+    @ObjCMethod("userName") func userName() -> UnsafeMutableRawPointer? { NSUserName() }
+    @ObjCMethod("fullUserName") func fullUserName() -> UnsafeMutableRawPointer? { NSFullUserName() }
+
+    /// macOS's automatic termination, which nothing here does: the setting
+    /// is kept for the asking.
+    nonisolated(unsafe) private static var automaticTermination = false
+    @ObjCMethod("automaticTerminationSupportEnabled")
+    func automaticTerminationSupportEnabled() -> Bool { Self.automaticTermination }
+    @ObjCMethod("setAutomaticTerminationSupportEnabled:")
+    func setAutomaticTerminationSupportEnabled(_ enabled: Bool) { Self.automaticTermination = enabled }
 
     /// The iOS version the app was built for.
     @ObjCMethod("operatingSystemVersion")
@@ -194,6 +216,19 @@ public final class NSProcessInfo: NSObject {
     func beginActivity(options: UInt64, reason: id?) -> id? { Arrays.autoreleased([]) }
 
     @ObjCMethod("endActivity:") func endActivity(_ activity: id?) {}
+
+    /// iOS's: the block runs asynchronously, on a global queue, with NO for
+    /// expired; nothing suspends the app here, so it is never called again
+    /// with YES.
+    @ObjCMethod("performExpiringActivityWithReason:usingBlock:")
+    func performExpiringActivity(reason: id?, block: ObjCObject?) {
+        guard let block, let copied = ObjC.retainBlock(block.id), let queue = Dispatch.globalQueue?(0x15, 0) else { return }
+        let delivered = DispatchedWork.async(queue) {
+            Blocks.invoke(copied, as: (@convention(c) (id, Bool) -> Void).self)(copied, false)
+            ObjC.release(copied)
+        }
+        if !delivered { ObjC.release(copied) }
+    }
 
     /// Runs the block at once, on this thread.
     @ObjCMethod("performActivityWithOptions:reason:usingBlock:")
