@@ -722,6 +722,22 @@ open class NSView: NSResponder {
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { CGSize(width: -1, height: -1) }
     @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { superview?.setNeedsLayout(true) }
     @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> NSEdgeInsets { NSEdgeInsets() }
+    /// The frame inset by the alignment insets, and back; the top and
+    /// bottom insets follow the view's flippedness.
+    @ObjCMethod("alignmentRectForFrame:")
+    func alignmentRect(forFrame frame: CGRect) -> CGRect {
+        let insets = alignmentRectInsets()
+        let bottom = isFlipped() ? insets.top : insets.bottom
+        return CGRect(x: frame.minX + insets.left, y: frame.minY + bottom,
+                      width: frame.width - insets.left - insets.right, height: frame.height - insets.top - insets.bottom)
+    }
+    @ObjCMethod("frameForAlignmentRect:")
+    func frame(forAlignmentRect rect: CGRect) -> CGRect {
+        let insets = alignmentRectInsets()
+        let bottom = isFlipped() ? insets.top : insets.bottom
+        return CGRect(x: rect.minX - insets.left, y: rect.minY - bottom,
+                      width: rect.width + insets.left + insets.right, height: rect.height + insets.top + insets.bottom)
+    }
     @ObjCMethod("baselineOffsetFromBottom") func baselineOffsetFromBottom() -> CGFloat { 0 }
     @ObjCMethod("firstBaselineOffsetFromTop") func firstBaselineOffsetFromTop() -> CGFloat { 0 }
     @ObjCMethod("contentHuggingPriorityForOrientation:")

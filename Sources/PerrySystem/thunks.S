@@ -477,6 +477,8 @@ PASSTHROUGH _fmax, fmax
 PASSTHROUGH _fmaxf, fmaxf
 PASSTHROUGH _fmin, fmin
 PASSTHROUGH _fminf, fminf
+PASSTHROUGH _fma, fma
+PASSTHROUGH _fmaf, fmaf
 PASSTHROUGH _fmod, fmod
 PASSTHROUGH _sinf, sinf
 PASSTHROUGH _cosf, cosf

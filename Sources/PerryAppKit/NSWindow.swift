@@ -77,6 +77,11 @@ open class NSWindow: NSResponder {
     var frame = CGRect(x: 0, y: 0, width: 640, height: 480)
     var styleMask: UInt = StyleMask.titled
     var title = ""
+    /// Shown under the title in a unified toolbar on macOS; kept.
+    var subtitle = ""
+    var identifier: String?
+    /// The class that restores the window at launch: kept, as windows aren't restored.
+    var restorationClass: UnsafeMutableRawPointer?
     var representedFilename = ""
     var representedURL: NSObject?
     var tabbingIdentifier = ""
@@ -421,6 +426,10 @@ open class NSWindow: NSResponder {
         if let sdlWindow { sdlWindow.title = self.title }
     }
     @ObjCMethod("setTitleWithRepresentedFilename:") func setTitle(representedFilename name: String?) { setTitle(name) }
+    @ObjCMethod("subtitle") func windowSubtitle() -> String { subtitle }
+    @ObjCMethod("setSubtitle:") func setSubtitle(_ subtitle: String?) { self.subtitle = subtitle ?? "" }
+    @ObjCMethod("identifier") func windowIdentifier() -> String? { identifier }
+    @ObjCMethod("setIdentifier:") func setIdentifier(_ identifier: String?) { self.identifier = identifier }
     @ObjCMethod("styleMask") func windowStyleMask() -> UInt { styleMask }
     @ObjCMethod("setStyleMask:")
     func setStyleMask(_ mask: UInt) {
@@ -476,6 +485,10 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setMovableByWindowBackground:") func setMovableByWindowBackground(_ value: Bool) {}
     @ObjCMethod("setRestorable:") func setRestorable(_ value: Bool) {}
     @ObjCMethod("isRestorable") func isRestorable() -> Bool { false }
+    @ObjCMethod("restorationClass") func windowRestorationClass() -> UnsafeMutableRawPointer? { restorationClass }
+    @ObjCMethod("setRestorationClass:") func setRestorationClass(_ cls: UnsafeMutableRawPointer?) { restorationClass = cls }
+    /// There is no key view loop kept to recalculate.
+    @ObjCMethod("recalculateKeyViewLoop") func recalculateKeyViewLoop() {}
     @ObjCMethod("tabbingMode") func tabbingModeValue() -> Int { tabbingMode }
     @ObjCMethod("setTabbingMode:") func setTabbingMode(_ mode: Int) { tabbingMode = mode }
     @ObjCMethod("tabbingIdentifier") func tabbingIdentifierValue() -> String { tabbingIdentifier }

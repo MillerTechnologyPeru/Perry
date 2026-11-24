@@ -363,6 +363,8 @@ open class NSColor: NSObject {
     @ObjCClassMethod("systemMintColor") static func systemMintColor() -> NSColor { system("systemMintColor")! }
     @ObjCClassMethod("systemCyanColor") static func systemCyanColor() -> NSColor { system("systemCyanColor")! }
     @ObjCClassMethod("systemFillColor") static func systemFillColor() -> NSColor { system("systemFillColor")! }
+    @ObjCClassMethod("secondarySystemFillColor") static func secondarySystemFillColor() -> NSColor { system("secondarySystemFillColor")! }
+    @ObjCClassMethod("tertiarySystemFillColor") static func tertiarySystemFillColor() -> NSColor { system("tertiarySystemFillColor")! }
     @ObjCClassMethod("alternatingContentBackgroundColors")
     static func alternatingContentBackgroundColors() -> NSObject { NSMutableArray.of([whiteColor(), NSColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)]) }
     @ObjCClassMethod("controlAlternatingRowBackgroundColors")
@@ -953,6 +955,10 @@ open class NSImage: NSObject {
         return image
     }
 
+    /// The image itself: symbols are drawn as macOS rendered them at the
+    /// system font's size, whatever the configuration.
+    @ObjCMethod("imageWithSymbolConfiguration:")
+    func image(withSymbolConfiguration configuration: NSObject?) -> NSImage? { self }
     @ObjCClassMethod("imageWithSystemSymbolName:accessibilityDescription:")
     static func image(systemSymbolName name: String?, accessibilityDescription: String?) -> NSImage? {
         let image = NSImage(size: CGSize(width: 16, height: 16))
