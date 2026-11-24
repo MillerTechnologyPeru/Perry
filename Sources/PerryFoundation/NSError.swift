@@ -196,6 +196,21 @@ public final class NSError: NSObject {
         Errors.value(objcObject, ErrorConstants.NSLocalizedRecoverySuggestionErrorKeyObject).map(ObjCObject.init)
     }
 
+    /// The user info's options (the titles of the buttons an alert offers),
+    /// or else the domain's provider's.
+    @ObjCMethod("localizedRecoveryOptions")
+    func localizedRecoveryOptions() -> ObjCObject? {
+        Errors.value(objcObject, ErrorConstants.NSLocalizedRecoveryOptionsErrorKeyObject).map(ObjCObject.init)
+    }
+
+    @ObjCMethod("recoveryAttempter")
+    func recoveryAttempter() -> ObjCObject? {
+        Errors.value(objcObject, ErrorConstants.NSRecoveryAttempterErrorKeyObject).map(ObjCObject.init)
+    }
+
+    @ObjCMethod("helpAnchor")
+    func helpAnchor() -> ObjCObject? { Errors.value(objcObject, ErrorConstants.NSHelpAnchorErrorKeyObject).map(ObjCObject.init) }
+
     @ObjCMethod("localizedFailureReason")
     func localizedFailureReason() -> ObjCObject? {
         Errors.value(objcObject, ErrorConstants.NSLocalizedFailureReasonErrorKeyObject).map(ObjCObject.init)
