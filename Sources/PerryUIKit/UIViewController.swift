@@ -122,6 +122,9 @@ open class UIViewController: UIResponder {
             if state.title == nil { state.title = item.state.title }
         }
         state.tabBarItem = decoded.object("UITabBarItem")?.as(UITabBarItem.self)
+        // The toolbar's items, which a storyboard's outlets to them may
+        // hold only weakly.
+        state.toolbarItems = decoded.object("UIToolbarItems")
         state.segueTemplates = decoded.array("UIStoryboardSegueTemplates").compactMap { $0.as(UIStoryboardSegueTemplate.self) }
         for template in state.segueTemplates { template.state.viewController = objcObject }
         state.externalObjects = decoded.dictionary("UIExternalObjectsTableForViewLoading")
