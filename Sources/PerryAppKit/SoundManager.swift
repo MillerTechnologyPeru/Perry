@@ -1,5 +1,6 @@
 import Glibc
 import PerryObjCInterop
+import CSDL3
 
 // Mac apps' alone: armv7 runs only iOS apps, so it has none of this.
 #if !arch(arm)
@@ -50,37 +51,39 @@ private enum Audio {
     static let u8: UInt32 = 0x0008, s8: UInt32 = 0x8008, s16le: UInt32 = 0x8010, s16be: UInt32 = 0x9010
     static let defaultPlayback: UInt32 = 0xFFFF_FFFF
 
-    nonisolated(unsafe) static var openStream: (@convention(c) (UInt32, UnsafeRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?)?
-    nonisolated(unsafe) static var put: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Int32) -> Bool)?
-    nonisolated(unsafe) static var queued: (@convention(c) (UnsafeMutableRawPointer?) -> Int32)?
-    nonisolated(unsafe) static var clear: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
-    nonisolated(unsafe) static var setFormat: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool)?
-    nonisolated(unsafe) static var setGain: (@convention(c) (UnsafeMutableRawPointer?, Float) -> Bool)?
-    nonisolated(unsafe) static var setRatio: (@convention(c) (UnsafeMutableRawPointer?, Float) -> Bool)?
-    nonisolated(unsafe) static var pauseDevice: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
-    nonisolated(unsafe) static var resumeDevice: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
-    nonisolated(unsafe) static var destroy: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+    // SDL's functions, called as AppKit links them. They were looked up in
+    // libSDL3 with dlopen and dlsym, which box86 answers with a handle that
+    // finds nothing once SDL's video has started, and no channel could be
+    // made there.
+    typealias Stream = UnsafeMutableRawPointer
+    private static func stream(_ pointer: Stream?) -> OpaquePointer? { pointer.map { OpaquePointer($0) } }
+    private static func spec(_ pointer: UnsafeRawPointer?) -> UnsafePointer<SDL_AudioSpec>? {
+        pointer?.assumingMemoryBound(to: SDL_AudioSpec.self)
+    }
+
+    nonisolated(unsafe) static let openStream: ((UInt32, UnsafeRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Stream?)? = { device, format, _, _ in
+        SDL_OpenAudioDeviceStream(device, spec(format), nil, nil).map { Stream($0) }
+    }
+    nonisolated(unsafe) static let put: ((Stream?, UnsafeRawPointer?, Int32) -> Bool)? = { SDL_PutAudioStreamData(stream($0), $1, $2) }
+    nonisolated(unsafe) static let queued: ((Stream?) -> Int32)? = { SDL_GetAudioStreamQueued(stream($0)) }
+    nonisolated(unsafe) static let clear: ((Stream?) -> Bool)? = { SDL_ClearAudioStream(stream($0)) }
+    nonisolated(unsafe) static let setFormat: ((Stream?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool)? = {
+        SDL_SetAudioStreamFormat(stream($0), spec($1), spec($2))
+    }
+    nonisolated(unsafe) static let setGain: ((Stream?, Float) -> Bool)? = { SDL_SetAudioStreamGain(stream($0), $1) }
+    nonisolated(unsafe) static let setRatio: ((Stream?, Float) -> Bool)? = { SDL_SetAudioStreamFrequencyRatio(stream($0), $1) }
+    nonisolated(unsafe) static let pauseDevice: ((Stream?) -> Bool)? = { SDL_PauseAudioStreamDevice(stream($0)) }
+    nonisolated(unsafe) static let resumeDevice: ((Stream?) -> Bool)? = { SDL_ResumeAudioStreamDevice(stream($0)) }
+    nonisolated(unsafe) static let destroy: ((Stream?) -> Void)? = { SDL_DestroyAudioStream(stream($0)) }
 
     /// Whether SDL's audio started, once.
     static let available: Bool = {
-        guard let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return false }
-        func bind<T>(_ name: String) -> T? { dlsym(library, name).map { unsafeBitCast($0, to: T.self) } }
-        typealias InitSubSystem = @convention(c) (UInt32) -> Bool
-        guard let initSubSystem: InitSubSystem = bind("SDL_InitSubSystem"), initSubSystem(0x10) else {   // SDL_INIT_AUDIO
-            appKitWarning("Sound Manager: no SDL3 audio; sound channels are unavailable")
+        guard SDL_InitSubSystem(0x10) else {   // SDL_INIT_AUDIO
+            let reason = SDL_GetError().map { String(cString: $0) } ?? ""
+            appKitWarning("Sound Manager: no SDL3 audio\(reason.isEmpty ? "" : " (\(reason))"); sound channels are unavailable")
             return false
         }
-        openStream = bind("SDL_OpenAudioDeviceStream")
-        put = bind("SDL_PutAudioStreamData")
-        queued = bind("SDL_GetAudioStreamQueued")
-        clear = bind("SDL_ClearAudioStream")
-        setFormat = bind("SDL_SetAudioStreamFormat")
-        setGain = bind("SDL_SetAudioStreamGain")
-        setRatio = bind("SDL_SetAudioStreamFrequencyRatio")
-        pauseDevice = bind("SDL_PauseAudioStreamDevice")
-        resumeDevice = bind("SDL_ResumeAudioStreamDevice")
-        destroy = bind("SDL_DestroyAudioStream")
-        return openStream != nil && put != nil && queued != nil && clear != nil && setFormat != nil && destroy != nil
+        return true
     }()
 }
 
@@ -314,8 +317,8 @@ private enum Channels {
     nonisolated(unsafe) static var lock = pthread_mutex_t()
     nonisolated(unsafe) static let initialized: Bool = {
         pthread_mutex_init(&lock, nil)
-        pthread_mutex_init(&waking, nil)
-        pthread_cond_init(&woken, nil)
+        pthread_mutex_init(waking, nil)
+        pthread_cond_init(woken, nil)
         return true
     }()
 
@@ -332,8 +335,16 @@ private enum Channels {
     // woke 500 times a second whether its channel played or not, and a
     // program with a pool of channels has dozens (MacSoft's Halo, 48).
     nonisolated(unsafe) static var thread = pthread_t()
-    nonisolated(unsafe) static var waking = pthread_mutex_t()
-    nonisolated(unsafe) static var woken = pthread_cond_t()
+    // On the heap, aligned for their 64-bit fields: a 32-bit program's
+    // globals are aligned to 4 bytes, and a condition there faults in an
+    // ARM machine's own pthread functions, which box86 hands these to.
+    nonisolated(unsafe) static let waking: UnsafeMutablePointer<pthread_mutex_t> = aligned()
+    nonisolated(unsafe) static let woken: UnsafeMutablePointer<pthread_cond_t> = aligned()
+    private static func aligned<T>() -> UnsafeMutablePointer<T> {
+        let memory = UnsafeMutableRawPointer.allocate(byteCount: max(MemoryLayout<T>.size, 16), alignment: 16)
+        memset(memory, 0, max(MemoryLayout<T>.size, 16))
+        return memory.assumingMemoryBound(to: T.self)
+    }
     nonisolated(unsafe) static var requested = false
     nonisolated(unsafe) static let started: Bool = {
         guard initialized else { return false }
@@ -345,10 +356,10 @@ private enum Channels {
 
     /// A callback now waits: the thread looks for it.
     static func wake() {
-        pthread_mutex_lock(&waking)
+        pthread_mutex_lock(waking)
         requested = true
-        pthread_cond_signal(&woken)
-        pthread_mutex_unlock(&waking)
+        pthread_cond_signal(woken)
+        pthread_mutex_unlock(waking)
     }
 
     private static func serve() {
@@ -361,10 +372,10 @@ private enum Channels {
             if waiting {
                 usleep(2000)
             } else {
-                pthread_mutex_lock(&waking)
-                while !requested { pthread_cond_wait(&woken, &waking) }
+                pthread_mutex_lock(waking)
+                while !requested { pthread_cond_wait(woken, waking) }
                 requested = false
-                pthread_mutex_unlock(&waking)
+                pthread_mutex_unlock(waking)
             }
         }
     }
