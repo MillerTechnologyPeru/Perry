@@ -119,6 +119,14 @@ final class ArchiverState {
     var objects: [UInt: Int] = [:]
     var classes: [String: Int] = [:]
     var classNames: [String: String] = [:]
+    /// A first pass's, which only notes the objects encoded
+    /// unconditionally: it writes conditional objects as nil.
+    var noting = false
+    /// The objects encoded unconditionally, by address.
+    var noted: Set<UInt> = []
+    /// The objects a first pass found encoded unconditionally, which
+    /// conditional encodes write in full; nil without a first pass.
+    var conditionalTargets: Set<UInt>?
 
     init() { integer(1000) }
 
@@ -185,12 +193,23 @@ final class ArchiverState {
     /// An object: nil, by number, or written out.
     func object(_ object: id?, coder: id) {
         guard let object else { return byte(Tag.null) }
+        noted.insert(UInt(bitPattern: object))
         if let number = objects[UInt(bitPattern: object)] { return reference(number) }
         objects[UInt(bitPattern: object)] = shared
         shared += 1
         byte(Tag.new)
         writeContents(object, coder: coder)
         byte(Tag.endOfObject)
+    }
+
+    /// An object encoded conditionally: by number when it was written
+    /// before, in full when the first pass found it encoded
+    /// unconditionally, otherwise nil.
+    func conditional(_ object: id?, coder: id) {
+        guard let object, !noting else { return byte(Tag.null) }
+        let key = UInt(bitPattern: object)
+        guard objects[key] != nil || conditionalTargets?.contains(key) == true else { return byte(Tag.null) }
+        self.object(object, coder: coder)
     }
 
     private func writeContents(_ object: id, coder: id) {
@@ -325,18 +344,59 @@ enum LegacyArchivers {
     nonisolated(unsafe) static var archiverClass: Class!
     static func state(_ object: id?) -> ArchiverState? { Storage.get(object, as: ArchiverState.self) }
 
+    /// An archive of the root object, made in two passes as Darwin's
+    /// -encodeRootObject: makes it: the first finds the objects encoded
+    /// unconditionally, which conditional encodes then write.
     static func archive(_ root: id?) -> Data {
-        let state = ArchiverState()
         guard let archiver = Storage.allocate(UnsafeMutableRawPointer(archiverClass)) else { return Data() }
+        defer { ObjC.release(archiver) }
+        let first = ArchiverState()
+        first.noting = true
+        Storage.set(archiver, first)
+        first.group("@") { first.object(root, coder: archiver) }
+        let state = ArchiverState()
+        state.conditionalTargets = first.noted
         Storage.set(archiver, state)
         state.group("@") { state.object(root, coder: archiver) }
-        ObjC.release(archiver)
         return Data(state.bytes)
+    }
+
+    /// The state an archiver writes to: its own, or that of the data it
+    /// was made for.
+    static func writing(_ archiver: id) -> ArchiverState? {
+        state(archiver) ?? Storage.get(archiver, as: ArchiverTarget.self)?.state
+    }
+
+    /// Writes the new bytes into the data the archiver was made for.
+    static func flush(_ archiver: id) {
+        guard let holder = Storage.get(archiver, as: ArchiverTarget.self), let data = holder.data else { return }
+        let bytes = holder.state.bytes
+        bytes.withUnsafeBytes { buffer in
+            typealias Length = @convention(c) (id?, SEL, UInt) -> Void
+            typealias Append = @convention(c) (id?, SEL, UnsafeRawPointer?, UInt) -> Void
+            unsafeBitCast(ObjC.msgSend!, to: Length.self)(data, ObjC.selector("setLength:"), 0)
+            unsafeBitCast(ObjC.msgSend!, to: Append.self)(data, ObjC.selector("appendBytes:length:"), buffer.baseAddress, UInt(buffer.count))
+        }
+    }
+
+    /// -encodeValuesOfObjCTypes: for an NSArchiver: one group of the
+    /// values, as Darwin's typedstream holds them. False for another coder.
+    static func encodeGroup(_ coder: id, _ types: [[UInt8]], _ pointers: [UnsafeRawPointer?]) -> Bool {
+        guard ObjC.isKind(coder, of: archiverClass) else { return false }
+        guard let state = writing(coder) else { return true }
+        state.group(String(decoding: Array(types.joined()), as: UTF8.self)) {
+            for (type, pointer) in zip(types, pointers) {
+                if let pointer { state.value(type, at: pointer, coder: coder) }
+            }
+        }
+        flush(coder)
+        return true
     }
 }
 
+/// NSArchiver, an NSCoder that writes typedstreams.
 @ObjCClass("NSArchiver")
-public final class NSArchiver: NSObject {
+public final class NSArchiver: NSCoder {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         LegacyArchivers.archiverClass = cls.storage
@@ -377,22 +437,24 @@ public final class NSArchiver: NSObject {
         return DataObjects.autoreleased(Data(state.bytes)).map(ObjCObject.init)
     }
 
-    private var writing: ArchiverState? { state ?? Storage.get(objcObject, as: ArchiverTarget.self)?.state }
+    private var writing: ArchiverState? { LegacyArchivers.writing(objcObject) }
 
-    /// Writes the new bytes into the data the archiver was made for.
-    private func flush() {
-        guard let holder = Storage.get(objcObject, as: ArchiverTarget.self), let data = holder.data else { return }
-        let bytes = holder.state.bytes
-        bytes.withUnsafeBytes { buffer in
-            typealias Length = @convention(c) (id?, SEL, UInt) -> Void
-            typealias Append = @convention(c) (id?, SEL, UnsafeRawPointer?, UInt) -> Void
-            unsafeBitCast(ObjC.msgSend!, to: Length.self)(data, ObjC.selector("setLength:"), 0)
-            unsafeBitCast(ObjC.msgSend!, to: Append.self)(data, ObjC.selector("appendBytes:length:"), buffer.baseAddress, UInt(buffer.count))
-        }
-    }
+    private func flush() { LegacyArchivers.flush(objcObject) }
 
+    /// The object, after a first pass that finds the objects it encodes
+    /// unconditionally, which conditional encodes then write.
     @ObjCMethod("encodeRootObject:")
-    func encodeRootObject(_ object: ObjCObject?) { encodeObject(object) }
+    func encodeRootObject(_ object: ObjCObject?) {
+        guard let holder = Storage.get(objcObject, as: ArchiverTarget.self) else { return encodeObject(object) }
+        let real = holder.state
+        let first = ArchiverState()
+        first.noting = true
+        holder.state = first
+        first.group("@") { first.object(object?.id, coder: objcObject) }
+        holder.state = real
+        real.conditionalTargets = (real.conditionalTargets ?? []).union(first.noted)
+        encodeObject(object)
+    }
 
     @ObjCMethod("encodeObject:")
     func encodeObject(_ object: ObjCObject?) {
@@ -401,7 +463,14 @@ public final class NSArchiver: NSObject {
         flush()
     }
 
-    @ObjCMethod("encodeConditionalObject:") func encodeConditionalObject(_ object: ObjCObject?) { encodeObject(object) }
+    /// Written only when the object is encoded unconditionally too:
+    /// otherwise nil.
+    @ObjCMethod("encodeConditionalObject:")
+    func encodeConditionalObject(_ object: ObjCObject?) {
+        guard let state = writing else { return }
+        state.group("@") { state.conditional(object?.id, coder: objcObject) }
+        flush()
+    }
     @ObjCMethod("encodeBycopyObject:") func encodeBycopyObject(_ object: ObjCObject?) { encodeObject(object) }
     @ObjCMethod("encodeByrefObject:") func encodeByrefObject(_ object: ObjCObject?) { encodeObject(object) }
 
@@ -434,16 +503,13 @@ public final class NSArchiver: NSObject {
         bytes.withUnsafeBytes { encodeBytes($0.baseAddress, length: UInt($0.count)) }
     }
 
-
-
-
     @ObjCMethod("encodeClassName:intoClassName:")
     func encodeClassName(_ trueName: String, into name: String) { writing?.classNames[trueName] = name }
     @ObjCMethod("classNameEncodedForTrueClassName:")
     func classNameEncoded(forTrueClassName name: String) -> String? { writing?.classNames[name] }
     @ObjCMethod("replaceObject:withObject:") func replaceObject(_ object: ObjCObject?, with replacement: ObjCObject?) {}
-    @ObjCMethod("allowsKeyedCoding") func allowsKeyedCoding() -> Bool { false }
-    @ObjCMethod("systemVersion") func systemVersion() -> UInt32 { 1000 }
+    @ObjCMethod("allowsKeyedCoding") override func allowsKeyedCoding() -> Bool { false }
+    @ObjCMethod("systemVersion") override func systemVersion() -> UInt32 { 1000 }
     @ObjCMethod("versionForClassName:")
     func version(forClassName name: String) -> Int {
         Int(ObjC.sendUInt(name.withCString { ObjC.getClass($0) }.map { UnsafeMutableRawPointer($0) }, ObjC.selector("version")))
@@ -451,7 +517,7 @@ public final class NSArchiver: NSObject {
 }
 
 final class ArchiverTarget {
-    let state: ArchiverState
+    var state: ArchiverState
     let data: id?
     init(state: ArchiverState, data: id?) {
         self.state = state
@@ -847,8 +913,9 @@ extension Unarchivers {
     nonisolated(unsafe) static var legacyUnarchiverClass: Class!
 }
 
+/// NSUnarchiver, an NSCoder that reads typedstreams.
 @ObjCClass("NSUnarchiver")
-public final class NSUnarchiver: NSObject {
+public final class NSUnarchiver: NSCoder {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Unarchivers.legacyUnarchiverClass = cls.storage
@@ -899,7 +966,7 @@ public final class NSUnarchiver: NSObject {
     }
 
     @ObjCMethod("decodeObject")
-    func decodeObject() -> UnsafeMutableRawPointer? {
+    override func decodeObject() -> UnsafeMutableRawPointer? {
         guard let state else { return nil }
         let type = state.nextType()
         guard ArchiveTypes.bare(type) == [UInt8(ascii: "@")] else {
@@ -934,7 +1001,7 @@ public final class NSUnarchiver: NSObject {
         var count: Int32 = 0
         "i".withCString { decodeValue(ofObjCType: $0, at: &count) }
         length?.pointee = UInt(max(count, 0))
-        guard count > 0, let data = DataObjects.autoreleased(Data(count: Int(count))),
+        guard count > 0, let data = DataObjects.autoreleased(Data(count: Int(count)), cls: UnsafeMutableRawPointer(DataObjects.mutableClass)),
               let bytes = ObjC.sendPointer(data, ObjC.selector("mutableBytes")) else { return nil }
         "c".withCString { decodeArray(ofObjCType: $0, count: UInt(count), at: UnsafeMutableRawPointer(mutating: bytes)) }
         return UnsafeMutableRawPointer(mutating: bytes)
@@ -948,12 +1015,9 @@ public final class NSUnarchiver: NSObject {
         return DataObjects.autoreleased(data)
     }
 
-
-
-
     @ObjCMethod("isAtEnd") func isAtEnd() -> Bool { state?.isAtEnd ?? true }
-    @ObjCMethod("systemVersion") func systemVersion() -> UInt32 { state?.systemVersion ?? 0 }
-    @ObjCMethod("allowsKeyedCoding") func allowsKeyedCoding() -> Bool { false }
+    @ObjCMethod("systemVersion") override func systemVersion() -> UInt32 { state?.systemVersion ?? 0 }
+    @ObjCMethod("allowsKeyedCoding") override func allowsKeyedCoding() -> Bool { false }
     @ObjCMethod("versionForClassName:")
     func version(forClassName name: String) -> Int { state?.versions[name] ?? Int.max }
     @ObjCMethod("decodeClassName:asClassName:")
