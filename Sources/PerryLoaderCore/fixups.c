@@ -386,17 +386,24 @@ typedef struct classic_symbols {
 } classic_symbols;
 
 #if defined(__i386__) || defined(__powerpc__)
-// What `__dyld_func_lookup` gives crt1 of programs from before Mac OS X 10.5,
-// for the startup functions it looks up and calls with no arguments: there
-// is nothing left for them to do.
-static void dyld_nothing(void) {}
+// What `__dyld_func_lookup` gives crt1 of programs from before Mac OS X 10.5:
+// libSystem's function of that name where it has one (crt1 of Tiger's
+// GCC walks the images with _dyld_image_count and _dyld_get_image_name,
+// looking for libobjc's __objcInit), whose Darwin name is its name there;
+// and for the startup functions it calls with no arguments, which have
+// nothing left to do, one that returns 0.
+static void *dyld_nothing(void) { return NULL; }
+
+static perry_loader *dyld_loader;
 
 static int dyld_func_lookup(const char *name, void **address) {
-    (void)name;
+    void *function = name && dyld_loader ? perry_provider_symbol(dyld_loader, "/usr/lib/libSystem.B.dylib", name) : NULL;
+    if (!function)
+        function = (void *)dyld_nothing;
 #if defined(__powerpc__)
-    *address = perry_ppc_thread_stub((void *)dyld_nothing);
+    *address = perry_ppc_thread_stub(function);
 #else
-    *address = (void *)dyld_nothing;
+    *address = function;
 #endif
     return 1;
 }
@@ -404,7 +411,8 @@ static int dyld_func_lookup(const char *name, void **address) {
 // __DATA,__dyld holds what crt1 calls dyld through, which dyld fills in: the
 // lazy binder, unused since imports are bound at load, and the function
 // lookup.
-static void fill_dyld_section(perry_image *image) {
+static void fill_dyld_section(perry_loader *loader, perry_image *image) {
+    dyld_loader = loader;
     for (uint32_t s = 0; s < image->segment_count; s++) {
         const perry_segment *segment = &image->segments[s];
         for (uint32_t i = 0; segment->mapped && i < segment->nsects; i++) {
@@ -651,7 +659,7 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
     else if (image->slide != 0 && image->header->filetype != MH_EXECUTE)
         perry_warn("%s: no fixup information; image may not work when slid", image->path);
 #if defined(__i386__) || defined(__powerpc__)
-    fill_dyld_section(image);
+    fill_dyld_section(loader, image);
 #endif
 #if defined(__powerpc__)
     patch_commpage_branches(loader, image);
