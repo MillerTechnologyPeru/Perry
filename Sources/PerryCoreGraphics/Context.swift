@@ -236,10 +236,15 @@ public func CGBitmapContextCreate(_ data: UnsafeMutableRawPointer?, _ width: Int
     let format = PixelFormat(bitsPerComponent: bitsPerComponent, bitsPerPixel: channels * bitsPerComponent,
                              colorComponents: colorComponents, bitmapInfo: bitmapInfo)
     guard bitsPerComponent == 8, format.isSupported, alpha != 3, alpha != 4 else { return nil }
-    let minimum = width * format.bytesPerPixel
+    let (minimum, rowOverflowed) = width.multipliedReportingOverflow(by: format.bytesPerPixel)
+    guard !rowOverflowed, minimum <= Int.max - 31 else { return nil }
     let rowBytes = bytesPerRow > 0 ? bytesPerRow : (minimum + 31) / 32 * 32
     guard rowBytes >= minimum else { return nil }
-    let memory = data ?? calloc(rowBytes * height, 1)!
+    // A bitmap too big for the address space, as a long document's layer
+    // can be in a 32-bit process, is no context, as on Darwin: its size
+    // overflows, or there is no memory for it.
+    let (byteCount, overflowed) = rowBytes.multipliedReportingOverflow(by: height)
+    guard !overflowed, let memory = data ?? calloc(byteCount, 1) else { return nil }
     guard let state = ContextState(width: width, height: height, bytesPerRow: rowBytes, format: format, space: space, data: memory,
                                    ownsData: data == nil) else {
         if data == nil { free(memory) }
