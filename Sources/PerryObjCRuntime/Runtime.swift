@@ -374,7 +374,7 @@ public enum Runtime {
             return (nil, handler)
         }
         notForwarded(receiver, selector)
-        return (nil, Unrecognized.returnZero)
+        return (nil, stret ? Unrecognized.returnZeroStret : Unrecognized.returnZero)
     }
 
     /// The end of forwarding, when nothing took the message: the receiver's
@@ -407,6 +407,14 @@ public enum Runtime {
 
         nonisolated(unsafe) static let returnZero: IMP = unsafeBitCast(
             { 0 } as @convention(c) () -> UInt, to: IMP.self)
+
+        /// The same for a message returning through memory: on i386 it pops
+        /// the result pointer, as the method it stands for would have.
+        #if arch(i386)
+        nonisolated(unsafe) static let returnZeroStret = IMP(mutating: perry_objc_i386_unrecognized_stret_address()!)
+        #else
+        static var returnZeroStret: IMP { returnZero }
+        #endif
 
         static func report(_ receiver: ObjectPointer, _ selector: SEL) {
             let info = Runtime.info(classOf(receiver))
