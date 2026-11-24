@@ -60,6 +60,9 @@ final class ViewControllerState: ObjectState {
     var capturesStatusBarAppearance = false
     var additionalSafeAreaInsets = UIEdgeInsets.zero
     var hidesBottomBarWhenPushed = false
+    /// The items for a navigation controller's toolbar, which isn't drawn
+    /// yet: kept for the controller to read back.
+    var toolbarItems: NSObject?
     /// UIRectEdge: the edges whose bars the view extends under; all 15.
     var edgesForExtendedLayout = 15
     var extendedLayoutIncludesOpaqueBars = false
@@ -297,6 +300,9 @@ open class UIViewController: UIResponder {
         state.view?.setNeedsLayout()
     }
     @ObjCMethod("hidesBottomBarWhenPushed") func hidesBottomBarWhenPushed() -> Bool { state.hidesBottomBarWhenPushed }
+    @ObjCMethod("toolbarItems") func toolbarItems() -> NSObject? { state.toolbarItems }
+    @ObjCMethod("setToolbarItems:") func setToolbarItems(_ items: NSObject?) { state.toolbarItems = items }
+    @ObjCMethod("setToolbarItems:animated:") func setToolbarItems(_ items: NSObject?, animated: Bool) { state.toolbarItems = items }
     @ObjCMethod("edgesForExtendedLayout") func edgesForExtendedLayout() -> Int { state.edgesForExtendedLayout }
     @ObjCMethod("setEdgesForExtendedLayout:") func setEdgesForExtendedLayout(_ edges: Int) { state.edgesForExtendedLayout = edges }
     /// iOS 3's: whether the view lays out under the status bar. Views always
