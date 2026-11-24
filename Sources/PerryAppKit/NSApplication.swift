@@ -98,12 +98,17 @@ open class NSApplication: NSResponder {
         type(text)
     }
 
-    /// Types `text` into the key window, a key at a time.
+    /// Types `text` into the key window, a key at a time; AppKit's arrow
+    /// key characters (U+F700 to U+F703) press the arrow keys.
     private func type(_ text: String) {
         let window = Windows.key ?? Windows.all.last { $0.visible }
+        let arrows: [Character: UInt16] = ["\u{F700}": 0x7E, "\u{F701}": 0x7D, "\u{F702}": 0x7B, "\u{F703}": 0x7C]
         for character in text.replacingEscapes() {
-            let (keyCode, characters): (UInt16, String) = character == "\n" ? (0x24, "\r") : character == "\t" ? (0x30, "\t") : (0, String(character))
-            guard let event = NSEvent.keyEvent(type: EventType.keyDown.rawValue, location: .zero, modifierFlags: 0, timestamp: Clock.now,
+            let (keyCode, characters): (UInt16, String) = character == "\n" ? (0x24, "\r") : character == "\t" ? (0x30, "\t")
+                : arrows[character].map { ($0, String(character)) } ?? (0, String(character))
+            // Arrow keys are function keys on the numeric pad, to AppKit.
+            let flags: UInt = arrows[character] != nil ? 1 << 23 | 1 << 21 : 0
+            guard let event = NSEvent.keyEvent(type: EventType.keyDown.rawValue, location: .zero, modifierFlags: flags, timestamp: Clock.now,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: characters,
                                                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode) else { continue }
             Send.void(objcObject, "sendEvent:", event.objcObject)
