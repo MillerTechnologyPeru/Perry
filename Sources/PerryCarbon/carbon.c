@@ -59,6 +59,11 @@ id carbon_application(void) {
     if (!application) {
         application = SEND(CLASS("NSApplication"), "sharedApplication");
         SEND(application, "finishLaunching");
+        // AppKit starts PERRY_APPKIT_CLICKS's scripted clicks and typing in
+        // -run, which a Carbon program's own event loop never calls.
+        if (getenv("PERRY_APPKIT_CLICKS"))
+            ((void (*)(id, SEL, SEL, id, double))objc_send)(application, SELECTOR("performSelector:withObject:afterDelay:"),
+                                                            SELECTOR("_perryScriptedClick"), NULL, 6.0);
     }
     return application;
 }
