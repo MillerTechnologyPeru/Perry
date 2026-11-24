@@ -29,7 +29,8 @@ final class UserDefaultsStorage {
     private let lock = Monitor()
 
     func value(_ key: String) -> PropertyValue? {
-        Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"]?[key] } ?? lock.locked { values[key] ?? registered[key] } ?? Self.global[key]
+        Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"]?[key] } ?? lock.locked { values[key] ?? registered[key] }
+            ?? Self.globalValue(key)
     }
 
     /// The defaults given on the command line, each "-Key value": the
@@ -58,6 +59,16 @@ final class UserDefaultsStorage {
             "AppleLocale": .string(Locale.current.identifier.isEmpty ? "en_US" : Locale.current.identifier),
         ]
     }()
+
+    /// NSGlobalDomain's values the system sets as the app runs, which
+    /// providers set through perry_foundation_set_global_default: AppKit's
+    /// AppleInterfaceStyle, "Dark" while the desktop is dark and absent
+    /// when it is light, as on macOS. Kept under volatileLock.
+    nonisolated(unsafe) static var system: [String: PropertyValue] = [:]
+
+    static func globalValue(_ key: String) -> PropertyValue? {
+        volatileLock.locked { system[key] } ?? global[key]
+    }
 
     func set(_ value: PropertyValue?, for key: String) {
         lock.locked {
@@ -123,7 +134,8 @@ final class UserDefaultsStorage {
 
     var all: [String: PropertyValue] {
         let arguments = Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"] } ?? [:]
-        return lock.locked { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+        let system = Self.volatileLock.locked { Self.system }
+        return lock.locked { Self.global.merging(system) { _, set in set }.merging(registered) { _, new in new }.merging(values) { _, set in set } }
             .merging(arguments) { _, given in given }
     }
 
@@ -443,4 +455,14 @@ enum UserDefaultsConstants {
     static let NSArgumentDomain = "NSArgumentDomain"
     static let NSGlobalDomain = "NSGlobalDomain"
     static let NSRegistrationDomain = "NSRegistrationDomain"
+}
+
+/// Sets, or with a nil value removes, a string in NSGlobalDomain's values
+/// the system keeps: for other providers, as AppKit sets
+/// AppleInterfaceStyle when the desktop's appearance changes.
+@c(perry_foundation_set_global_default)
+public func perryFoundationSetGlobalDefault(_ key: UnsafePointer<CChar>?, _ value: UnsafePointer<CChar>?) {
+    guard let key else { return }
+    let name = String(cString: key)
+    UserDefaultsStorage.volatileLock.locked { UserDefaultsStorage.system[name] = value.map { .string(String(cString: $0)) } }
 }
