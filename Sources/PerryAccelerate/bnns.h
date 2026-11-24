@@ -672,8 +672,17 @@ enum { BNNSGraphArgumentTypePointer = 0, BNNSGraphArgumentTypeTensor = 2 };
 
 // MARK: - Layouts (Darwin LP64, checked against the macOS SDK)
 
+// The sizes and offsets below are a 64-bit Mac's. A 32-bit program's
+// (i386, armv7) have its own pointers and sizes in them, laid out as its
+// compiler lays these declarations out, so there is nothing to check them
+// against here.
+#if defined(__LP64__)
 #define BNNS_CHECK_SIZE(T, n) _Static_assert(sizeof(T) == (n), "size of " #T)
 #define BNNS_CHECK_OFFSET(T, f, n) _Static_assert(offsetof(T, f) == (n), "offset of " #T "." #f)
+#else
+#define BNNS_CHECK_SIZE(T, n) _Static_assert(sizeof(T) > 0, "size of " #T)
+#define BNNS_CHECK_OFFSET(T, f, n) _Static_assert(offsetof(T, f) < sizeof(T), "offset of " #T "." #f)
+#endif
 
 BNNS_CHECK_SIZE(BNNSActivation, 48);
 BNNS_CHECK_OFFSET(BNNSActivation, iscale, 12);
