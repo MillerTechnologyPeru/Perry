@@ -125,8 +125,9 @@ Each app gets a home directory at `~/.perry/Containers/<bundle id>`.
 | `PERRY_CRASH_REPORT=1` | Print registers and frames on a fatal signal |
 | `PERRY_PROFILE=<path>` | Sample the main thread's stacks; `Scripts/perry-profile.py` reports them |
  
-`perry --help` lists the rest, and most providers have a
-`PERRY_<FRAMEWORK>_TRACE` variable of their own.
+`perry --help` lists the most used, and `perry --settings` lists all of
+them, by group, from `Sources/PerryInterface/include/perry_settings.def`.
+A new variable goes in that table, or the tests fail.
  
 `DYLD_INSERT_LIBRARIES` loads Mach-O libraries with the program, as dyld
 does.
