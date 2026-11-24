@@ -243,8 +243,9 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
                     if let region = visibleRegion {
                         // The user's location under the annotations, as MapKit
                         // draws it.
-                        ForEach(Self.drawingOrder(items), id: \.self) { index in
-                            MapItemView(item: items[index], region: region, size: proxy.size, userCoordinate: userCoordinate)
+                        ForEach(Self.drawingOrder(items, in: region, size: proxy.size)) { shown in
+                            MapItemView(item: items[shown.id], region: region, size: proxy.size, userCoordinate: userCoordinate,
+                                        showsTitle: shown.showsTitle)
                         }
                     }
                 }
@@ -258,15 +259,50 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
     }
 }
 
+/// An item that shows, by its index, and whether its title does.
+struct ShownMapItem: Identifiable {
+    var id: Int
+    var showsTitle: Bool
+}
+
 extension MapContentView {
-    /// The items' indices, the user's location first, then the rest in
-    /// their order.
-    static func drawingOrder(_ items: [MapItem]) -> [Int] {
+    /// The items that show in the region, the user's location first, then
+    /// the rest in their order. An annotation whose coordinate is farther
+    /// outside the view than an annotation and its title reach is left out,
+    /// and a title that would run into one already placed is hidden, as
+    /// MapKit hides them: a map of hundreds lays out only what can be read
+    /// each time it moves, and so keeps up with it.
+    static func drawingOrder(_ items: [MapItem], in region: MKCoordinateRegion, size: CGSize) -> [ShownMapItem] {
         func isUser(_ item: MapItem) -> Bool {
             if case .userLocation = item { return true }
             return false
         }
-        return items.indices.filter { isUser(items[$0]) } + items.indices.filter { !isUser(items[$0]) }
+        let rect = MapGeometry.rect(of: region)
+        let reach: CGFloat = 150
+        var shown = items.indices.filter { isUser(items[$0]) }.map { ShownMapItem(id: $0, showsTitle: false) }
+        guard rect.width > 0, rect.height > 0 else {
+            return shown + items.indices.filter { !isUser(items[$0]) }.map { ShownMapItem(id: $0, showsTitle: true) }
+        }
+        // Where the titles placed so far are: a column 100 points wide, two
+        // lines of caption text under the coordinate.
+        var titles: [CGRect] = []
+        for index in items.indices {
+            guard case let .annotation(coordinate, _, _, label) = items[index] else { continue }
+            let mapPoint = MKMapPoint(coordinate)
+            let x = (mapPoint.x - rect.minX) / rect.width * size.width
+            let y = (mapPoint.y - rect.minY) / rect.height * size.height
+            guard x >= -reach, x <= size.width + reach, y >= -reach, y <= size.height + reach else { continue }
+            var showsTitle = false
+            if label != nil {
+                let title = CGRect(x: x - 50, y: y + 2, width: 100, height: 32)
+                if !titles.contains(where: { $0.intersects(title) }) {
+                    titles.append(title)
+                    showsTitle = true
+                }
+            }
+            shown.append(ShownMapItem(id: index, showsTitle: showsTitle))
+        }
+        return shown
     }
 }
 
@@ -277,6 +313,9 @@ struct MapItemView: View {
     var size: CGSize
     /// Where the user is, as the map view knows it; nil if unknown.
     var userCoordinate: CLLocationCoordinate2D?
+    /// Whether an annotation's title shows: not when it would run into
+    /// another's.
+    var showsTitle = true
 
     /// Where a coordinate falls in the view, on the map's Mercator
     /// projection.
@@ -297,7 +336,7 @@ struct MapItemView: View {
             let at = point(coordinate)
             ZStack(alignment: .topLeading) {
                 AnchoredLayout(point: at, anchor: anchor) { content }
-                if let label {
+                if showsTitle, let label {
                     AnchoredLayout(point: CGPoint(x: at.x, y: at.y + 2), anchor: .top) {
                         MapTitle(label: label)
                     }
