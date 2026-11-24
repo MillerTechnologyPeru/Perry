@@ -126,6 +126,17 @@ public final class NSTimeZone: NSObject {
         }))
     }
 
+    /// Replaces the abbreviations +timeZoneWithAbbreviation: knows, for the
+    /// process; entries that aren't strings are left out.
+    @ObjCClassMethod("setAbbreviationDictionary:")
+    static func setAbbreviations(_ dictionary: ObjCObject?) {
+        var abbreviations: [String: String] = [:]
+        for entry in Dictionaries.entries(dictionary?.id) {
+            if let key = Strings.value(of: entry.key), let value = Strings.value(of: entry.value) { abbreviations[key] = value }
+        }
+        TimeZone.abbreviationDictionary = abbreviations
+    }
+
     @ObjCClassMethod("timeZoneDataVersion") static func dataVersion() -> String { TimeZone.timeZoneDataVersion }
 
     @ObjCMethod("name") func name() -> String { zone.identifier }
