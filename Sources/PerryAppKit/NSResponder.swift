@@ -28,6 +28,8 @@ open class NSResponder: NSObject {
     @ObjCMethod("menu") func responderMenu() -> NSObject? { menu }
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) { self.menu = menu }
     @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
+    /// Windows aren't restored at launch, so there is no state to save.
+    @ObjCMethod("invalidateRestorableState") func invalidateRestorableState() {}
 
     /// There's no Touch Bar to show it on: kept, and made by -makeTouchBar
     /// the first time it is asked for.
