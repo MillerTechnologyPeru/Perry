@@ -158,7 +158,10 @@ enum URLSchemes {
     /// Has the page hand `scheme`'s requests to its handler; the handler is
     /// the latest to be given, and the web view, which is not retained,
     /// the one it was given for.
-    static func register(_ scheme: String, handler: NSObject, page: WebPage, view: UnsafeMutableRawPointer) {
+    static func register(_ given: String, handler: NSObject, page: WebPage, view: UnsafeMutableRawPointer) {
+        // Schemes are case-insensitive, and requests' come in lowercase: a
+        // handler for "nnwImageIcon" (NetNewsWire's) answers them.
+        let scheme = given.lowercased()
         handlers[scheme] = (handler, view)
         guard page.content.registerURLScheme(scheme) else { return }
         page.content.onURLSchemeRequest = { request in received(request) }
