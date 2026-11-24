@@ -873,6 +873,41 @@ open class NSView: NSResponder {
         needsDisplay = false
     }
 
+    // MARK: Caching what the view draws
+
+    /// A bitmap for -cacheDisplayInRect:toBitmapImageRep:: the rectangle's
+    /// size at the view's backing scale, 8-bit RGBA, transparent.
+    @ObjCMethod("bitmapImageRepForCachingDisplayInRect:")
+    func bitmapImageRepForCachingDisplay(in rect: CGRect) -> NSBitmapImageRep? {
+        let scale = backingScale
+        let width = Int((rect.width * scale).rounded(.up)), height = Int((rect.height * scale).rounded(.up))
+        guard width > 0, height > 0 else { return nil }
+        let rep = NSBitmapImageRep(planes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: "NSCalibratedRGBColorSpace", bitmapFormat: 0,
+                                   bytesPerRow: width * 4, bitsPerPixel: 32)
+        rep.size = rect.size
+        return rep
+    }
+
+    /// Draws `rect` of the view and its subviews into `rep`, scaled to fill
+    /// it, whether or not the view is in a window: through its layers, laid
+    /// out first, as the window shows them.
+    @ObjCMethod("cacheDisplayInRect:toBitmapImageRep:")
+    func cacheDisplay(in rect: CGRect, to rep: NSBitmapImageRep?) {
+        guard let rep, rect.width > 0, rect.height > 0, let context = rep.makeContext() else { return }
+        defer { CG.release(context) }
+        Send.void(objcObject, "layoutSubtreeIfNeeded")
+        ensureLayer()
+        guard let layer else { return }
+        // Layers draw from the top left; the bitmap context's y is upwards.
+        CG.scaleCTM(context, CGFloat(rep.pixelsWide) / rect.width, CGFloat(rep.pixelsHigh) / rect.height)
+        CG.translateCTM(context, 0, rect.height)
+        CG.scaleCTM(context, 1, -1)
+        let top = flipped ? rect.minY - bounds.minY : bounds.maxY - rect.maxY
+        CG.translateCTM(context, -(rect.minX - bounds.minX), -top)
+        Send.void(layer.objcObject, "renderInContext:", context)
+    }
+
     /// The view drawing now, which +focusView answers. Not retained.
     nonisolated(unsafe) static var focused: UnsafeMutableRawPointer?
 

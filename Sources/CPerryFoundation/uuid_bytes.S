@@ -40,3 +40,11 @@ UUID_BYTES _CFUUIDCreateWithBytes, perry_foundation_cf_uuid_create_with_bytes
 UUID_BYTES _CFUUIDGetConstantUUIDWithBytes, perry_foundation_cf_uuid_constant_with_bytes
 
 #endif
+
+// The stack isn't executable, on every architecture: an object without
+// this note (as this one is everywhere but arm64, being empty) makes the
+// linker mark the whole library as needing one, which glibc then refuses
+// to load.
+#if defined(__ELF__)
+    .section .note.GNU-stack, "", %progbits
+#endif

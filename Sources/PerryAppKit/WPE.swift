@@ -2,12 +2,14 @@ import Glibc
 
 // WPE WebKit, WebKit's port for embedding, loaded when a web view first
 // needs it: AppKit's copy of UIKit's engine, with script message handlers,
-// user scripts and pointer input, which Mac apps' web views use. Each web view has a WebKitWebView of its own over a view backend
-// from WPEBackend-fdo, which hands every frame the web process draws to the
-// view in shared memory; the view shows it as its layer's contents. The
-// pages run in WPE's web and network processes, which are Linux programs;
-// their replies come through GLib's main context, which runs on the main
-// queue while there are pages. Without WPE web views load nothing.
+// user scripts, URL schemes the app answers and pointer input, which Mac
+// apps' web views use. Each web view has a WebKitWebView of its own over a
+// view backend from WPEBackend-fdo, which hands every frame the web process
+// draws to the view in shared memory; the view shows it as its layer's
+// contents. The pages run in WPE's web and network processes, which are
+// Linux programs; their replies come through GLib's main context, which
+// runs on the main queue while there are pages. Without WPE web views load
+// nothing.
 
 final class WPE: @unchecked Sendable {
     typealias Pointer = UnsafeMutableRawPointer
@@ -76,6 +78,26 @@ final class WPE: @unchecked Sendable {
     let userScriptUnref: @convention(c) (Pointer) -> Void
     let userContentManagerAddScript: @convention(c) (Pointer, Pointer) -> Void
     let userContentManagerRemoveAllScripts: @convention(c) (Pointer) -> Void
+    // URL schemes the app answers (WKURLSchemeHandler), and the responses
+    // made for them.
+    let webViewGetContext: @convention(c) (Pointer) -> Pointer?
+    let webContextRegisterURIScheme: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void
+    let webContextGetSecurityManager: @convention(c) (Pointer) -> Pointer?
+    let securityManagerRegisterURISchemeAsSecure: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let securityManagerRegisterURISchemeAsCORSEnabled: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let uriSchemeRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let uriSchemeRequestGetWebView: @convention(c) (Pointer) -> Pointer?
+    let uriSchemeRequestGetHTTPMethod: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let uriSchemeRequestFinishWithResponse: @convention(c) (Pointer, Pointer) -> Void
+    let uriSchemeRequestFinishError: @convention(c) (Pointer, Pointer) -> Void
+    let uriSchemeResponseNew: @convention(c) (Pointer, Int64) -> Pointer?
+    let uriSchemeResponseSetStatus: @convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void
+    let uriSchemeResponseSetContentType: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let bytesNew: @convention(c) (UnsafeRawPointer?, Int) -> Pointer?
+    let bytesUnref: @convention(c) (Pointer) -> Void
+    let memoryInputStreamNewFromBytes: @convention(c) (Pointer) -> Pointer?
+    let errorNewLiteral: @convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?
+    let quarkFromString: @convention(c) (UnsafePointer<CChar>) -> UInt32
     // Input.
     let viewBackendDispatchPointerEvent: @convention(c) (Pointer, UnsafeRawPointer) -> Void
     let viewBackendDispatchAxisEvent: @convention(c) (Pointer, UnsafeRawPointer) -> Void
@@ -197,6 +219,32 @@ final class WPE: @unchecked Sendable {
         userContentManagerAddScript = bind(webkit, "webkit_user_content_manager_add_script", (@convention(c) (Pointer, Pointer) -> Void).self)
         userContentManagerRemoveAllScripts = bind(webkit, "webkit_user_content_manager_remove_all_scripts",
                                                   (@convention(c) (Pointer) -> Void).self)
+        webViewGetContext = bind(webkit, "webkit_web_view_get_context", (@convention(c) (Pointer) -> Pointer?).self)
+        webContextRegisterURIScheme = bind(webkit, "webkit_web_context_register_uri_scheme",
+                                           (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void).self)
+        webContextGetSecurityManager = bind(webkit, "webkit_web_context_get_security_manager", (@convention(c) (Pointer) -> Pointer?).self)
+        securityManagerRegisterURISchemeAsSecure = bind(webkit, "webkit_security_manager_register_uri_scheme_as_secure",
+                                                        (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        securityManagerRegisterURISchemeAsCORSEnabled = bind(webkit, "webkit_security_manager_register_uri_scheme_as_cors_enabled",
+                                                             (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        uriSchemeRequestGetURI = bind(webkit, "webkit_uri_scheme_request_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        uriSchemeRequestGetWebView = bind(webkit, "webkit_uri_scheme_request_get_web_view", (@convention(c) (Pointer) -> Pointer?).self)
+        uriSchemeRequestGetHTTPMethod = bind(webkit, "webkit_uri_scheme_request_get_http_method",
+                                             (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        uriSchemeRequestFinishWithResponse = bind(webkit, "webkit_uri_scheme_request_finish_with_response",
+                                                  (@convention(c) (Pointer, Pointer) -> Void).self)
+        uriSchemeRequestFinishError = bind(webkit, "webkit_uri_scheme_request_finish_error", (@convention(c) (Pointer, Pointer) -> Void).self)
+        uriSchemeResponseNew = bind(webkit, "webkit_uri_scheme_response_new", (@convention(c) (Pointer, Int64) -> Pointer?).self)
+        uriSchemeResponseSetStatus = bind(webkit, "webkit_uri_scheme_response_set_status",
+                                          (@convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void).self)
+        uriSchemeResponseSetContentType = bind(webkit, "webkit_uri_scheme_response_set_content_type",
+                                               (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        bytesNew = bind(glib, "g_bytes_new", (@convention(c) (UnsafeRawPointer?, Int) -> Pointer?).self)
+        bytesUnref = bind(glib, "g_bytes_unref", (@convention(c) (Pointer) -> Void).self)
+        // GIO, which WebKit links, found through it.
+        memoryInputStreamNewFromBytes = bind(webkit, "g_memory_input_stream_new_from_bytes", (@convention(c) (Pointer) -> Pointer?).self)
+        errorNewLiteral = bind(glib, "g_error_new_literal", (@convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?).self)
+        quarkFromString = bind(glib, "g_quark_from_string", (@convention(c) (UnsafePointer<CChar>) -> UInt32).self)
         viewBackendDispatchPointerEvent = bind(wpe, "wpe_view_backend_dispatch_pointer_event",
                                                (@convention(c) (Pointer, UnsafeRawPointer) -> Void).self)
         viewBackendDispatchAxisEvent = bind(wpe, "wpe_view_backend_dispatch_axis_event", (@convention(c) (Pointer, UnsafeRawPointer) -> Void).self)
@@ -354,6 +402,7 @@ final class WebPage {
                                                   data, nil, 0))
         }
         WebPage.count += 1
+        WebPage.pages[view] = Unmanaged.passUnretained(self)
         WebPage.schedule()
         addColorSchemeScript()
     }
@@ -421,6 +470,58 @@ final class WebPage {
         .observe(document.documentElement, { childList: true, subtree: true });
     })();
     """#
+
+    // MARK: URL schemes
+
+    /// A request for a URL in a scheme this page registered, for the app to
+    /// answer (WKURLSchemeHandler); without it they fail.
+    var schemeRequest: ((SchemeRequest) -> Void)?
+    private var urlSchemes: Set<String> = []
+
+    /// Has requests for `given`'s URLs, such as NetNewsWire's
+    /// "nnwImageIcon:", reach `schemeRequest`. Schemes are compared
+    /// lowercased, as requests come. WebKit keeps a scheme for every page of
+    /// its context and can't forget one, so each is registered once for all,
+    /// as secure and CORS-enabled, so that a page from https loads it and
+    /// fetch reaches it. False for a name that isn't a scheme, or one WebKit
+    /// loads itself.
+    @discardableResult
+    func registerURLScheme(_ given: String) -> Bool {
+        let scheme = given.lowercased()
+        let letters: ClosedRange<Unicode.Scalar> = "a"..."z", digits: ClosedRange<Unicode.Scalar> = "0"..."9"
+        guard let first = scheme.unicodeScalars.first, letters.contains(first),
+              scheme.unicodeScalars.allSatisfy({ letters.contains($0) || digits.contains($0) || "+-.".unicodeScalars.contains($0) }),
+              !WebPage.reservedSchemes.contains(scheme) else { return false }
+        if !WebPage.registeredSchemes.contains(scheme) {
+            guard let context = wpe.webViewGetContext(view) else { return false }
+            wpe.webContextRegisterURIScheme(context, scheme, unsafeBitCast(WebPage.onURISchemeRequest, to: UnsafeRawPointer.self), nil, nil)
+            if let security = wpe.webContextGetSecurityManager(context) {
+                wpe.securityManagerRegisterURISchemeAsSecure(security, scheme)
+                wpe.securityManagerRegisterURISchemeAsCORSEnabled(security, scheme)
+            }
+            WebPage.registeredSchemes.insert(scheme)
+        }
+        urlSchemes.insert(scheme)
+        return true
+    }
+
+    /// Schemes WebKit loads itself.
+    static let reservedSchemes: Set<String> = ["http", "https", "ws", "wss", "ftp", "file", "about", "data", "blob", "javascript", "resource"]
+    nonisolated(unsafe) private static var registeredSchemes: Set<String> = []
+    /// The pages by their WebKitWebView, which a scheme request names.
+    nonisolated(unsafe) private static var pages: [Pointer: Unmanaged<WebPage>] = [:]
+
+    /// WebKitURISchemeRequestCallback, for every scheme: the request goes to
+    /// the page whose view made it, if that page registered the scheme.
+    private static let onURISchemeRequest: @convention(c) (Pointer?, Pointer?) -> Void = { request, _ in
+        guard let request, let wpe = WPE.shared else { return }
+        let task = SchemeRequest(wpe, request)
+        guard let view = wpe.uriSchemeRequestGetWebView(request), let page = pages[view]?.takeUnretainedValue(),
+              page.urlSchemes.contains(task.scheme), let schemeRequest = page.schemeRequest else {
+            return task.fail("nothing answers \(task.url)")
+        }
+        schemeRequest(task)
+    }
 
     // MARK: Script messages, user scripts and input
 
@@ -521,6 +622,7 @@ final class WebPage {
             }
         }
         for handler in handlers { wpe.signalHandlerDisconnect(view, handler) }
+        WebPage.pages[view] = nil
         // The slot stays, empty, for any frame still on its way.
         slot.pointee = nil
         wpe.objectUnref(view)
@@ -533,6 +635,7 @@ final class WebPage {
         (frame, loadChanged, loadFailed, propertyChanged, decideNavigation, scriptMessage) = (nil, nil, nil, nil, nil, nil)
         extensionMessage = nil
         decideNavigationLater = nil
+        schemeRequest = nil
     }
 
     func loadHTML(_ html: String, baseURI: String?) {
@@ -803,4 +906,71 @@ final class WebPage {
 
     /// Run after each pass of GLib's context: web views follow their sizes.
     nonisolated(unsafe) static var tick: (() -> Void)?
+}
+
+/// A page's request for a URL in a scheme the app answers, kept until it is
+/// answered, once. One let go unanswered fails, so the page doesn't wait
+/// for it. Answers go to WebKit on the main queue, where GLib's context runs.
+final class SchemeRequest {
+    let url: String
+    /// GET, or POST for a form or a fetch with a body.
+    let method: String
+    var scheme: String { String(url.prefix { $0 != ":" }).lowercased() }
+    private let wpe: WPE
+    /// WebKit's request, +1, until it is answered.
+    private var request: UnsafeMutableRawPointer?
+
+    init(_ wpe: WPE, _ request: UnsafeMutableRawPointer) {
+        self.wpe = wpe
+        self.request = wpe.objectRef(request)
+        url = wpe.uriSchemeRequestGetURI(request).map { String(cString: $0) } ?? ""
+        method = wpe.uriSchemeRequestGetHTTPMethod(request).map { String(cString: $0) } ?? "GET"
+    }
+
+    deinit {
+        guard let request else { return }
+        let (wpe, url) = (wpe, url)
+        Dispatch.onMain {
+            SchemeRequest.fail(wpe, request, "no response for \(url)")
+            wpe.objectUnref(request)
+        }
+    }
+
+    /// Answers with a status, the type of the body, and the body.
+    func finish(status: Int, contentType: String?, body: [UInt8]) {
+        guard let request = take() else { return }
+        defer { wpe.objectUnref(request) }
+        guard let bytes = body.withUnsafeBytes({ wpe.bytesNew($0.baseAddress, $0.count) }) else {
+            return SchemeRequest.fail(wpe, request, "can't answer \(url)")
+        }
+        defer { wpe.bytesUnref(bytes) }
+        guard let stream = wpe.memoryInputStreamNewFromBytes(bytes) else { return SchemeRequest.fail(wpe, request, "can't answer \(url)") }
+        defer { wpe.objectUnref(stream) }
+        guard let response = wpe.uriSchemeResponseNew(stream, Int64(body.count)) else {
+            return SchemeRequest.fail(wpe, request, "can't answer \(url)")
+        }
+        defer { wpe.objectUnref(response) }
+        wpe.uriSchemeResponseSetStatus(response, UInt32(clamping: status), nil)
+        if let contentType { wpe.uriSchemeResponseSetContentType(response, contentType) }
+        wpe.uriSchemeRequestFinishWithResponse(request, response)
+    }
+
+    /// Fails the request: the page sees a failed load.
+    func fail(_ message: String) {
+        guard let request = take() else { return }
+        defer { wpe.objectUnref(request) }
+        SchemeRequest.fail(wpe, request, message)
+    }
+
+    private func take() -> UnsafeMutableRawPointer? {
+        defer { request = nil }
+        return request
+    }
+
+    /// WEBKIT_NETWORK_ERROR_FAILED, in WebKitNetworkError's domain.
+    private static func fail(_ wpe: WPE, _ request: UnsafeMutableRawPointer, _ message: String) {
+        guard let error = wpe.errorNewLiteral(wpe.quarkFromString("WebKitNetworkError"), 399, message) else { return }
+        defer { wpe.errorFree(error) }
+        wpe.uriSchemeRequestFinishError(request, error)
+    }
 }

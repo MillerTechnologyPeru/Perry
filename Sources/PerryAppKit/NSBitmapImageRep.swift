@@ -4,7 +4,8 @@ import PerryObjCInterop
 
 // NSImageRep and NSBitmapImageRep: a picture's pixels, kept in memory for the
 // program to fill and read. Games make them to hand an image to the window or
-// the cursor; nothing here decodes or encodes a file.
+// the cursor; apps draw views into them (-cacheDisplayInRect:toBitmapImageRep:)
+// and write them out as PNG, JPEG or GIF through ImageIO.
 
 @ObjCClass("NSImageRep")
 open class NSImageRep: NSObject {
@@ -175,6 +176,59 @@ open class NSBitmapImageRep: NSImageRep {
     @ObjCMethod("numberOfPlanes") func repNumberOfPlanes() -> Int { planar ? samplesPerPixel : 1 }
     @ObjCMethod("isPlanar") func repIsPlanar() -> Bool { planar }
     @ObjCMethod("bitmapFormat") func repBitmapFormat() -> UInt { format }
+
+    /// A context drawing into the pixels, +1, for the layout CGImage reads:
+    /// 8-bit RGBA, premultiplied, in one plane; nil for others.
+    func makeContext() -> CGRef? {
+        guard CG.ready, let pixels, pixelsWide > 0, pixelsHigh > 0, !planar, bitsPerSample == 8, samplesPerPixel == 4,
+              bitsPerPixel == 32, let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
+        defer { CG.release(space) }
+        return CG.bitmapContextCreate(pixels, pixelsWide, pixelsHigh, 8, bytesPerRow, space, hasAlpha ? 1 : 5)
+    }
+
+    /// The pixels as a file of an NSBitmapImageFileType that ImageIO writes:
+    /// GIF 2, JPEG 3 or PNG 4 (not TIFF 0 or BMP 1), with JPEG's quality from
+    /// NSImageCompressionFactor; nil for the others.
+    @ObjCMethod("representationUsingType:properties:")
+    func representation(using type: UInt, properties: NSObject?) -> NSObject? {
+        let types: [UInt: String] = [2: "com.compuserve.gif", 3: "public.jpeg", 4: "public.png"]
+        guard let uti = types[type], let image = cgImage(),
+              let data = Classes.named("NSMutableData").flatMap({ Send.object($0.pointer, "data") }) else { return nil }
+        var options: UnsafeMutableRawPointer?
+        if let properties, let factor = Send.object(properties.objcObject, "objectForKey:", "NSImageCompressionFactor".objCArgument()) {
+            options = Send.object(ObjCRuntime.classObject("NSDictionary"), "dictionaryWithObject:forKey:", factor,
+                                  "kCGImageDestinationLossyCompressionQuality".objCArgument())
+        }
+        guard ImageIO.write(image, type: uti, to: data, options: options) else { return nil }
+        return NSObject(data)
+    }
+}
+
+/// ImageIO's destinations, CoreGraphics' provider's.
+enum ImageIO {
+    private typealias CreateWithData = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Int, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    private typealias AddImage = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+    private typealias Finalize = @convention(c) (UnsafeMutableRawPointer?) -> Bool
+
+    private static let coreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+
+    private static func function<T>(_ name: String, as type: T.Type) -> T? {
+        guard let symbol = Symbols.symbol(coreGraphics, "perry_native_" + name) ?? Symbols.symbol(coreGraphics, "_" + name) else { return nil }
+        return unsafeBitCast(symbol, to: type)
+    }
+
+    /// Writes `image` as a file of the type `type` names into `data`, an
+    /// NSMutableData.
+    static func write(_ image: CGRef, type: String, to data: UnsafeMutableRawPointer, options: UnsafeMutableRawPointer?) -> Bool {
+        guard let create = function("CGImageDestinationCreateWithData", as: CreateWithData.self),
+              let add = function("CGImageDestinationAddImage", as: AddImage.self),
+              let finalize = function("CGImageDestinationFinalize", as: Finalize.self) else { return false }
+        let name = NSObject(objCReturnValue: type.objCReturnValue())
+        guard let destination = create(data, name.objcObject, 1, nil) else { return false }
+        defer { CG.release(destination) }
+        add(destination, image, options)
+        return finalize(destination)
+    }
 }
 
 /// NSCIImageRep: a Core Image image as an image rep. Core Image's classes
