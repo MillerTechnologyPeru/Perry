@@ -41,6 +41,35 @@ enum Cookies {
 
     static func objects(_ cookies: [Cookie]) -> NSArray { NSMutableArray.of(cookies.map(object)) }
 
+    /// A Port property's port, the first number in it, as Darwin reads it.
+    static func ports(_ text: String) -> [UInt16] {
+        let digits = text.drop { !$0.isNumber }.prefix { $0.isNumber }
+        guard let first = UInt64(digits.prefix(18)) else { return [] }
+        return [UInt16(truncatingIfNeeded: first)]
+    }
+
+    /// Whether a cookie may go to a URL's port: one limited to ports names it.
+    static func allows(_ cookie: Cookie, port: Int) -> Bool {
+        guard let text = cookie.properties.first(where: { $0.0 == CookieKeys.NSHTTPCookiePort })?.1 else { return true }
+        let listed = ports(text)
+        return listed.isEmpty || listed.contains(UInt16(truncatingIfNeeded: port))
+    }
+
+    /// Whether a cookie's domain covers a host.
+    static func matches(_ cookie: Cookie, host: String) -> Bool {
+        let host = host.lowercased()
+        var domain = cookie.domain.lowercased()
+        if domain.hasPrefix(".") { domain.removeFirst() }
+        return host == domain || host.hasSuffix("." + domain)
+    }
+
+    /// The URL a task's cookies are for, and its main document's.
+    static func urls(_ task: NSObject?) -> (url: URL?, mainDocument: URL?) {
+        guard let task, let request = task.unsafeCast(to: NSURLSessionTask.self).currentRequest() else { return (nil, nil) }
+        let value = Requests.request(request.objcObject)
+        return (value.url, value.mainDocumentURL)
+    }
+
     /// A properties dictionary's values as corelibs takes them: strings,
     /// dates and URLs.
     static func properties(_ dictionary: NSDictionary) -> [String: Any] {
@@ -109,6 +138,24 @@ open class NSHTTPCookie: NSObject {
     @ObjCMethod("isHTTPOnly") func isHTTPOnly() -> Bool { cookie?.isHTTPOnly ?? false }
     @ObjCMethod("version") func version() -> UInt { UInt(cookie?.version ?? 0) }
     @ObjCMethod("comment") func comment() -> String? { cookie?.comment }
+
+    /// A property's text, as the cookie was given it.
+    private func property(_ name: String) -> String? { cookie?.properties.first { $0.0 == name }?.1 }
+
+    @ObjCMethod("commentURL")
+    func commentURL() -> NSURL? {
+        guard let text = property(CookieKeys.NSHTTPCookieCommentURL), let url = URL(string: text) else { return nil }
+        return NSURL.of(url)
+    }
+
+    /// The port the cookie is limited to, as NSNumbers; empty for any port.
+    /// Darwin reads one port from the Port property, its first, as an
+    /// unsigned 16-bit number.
+    @ObjCMethod("portList")
+    func portList() -> NSArray {
+        guard let text = property(CookieKeys.NSHTTPCookiePort) else { return NSMutableArray.of([]) }
+        return NSMutableArray.of(Cookies.ports(text).map { NSNumber.make(int64: Int64($0)) })
+    }
     @ObjCMethod("sameSitePolicy") func sameSitePolicy() -> String? { cookie?.sameSitePolicy }
 
     @ObjCMethod("properties")
@@ -128,6 +175,10 @@ open class NSHTTPCookie: NSObject {
     func description() -> String {
         "<NSHTTPCookie name:\(name()) value:\(value()) domain:\(domain()) path:\(path())>"
     }
+}
+
+extension NSArray {
+    @ObjCMethod("sortedArrayUsingDescriptors:") func sorted(using descriptors: NSArray) -> NSArray
 }
 
 /// NSHTTPCookieStorage: the one shared storage.
@@ -159,6 +210,39 @@ open class NSHTTPCookieStorage: NSObject {
     @ObjCMethod("setCookies:forURL:mainDocumentURL:")
     func setCookies(_ cookies: NSArray?, for url: NSURL?, mainDocumentURL: NSURL?) {
         CookieStorage.set((cookies?.elements ?? []).compactMap(Cookies.cookie), for: url?.url, mainDocumentURL: mainDocumentURL?.url)
+    }
+
+    /// The cookies, sorted as the descriptors say.
+    @ObjCMethod("sortedCookiesUsingDescriptors:")
+    func sortedCookies(using descriptors: NSArray?) -> NSArray {
+        let all = cookies()
+        guard let descriptors else { return all }
+        return all.sorted(using: descriptors)
+    }
+
+    /// The cookies for the task's URL whose domain covers its host, as
+    /// Darwin keeps only those.
+    @ObjCMethod("storeCookies:forTask:")
+    func storeCookies(_ cookies: NSArray?, for task: NSObject?) {
+        let (url, mainDocument) = Cookies.urls(task)
+        guard let url, let host = url.host else { return }
+        let kept = (cookies?.elements ?? []).compactMap(Cookies.cookie).filter { Cookies.matches($0, host: host) }
+        CookieStorage.set(kept, for: url, mainDocumentURL: mainDocument)
+    }
+
+    /// The cookies that would go with the task's request, given to the
+    /// handler on another thread: void (^)(NSArray<NSHTTPCookie *> *).
+    @ObjCMethod("getCookiesForTask:completionHandler:")
+    func getCookies(for task: NSObject?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        let url = Cookies.urls(task).url
+        let port = url.map { $0.port ?? ($0.scheme?.lowercased() == "https" ? 443 : 80) } ?? 0
+        let found = url.map(CookieStorage.cookies(for:))?.filter { Cookies.allows($0, port: port) } ?? []
+        nonisolated(unsafe) let block = completionHandler
+        SocketTaskThreads.spawn {
+            block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                block.object, Cookies.objects(found).objcObject)
+        }
     }
 
     @ObjCMethod("cookieAcceptPolicy") func cookieAcceptPolicy() -> UInt { UInt(CookieStorage.acceptPolicy) }
