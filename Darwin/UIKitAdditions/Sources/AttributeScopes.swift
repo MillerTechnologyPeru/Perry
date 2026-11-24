@@ -36,6 +36,16 @@ extension Foundation.AttributeScopes {
   }
 }
 
+/// UIKit's attributes as members of an AttributedString's runs and
+/// containers (`string.font`, `container.foregroundColor`): the key path
+/// names the attribute; this getter only takes part in key paths.
+@available(iOS 15, tvOS 15, watchOS 8, *)
+extension Foundation.AttributeDynamicLookup {
+  @_disfavoredOverload public subscript<T>(dynamicMember keyPath: Swift.KeyPath<Foundation.AttributeScopes.UIKitAttributes, T>) -> T where T : Foundation.AttributedStringKey {
+    get { self[T.self] }
+  }
+}
+
 @available(iOS 6.0, *)
 extension NSUnderlineStyle : Swift.Hashable {}
 
