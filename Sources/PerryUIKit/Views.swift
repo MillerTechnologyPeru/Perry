@@ -777,10 +777,16 @@ open class WKWebView: UIView {
         }
         guard let page = web.page else { return Updates.afterPass(deliver) }
         // The page is snapshotted once it has drawn what it has now, and a
-        // page still loading once it has drawn after the load.
+        // page still loading once it has drawn after the load. It draws
+        // until then, on screen or not.
+        page.holdShown()
+        let delivered: () -> Void = {
+            deliver()
+            WKWebView(objcObject: object, ownership: .retain).web.page?.releaseShown()
+        }
         page.afterRendering {
             let view = WKWebView(objcObject: object, ownership: .retain)
-            if view.web.frameCurrent { deliver() } else { view.web.snapshotWaiters.append(deliver) }
+            if view.web.frameCurrent { delivered() } else { view.web.snapshotWaiters.append(delivered) }
         }
     }
 
@@ -922,13 +928,29 @@ enum WebViews {
         return size
     }
 
-    /// Pages follow their views' sizes.
+    /// Pages follow their views' sizes, and are shown while their views
+    /// are on screen.
     static func tick() {
         for (object, web) in live {
             guard let page = web.page else { continue }
-            let size = pageSize(for: UIView(objcObject: object, ownership: .retain).state.bounds.size)
+            let view = UIView(objcObject: object, ownership: .retain)
+            let size = pageSize(for: view.state.bounds.size)
             page.resize(width: UInt32(size.width), height: UInt32(size.height), scale: Float(Screen.scale))
+            page.setOnScreen(isOnScreen(object))
         }
+    }
+
+    /// Whether a view is in a window, with neither it nor a view above it
+    /// hidden or transparent.
+    static func isOnScreen(_ object: UnsafeMutableRawPointer) -> Bool {
+        var current: UnsafeMutableRawPointer? = object
+        while let view = current {
+            let state = UIView.states[view]
+            if state.hidden || state.alpha < 0.01 { return false }
+            if UIView.wrap(view).is(UIWindow.self) { return true }
+            current = state.superview
+        }
+        return false
     }
 
     static func loadChanged(_ object: UnsafeMutableRawPointer, _ event: Int32) {
