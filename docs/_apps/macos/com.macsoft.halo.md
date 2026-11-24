@@ -29,6 +29,27 @@ reports:
         caption: The main menu
       - url: https://github.com/user-attachments/assets/6b34b2b4-2f04-46e1-8bb3-2274bdd2087b
         caption: The graphics settings window
+  - pr: 349
+    date: 2026-11-23
+    perry: "38c2001a"
+    platform: macos
+    cpu: i386
+    app_version: "2.0"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    resolution: "800x600"
+    graphics: OpenGL
+    env:
+      - "PERRY_DISCS=Halo Universal=~/perry-halo/cd/mnt"
+      - "PERRY_CONTAINER=~/perry-halo/container-ub"
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: With auxiliary color buffers the campaign's first level draws lit, with its characters in color, and the main menu shows its ring background. Sound and play are untested.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/23a0f940-748b-4516-b318-097510a6cf7a
+        caption: The first level
 ---
 
 A Carbon application for PowerPC and Intel, run with the 32-bit Perry. It

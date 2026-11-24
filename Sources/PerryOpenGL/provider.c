@@ -84,6 +84,7 @@ static void perry_glGetIntegerv(unsigned int name, int *values) {
     }
     if (!get_integer) return;
     get_integer(name, values);
+    perry_aux_integer(name, values);
     switch (name) {
     case 0x8872:   // GL_MAX_TEXTURE_IMAGE_UNITS
     case 0x8B4C:   // GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS
@@ -99,6 +100,8 @@ static void *gl_function(const char *name) {
     if (!symbol && gl.handle) symbol = dlsym(gl.handle, name + 1);
     return symbol;
 }
+
+void *perry_opengl_function(const char *name) { return gl_function(name); }
 
 /// What an ALIAS of a binding should have been declared as: OUTPUT for a
 /// result, ATTRIB for a vertex's or a fragment's attribute, PARAM for a
@@ -200,6 +203,9 @@ void *perry_provider_symbol(const char *name) {
     if (strcmp(name, "_glGetString") == 0) return (void *)perry_glGetString;
     if (strcmp(name, "_glGetIntegerv") == 0) return (void *)perry_glGetIntegerv;
     if (strcmp(name, "_glProgramStringARB") == 0) return (void *)perry_glProgramString;
+    // Auxiliary buffers, which Mesa has none of.
+    void *replaced = perry_aux_symbol(name);
+    if (replaced) return replaced;
     // APPLE_vertex_array_object's functions are ARB_vertex_array_object's,
     // which a compatibility context's client arrays work with too.
     static const char *const apple_vao[][2] = {
