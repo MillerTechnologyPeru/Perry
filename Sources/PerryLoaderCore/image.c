@@ -1280,14 +1280,14 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
                 initializer_fn *fns = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(void *); k++) {
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fns[k], image->path);
-                    PERRY_DARWIN_CALL(fns[k](argc, argv, envp, apple, &vars));
+                    PERRY_DARWIN_CALL(PERRY_DARWIN_FUNCTION(fns[k])(argc, argv, envp, apple, &vars));
                 }
             } else if (type == S_INIT_FUNC_OFFSETS) {
                 const uint32_t *offsets = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(uint32_t); k++) {
                     initializer_fn fn = (initializer_fn)(void *)(image->base + offsets[k]);
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fn, image->path);
-                    PERRY_DARWIN_CALL(fn(argc, argv, envp, apple, &vars));
+                    PERRY_DARWIN_CALL(PERRY_DARWIN_FUNCTION(fn)(argc, argv, envp, apple, &vars));
                 }
             }
         }
@@ -1713,6 +1713,6 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
                                      : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
     int status;
-    PERRY_DARWIN_CALL(status = entry(argc, argv, envp, apple));
+    PERRY_DARWIN_CALL(status = PERRY_DARWIN_FUNCTION(entry)(argc, argv, envp, apple));
     exit(status);
 }

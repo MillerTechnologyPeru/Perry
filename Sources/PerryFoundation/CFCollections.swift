@@ -440,48 +440,50 @@ public func CFArrayGetValueAtIndex(_ array: id?, _ index: Int) -> CFValue {
     return values[index]
 }
 
-@c(_CFArrayGetValues)
+@DarwinC("_CFArrayGetValues")
 public func CFArrayGetValues(_ array: id?, _ range: CFRange, _ values: UnsafeMutablePointer<CFValue>?) {
     let all = CFArrays.values(array)
     for (offset, index) in CFArrays.range(range).enumerated() { values?[offset] = all[index] }
 }
 
-@c(_CFArrayContainsValue)
+@DarwinC("_CFArrayContainsValue")
 public func CFArrayContainsValue(_ array: id?, _ range: CFRange, _ value: CFValue) -> Bool {
     CFArrayGetFirstIndexOfValue(array, range, value) != -1
 }
 
-@c(_CFArrayGetFirstIndexOfValue)
+@DarwinC("_CFArrayGetFirstIndexOfValue")
 public func CFArrayGetFirstIndexOfValue(_ array: id?, _ range: CFRange, _ value: CFValue) -> Int {
     let all = CFArrays.values(array)
     return CFArrays.range(range).first { CFArrays.isEqual(array, all[$0], value) } ?? -1
 }
 
-@c(_CFArrayGetLastIndexOfValue)
+@DarwinC("_CFArrayGetLastIndexOfValue")
 public func CFArrayGetLastIndexOfValue(_ array: id?, _ range: CFRange, _ value: CFValue) -> Int {
     let all = CFArrays.values(array)
     return CFArrays.range(range).reversed().first { CFArrays.isEqual(array, all[$0], value) } ?? -1
 }
 
-@c(_CFArrayGetCountOfValue)
+@DarwinC("_CFArrayGetCountOfValue")
 public func CFArrayGetCountOfValue(_ array: id?, _ range: CFRange, _ value: CFValue) -> Int {
     let all = CFArrays.values(array)
     return CFArrays.range(range).filter { CFArrays.isEqual(array, all[$0], value) }.count
 }
 
-@c(_CFArrayApplyFunction)
+@DarwinC("_CFArrayApplyFunction")
 public func CFArrayApplyFunction(_ array: id?, _ range: CFRange,
                                  _ function: (@convention(c) (CFValue, UnsafeMutableRawPointer?) -> Void)?,
                                  _ context: UnsafeMutableRawPointer?) {
     let all = CFArrays.values(array)
+    let function = function.map { darwinCallable($0) }
     for index in CFArrays.range(range) { function?(all[index], context) }
 }
 
-@c(_CFArrayBSearchValues)
+@DarwinC("_CFArrayBSearchValues")
 public func CFArrayBSearchValues(_ array: id?, _ range: CFRange, _ value: CFValue,
                                  _ comparator: (@convention(c) (CFValue, CFValue, UnsafeMutableRawPointer?) -> Int)?,
                                  _ context: UnsafeMutableRawPointer?) -> Int {
     let all = CFArrays.values(array)
+    let comparator = comparator.map { darwinCallable($0) }
     var low = range.location, high = range.location + range.length
     while low < high {
         let middle = (low + high) / 2
@@ -533,24 +535,25 @@ public func CFArrayExchangeValuesAtIndices(_ array: id?, _ first: Int, _ second:
     CFArrays.setValues(array, values)
 }
 
-@c(_CFArrayReplaceValues)
+@DarwinC("_CFArrayReplaceValues")
 public func CFArrayReplaceValues(_ array: id?, _ range: CFRange, _ newValues: UnsafePointer<CFValue>?, _ count: Int) {
     var values = CFArrays.values(array)
     values.replaceSubrange(CFArrays.range(range), with: (0..<count).map { newValues![$0] })
     CFArrays.setValues(array, values)
 }
 
-@c(_CFArrayAppendArray)
+@DarwinC("_CFArrayAppendArray")
 public func CFArrayAppendArray(_ array: id?, _ other: id?, _ range: CFRange) {
     let more = CFArrays.values(other)
     for index in CFArrays.range(range) { CFArrayAppendValue(array, more[index]) }
 }
 
 /// A stable sort of the range by the comparator.
-@c(_CFArraySortValues)
+@DarwinC("_CFArraySortValues")
 public func CFArraySortValues(_ array: id?, _ range: CFRange,
                               _ comparator: (@convention(c) (CFValue, CFValue, UnsafeMutableRawPointer?) -> Int)?,
                               _ context: UnsafeMutableRawPointer?) {
+    let comparator = comparator.map { darwinCallable($0) }
     var values = CFArrays.values(array)
     let span = CFArrays.range(range)
     let sorted = values[span].enumerated().sorted { a, b in
