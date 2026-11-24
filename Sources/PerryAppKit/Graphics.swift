@@ -111,10 +111,30 @@ open class NSColor: NSObject {
     /// colors do.
     var resolvedDark: Bool?
 
-    /// The color as a CGColor, made once (again when a system color's
-    /// appearance changes).
+    /// A dynamic color's block (+colorWithName:dynamicProvider:), which
+    /// gives its color for an appearance.
+    var provider: ObjCBlock?
+
+    /// Takes the provider's color for the current appearance.
+    func resolveProvider() {
+        guard let provider else { return }
+        typealias Provider = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        resolvedDark = Appearances.currentIsDark
+        guard let made = provider.function(as: Provider.self)(provider.object, NSAppearance.currentAppearance().objcObject),
+              let color = NSObject(objcObject: made, ownership: .retain).as(NSColor.self) else { return }
+        if color.provider != nil, color !== self { color.resolveProvider() }
+        (red, green, blue, alpha) = (color.red, color.green, color.blue, color.alpha)
+        patternImage = color.patternImage
+    }
+
+    /// The color as a CGColor, made once (again when a system or dynamic
+    /// color's appearance changes).
     var cgColorRef: CGRef? {
-        if let dark = resolvedDark, dark != Appearances.currentIsDark, let name = colorName, let system = NSColor.system(name) {
+        if provider != nil, resolvedDark != Appearances.currentIsDark {
+            resolveProvider()
+            if let cgColor { CG.release(cgColor) }
+            cgColor = nil
+        } else if let dark = resolvedDark, dark != Appearances.currentIsDark, let name = colorName, let system = NSColor.system(name) {
             (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
             resolvedDark = Appearances.currentIsDark
             if let cgColor { CG.release(cgColor) }
@@ -185,6 +205,15 @@ open class NSColor: NSObject {
     static func color(named name: String?) -> NSColor? { name.flatMap { system($0) ?? AppKitAssets.color(named: $0) } }
     @ObjCClassMethod("colorNamed:bundle:")
     static func color(named name: String?, bundle: NSObject?) -> NSColor? { color(named: name) }
+    /// A color that asks `provider` for its color in each appearance it is
+    /// drawn in.
+    @ObjCClassMethod("colorWithName:dynamicProvider:")
+    static func color(name: String?, dynamicProvider provider: ObjCBlock?) -> NSColor {
+        let color = NSColor()
+        color.provider = provider
+        color.resolveProvider()
+        return color
+    }
     @ObjCClassMethod("colorWithCatalogName:colorName:")
     static func color(catalogName: String?, colorName: String?) -> NSColor? { colorName.flatMap(system) }
 
