@@ -61,7 +61,7 @@ final class DisplayListCompositor {
 
     /// The parts of a layer that are items of their own.
     private enum Part: Int {
-        case content, border, clip, backdrop, live
+        case content, border, clip, backdrop, live, shadow
     }
 
     private struct Key: Hashable {
@@ -163,6 +163,10 @@ final class DisplayListCompositor {
         guard !state.hidden, state.opacity > 0 else { return }
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
+        // A shadow is under all of the layer.
+        if state.shadowOpacity > 0, let color = state.shadowColor, Self.isUniform(toScreen) {
+            addShadow(of: layer, state: state, color: color, toScreen: toScreen, alpha: alpha, into: &items)
+        }
         // A backdrop shows what is behind it, blurred, before its own fill.
         if layer.state.filters != nil, let backdrop = layer.as(CABackdropLayer.self) {
             addBackdrop(backdrop, of: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
@@ -243,13 +247,16 @@ final class DisplayListCompositor {
                                       value: .effect(.opacity(Double(alpha)), DisplayList(items: [item]))))
     }
 
-    /// A gray or RGB color, faded by `alpha`.
+    /// A gray or RGB color, faded by `alpha`, each part within 0 to 1: a
+    /// spring animating a color overshoots them, and the engine makes
+    /// bytes of them.
     private func resolved(_ color: CGRef, alpha: CGFloat) -> ResolvedColor? {
         guard let components = CG.colorGetComponents(color) else { return nil }
         let gray = CG.colorGetNumberOfComponents(color) == 2
         let (r, g, b, a) = gray ? (components[0], components[0], components[0], components[1])
             : (components[0], components[1], components[2], components[3])
-        return ResolvedColor(red: Float(r), green: Float(g), blue: Float(b), opacity: Float(a * alpha))
+        func unit(_ value: CGFloat) -> Float { value.isNaN ? 0 : Float(min(max(value, 0), 1)) }
+        return ResolvedColor(red: unit(r), green: unit(g), blue: unit(b), opacity: unit(a * alpha))
     }
 
     private func addFill(_ rect: CGRect, with color: CGRef, of layer: CALayer, alpha: CGFloat, into items: inout [DisplayList.Item]) {
@@ -343,6 +350,68 @@ final class DisplayListCompositor {
                                       cornerRadius: Foundation.CGFloat(Double(cornerRadius)), corners: corners)
         append(DisplayList.Item(frame: Foundation.CGRect(toScreen.apply(state.bounds)), identity: identity(layer, .backdrop), version: 0,
                                 value: .content(.backdrop(content))), alpha: alpha, into: &items)
+    }
+
+    // MARK: Shadows
+
+    /// The layer's shadow: its silhouette in the shadow's color, blurred and
+    /// moved. The silhouette is the layer's box if it has a background or is
+    /// a backdrop, and otherwise the boxes of the nearest layers under it
+    /// that do, each with its rounded corners; what a layer draws itself
+    /// (text, images, shapes) casts none yet. Under a backdrop the shadow
+    /// is left out of the silhouette, so the backdrop doesn't blur its own
+    /// shadow into itself.
+    private func addShadow(of layer: CALayer, state: LayerState, color: CGRef, toScreen: CGAffineTransform, alpha: CGFloat,
+                           into items: inout [DisplayList.Item]) {
+        guard let tint = resolved(color, alpha: alpha * CGFloat(state.shadowOpacity)), tint.opacity > 0 else { return }
+        var boxes: [(rect: Foundation.CGRect, radius: Double)] = []
+        var overBackdrop = false
+        func collect(_ layer: CALayer, _ state: LayerState, _ toScreen: CGAffineTransform, depth: Int) {
+            let isBackdrop = layer.state.filters != nil && layer.as(CABackdropLayer.self) != nil
+            let isFilled = state.backgroundColor.flatMap { resolved($0, alpha: 1) }.map { $0.opacity > 0.02 } ?? false
+            if isBackdrop || isFilled {
+                if isBackdrop { overBackdrop = true }
+                boxes.append((Foundation.CGRect(toScreen.apply(state.bounds)), Double(state.cornerRadius * abs(toScreen.a))))
+                return
+            }
+            guard depth < 4 else { return }
+            for sublayer in CALayer.orderedSublayers(of: state) {
+                let presented = Presentation.state(of: sublayer)
+                guard !presented.hidden, presented.opacity > 0 else { continue }
+                collect(sublayer, presented, presented.toSuperlayer(within: state).concatenating(toScreen), depth: depth + 1)
+            }
+        }
+        collect(layer, state, toScreen, depth: 0)
+        guard var extent = boxes.first?.rect else { return }
+        for box in boxes.dropFirst() { extent = extent.union(box.rect) }
+        guard extent.width >= 1, extent.height >= 1, extent.minX.isFinite, extent.minY.isFinite, extent.width.isFinite,
+              extent.height.isFinite else { return }
+        let radius = Double(max(state.shadowRadius, 0) * toScreen.a)
+        let offset = Foundation.CGSize(width: Double(state.shadowOffset.width * toScreen.a), height: Double(state.shadowOffset.height * toScreen.a))
+        let spread = radius * 3 + 1
+        let frame = extent.union(extent.offsetBy(dx: offset.width, dy: offset.height)).insetBy(dx: -spread, dy: -spread)
+        guard frame.width * Double(scale) <= 4096, frame.height * Double(scale) <= 4096 else { return }
+        let outline = Path { path in
+            for box in boxes {
+                let corner = min(box.radius, Double(min(box.rect.width, box.rect.height)) / 2)
+                path.addRoundedRect(in: box.rect.offsetBy(dx: -frame.minX, dy: -frame.minY),
+                                    cornerSize: Foundation.CGSize(width: corner, height: corner), style: .circular)
+            }
+        }
+        let silhouette = DrawingContent(operations: [
+            .shape(ShapeContent(path: outline, color: ResolvedColor(red: 0, green: 0, blue: 0), drawing: .fill(FillStyle())), DrawingState())
+        ])
+        var shadowed = DrawingState()
+        shadowed.filters = [.shadow(color: tint, radius: Foundation.CGFloat(radius), offset: offset, blendMode: .normal, placement: .only,
+                                    invertsAlpha: false)]
+        var drawing = DrawingContent(operations: [.layer(silhouette, shadowed)])
+        if overBackdrop {
+            var outside = DrawingState()
+            outside.masks = [DrawingMask(content: silhouette, opacity: 1, isInverse: true)]
+            drawing = DrawingContent(operations: [.layer(drawing, outside)])
+        }
+        items.append(DisplayList.Item(frame: frame, identity: identity(layer, .shadow), version: 0,
+                                      value: .content(.drawing(drawing))))
     }
 
     /// The backdrops of the layers under one that is drawn flattened, drawn
