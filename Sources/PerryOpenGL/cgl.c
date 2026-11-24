@@ -5,6 +5,7 @@
 // The renderer information is one accelerated renderer, the one SDL's
 // contexts are on.
 
+#include "PerryOpenGL.h"
 #include "perry_interface.h"
 
 #include <pthread.h>
@@ -83,7 +84,9 @@ id perry_CGLGetCurrentContext(void) { return send(context_class(), "currentConte
 CGLError perry_CGLFlushDrawable(id context) CGL_SYMBOL(CGLFlushDrawable);
 CGLError perry_CGLFlushDrawable(id context) {
     if (!context) return kCGLBadContext;
+    perry_aux_before_swap();
     send(context, "flushBuffer");
+    perry_aux_after_swap();
     return kCGLNoError;
 }
 
