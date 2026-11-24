@@ -561,15 +561,23 @@ let package = Package(
             name: "PerryDesktopAppearance",
             dependencies: [.product(name: "CacaoDBus", package: "Cacao")]
         ),
+        // A Mac app's main menu in the desktop's global menu bar: NSMenu's
+        // items as dbusmenu's, served with Cacao's exporter, found by the
+        // app's app_id and tied to windows with the appmenu protocol.
+        .target(
+            name: "PerryDesktopMenus",
+            dependencies: [.product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "CacaoWayland", package: "Cacao"),
+                           .product(name: "DBus", package: "DBus")]
+        ),
         // AppKit: variadic entry points.
         .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryDesktopAppearance", "PerryInterface", "PerryLayoutSolver",
-                           "PerryObjCInterop", "PerryScrollPhysics", .product(name: "CacaoDBus", package: "Cacao"),
-                           .product(name: "SDL3Swift", package: "SDL")],
+            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryDesktopAppearance", "PerryDesktopMenus", "PerryInterface",
+                           "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics", .product(name: "CacaoDBus", package: "Cacao"),
+                           .product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // Metal's declarations of metal2vulkan's C ABI, and its loader:
@@ -612,6 +620,10 @@ let package = Package(
         .testTarget(
             name: "PerryDesktopAppearanceTests",
             dependencies: ["PerryDesktopAppearance", .product(name: "CacaoDBus", package: "Cacao"), .product(name: "DBus", package: "DBus")]
+        ),
+        .testTarget(
+            name: "PerryDesktopMenusTests",
+            dependencies: ["PerryDesktopMenus", .product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "DBus", package: "DBus")]
         ),
     ]
 )
