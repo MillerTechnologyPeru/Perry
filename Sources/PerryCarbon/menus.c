@@ -41,6 +41,9 @@ MenuRef carbon_menu_new(int16_t identifier, id title) {
     menu->magic = CARBON_MENU_MAGIC;
     menu->identifier = identifier;
     menu->menu = SEND1(SEND(CLASS("NSMenu"), "alloc"), "initWithTitle:", title ? title : carbon_string(""));
+    // Carbon's items are enabled and disabled by the application, not by
+    // asking their targets: a pop-up button's have no action to ask about.
+    ((void (*)(id, SEL, signed char))objc_send)(menu->menu, SELECTOR("setAutoenablesItems:"), 0);
     menu->next = menus;
     menus = menu;
     return menu;
@@ -341,4 +344,70 @@ void carbon_SetMenuItemText(MenuRef menu, uint16_t item, ConstStr255Param text) 
 void carbon_SetMenuItemText(MenuRef menu, uint16_t item, ConstStr255Param text) {
     if (!(menu = menu_from(menu)) || item == 0 || item > menu->count || !text) return;
     SEND1(menu->items[item - 1].item, "setTitle:", carbon_pascal_string(text));
+}
+
+OSStatus carbon_SetMenuItemTextWithCFString(MenuRef menu, uint16_t item, id text) CARBON_SYMBOL(SetMenuItemTextWithCFString);
+OSStatus carbon_SetMenuItemTextWithCFString(MenuRef menu, uint16_t item, id text) {
+    if (!(menu = menu_from(menu)) || !text) return paramErr;
+    if (item == 0 || item > menu->count) return -5620;   // menuItemNotFoundErr
+    SEND1(menu->items[item - 1].item, "setTitle:", text);
+    return noErr;
+}
+
+OSStatus carbon_CopyMenuItemTextAsCFString(MenuRef menu, uint16_t item, id *text) CARBON_SYMBOL(CopyMenuItemTextAsCFString);
+OSStatus carbon_CopyMenuItemTextAsCFString(MenuRef menu, uint16_t item, id *text) {
+    if (!(menu = menu_from(menu)) || !text) return paramErr;
+    if (item == 0 || item > menu->count) return -5620;   // menuItemNotFoundErr
+    *text = SEND(SEND(menu->items[item - 1].item, "title"), "copy");
+    return noErr;
+}
+
+// MARK: - Items by their number
+
+/// Enables or disables the 1-based item, or every item for 0, as a
+/// disabled menu's are.
+static void enable_item(MenuRef menu, uint16_t item, bool enabled) {
+    if (!(menu = menu_from(menu)) || item > menu->count) return;
+    for (size_t index = item ? item - 1u : 0; index < (item ? item : menu->count); index++) {
+        menu->items[index].enabled = enabled;
+        ((void (*)(id, SEL, signed char))objc_send)(menu->items[index].item, SELECTOR("setEnabled:"), enabled ? 1 : 0);
+    }
+}
+
+void carbon_EnableMenuItem(MenuRef menu, uint16_t item) CARBON_SYMBOL(EnableMenuItem);
+void carbon_EnableMenuItem(MenuRef menu, uint16_t item) { enable_item(menu, item, true); }
+
+void carbon_DisableMenuItem(MenuRef menu, uint16_t item) CARBON_SYMBOL(DisableMenuItem);
+void carbon_DisableMenuItem(MenuRef menu, uint16_t item) { enable_item(menu, item, false); }
+
+Boolean carbon_IsMenuItemEnabled(MenuRef menu, uint16_t item) CARBON_SYMBOL(IsMenuItemEnabled);
+Boolean carbon_IsMenuItemEnabled(MenuRef menu, uint16_t item) {
+    if (!(menu = menu_from(menu)) || item > menu->count) return false;
+    if (item) return menu->items[item - 1].enabled;
+    for (size_t index = 0; index < menu->count; index++)
+        if (menu->items[index].enabled) return true;
+    return menu->count == 0;
+}
+
+/// The item's check mark.
+void carbon_CheckMenuItem(MenuRef menu, uint16_t item, Boolean checked) CARBON_SYMBOL(CheckMenuItem);
+void carbon_CheckMenuItem(MenuRef menu, uint16_t item, Boolean checked) {
+    if (!(menu = menu_from(menu)) || item == 0 || item > menu->count) return;
+    ((void (*)(id, SEL, long))objc_send)(menu->items[item - 1].item, SELECTOR("setState:"), checked ? 1 : 0);
+}
+
+void carbon_MacCheckMenuItem(MenuRef menu, uint16_t item, Boolean checked) CARBON_SYMBOL(MacCheckMenuItem);
+void carbon_MacCheckMenuItem(MenuRef menu, uint16_t item, Boolean checked) { carbon_CheckMenuItem(menu, item, checked); }
+
+/// The item's mark: a character, the check mark's (18) among them, or 0
+/// for none.
+void carbon_SetItemMark(MenuRef menu, uint16_t item, uint16_t mark) CARBON_SYMBOL(SetItemMark);
+void carbon_SetItemMark(MenuRef menu, uint16_t item, uint16_t mark) { carbon_CheckMenuItem(menu, item, mark != 0); }
+
+void carbon_GetItemMark(MenuRef menu, uint16_t item, uint16_t *mark) CARBON_SYMBOL(GetItemMark);
+void carbon_GetItemMark(MenuRef menu, uint16_t item, uint16_t *mark) {
+    if (!mark) return;
+    *mark = 0;
+    if (!(menu = menu_from(menu)) || item == 0 || item > menu->count) return;
+    if (((long (*)(id, SEL))objc_send)(menu->items[item - 1].item, SELECTOR("state"))) *mark = 18;   // checkMark
 }
