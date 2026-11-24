@@ -186,6 +186,24 @@ public class NSCharacterSet: NSObject {
     @ObjCClassMethod("URLFragmentAllowedCharacterSet")
     static func urlFragmentAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: ":@/?") }
 
+    /// The characters with a canonical decomposition (precomposed letters,
+    /// Hangul syllables, singletons such as the Angstrom sign).
+    @ObjCClassMethod("decomposableCharacterSet")
+    static func decomposable(_ cls: ObjCClass) -> NSCharacterSet? {
+        standard(cls) { scalar in
+            scalar.value >= 0xC0 && StringFolding.decomposed(String(scalar)).unicodeScalars.elementsEqual(CollectionOfOne(scalar)) == false
+        }
+    }
+
+    /// The set a file holds as -bitmapRepresentation gives it; nil if the
+    /// file can't be read.
+    @ObjCClassMethod("characterSetWithContentsOfFile:")
+    static func contents(_ cls: ObjCClass, ofFile path: String?) -> NSCharacterSet? {
+        guard let path, let data = FileManager.default.contents(atPath: path) else { return nil }
+        let members = CharacterSets.members(fromBitmap: data)
+        return set(cls) { members.contains($0.value) }
+    }
+
     @ObjCClassMethod("characterSetWithCharactersInString:")
     static func characters(_ cls: ObjCClass, in string: String) -> NSCharacterSet? {
         let members = Set(string.unicodeScalars.map(\.value))
