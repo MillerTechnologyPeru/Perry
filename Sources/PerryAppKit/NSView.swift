@@ -47,6 +47,8 @@ open class NSView: NSResponder {
     var postsBoundsChangedNotifications = true
     var identifier: String?
     var toolTip: String?
+    /// The view's shadow (an NSShadow): kept, not drawn, as NSShadow is.
+    var shadow: NSObject?
     var appearance: NSObject?
     var nextKeyView: NSObject?
     var constraints: [NSLayoutConstraint] = []
@@ -291,6 +293,8 @@ open class NSView: NSResponder {
     @ObjCMethod("setIdentifier:") func setIdentifier(_ identifier: String?) { self.identifier = identifier }
     @ObjCMethod("toolTip") func viewToolTip() -> String? { toolTip }
     @ObjCMethod("setToolTip:") func setToolTip(_ toolTip: String?) { self.toolTip = toolTip }
+    @ObjCMethod("shadow") func viewShadow() -> NSObject? { shadow }
+    @ObjCMethod("setShadow:") func setShadow(_ shadow: NSObject?) { self.shadow = shadow }
     @ObjCMethod("appearance") func viewAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
     @ObjCMethod("effectiveAppearance")
