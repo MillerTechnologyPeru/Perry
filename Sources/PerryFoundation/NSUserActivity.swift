@@ -151,6 +151,38 @@ public final class NSUserActivity: NSObject {
     @ObjCMethod("resignCurrent") func resignCurrent() {}
     @ObjCMethod("invalidate") func invalidate() {}
 
+    /// Calls `block` later on a global queue, as Darwin calls these
+    /// completion handlers; the block is copied until then.
+    private static func later(_ block: ObjCObject?, _ call: @escaping (id) -> Void) {
+        guard let block, let copied = ObjC.retainBlock(block.id), let queue = Dispatch.globalQueue?(0x15, 0) else { return }
+        let delivered = DispatchedWork.async(queue) {
+            call(copied)
+            ObjC.release(copied)
+        }
+        if !delivered { ObjC.release(copied) }
+    }
+
+    /// No streams come from another device: the handler is given nil
+    /// streams and NSUserActivityConnectionUnavailableError (4609).
+    @ObjCMethod("getContinuationStreamsWithCompletionHandler:")
+    func getContinuationStreams(completionHandler: ObjCObject?) {
+        NSUserActivity.later(completionHandler) { block in
+            let error = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4609, description: nil)
+            Blocks.invoke(block, as: (@convention(c) (id, id?, id?, id?) -> Void).self)(block, nil, nil, error)
+        }
+    }
+
+    /// Nothing saves activities here, so there are none to delete.
+    @ObjCClassMethod("deleteSavedUserActivitiesWithPersistentIdentifiers:completionHandler:")
+    static func deleteSaved(persistentIdentifiers: ObjCObject?, completionHandler: ObjCObject?) {
+        later(completionHandler) { block in Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block) }
+    }
+
+    @ObjCClassMethod("deleteAllSavedUserActivitiesWithCompletionHandler:")
+    static func deleteAllSaved(completionHandler: ObjCObject?) {
+        later(completionHandler) { block in Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block) }
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)

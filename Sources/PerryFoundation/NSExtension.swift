@@ -48,9 +48,17 @@ private func entry(_ dictionary: id?, _ key: String) -> id? {
 // MARK: - Interfaces
 
 /// What an NSXPCInterface was made for. Nothing is encoded here, so the
-/// classes arguments may be are not kept.
+/// classes arguments may be are not kept; the XPC types set are, to be
+/// asked for again.
 final class InterfaceStorage {
     var proto: id?
+    /// xpc_type_t, by selector, argument and whether of the reply.
+    var xpcTypes: [String: UnsafeMutableRawPointer] = [:]
+
+    static func key(_ selector: UnsafeRawPointer?, _ argument: UInt, _ ofReply: Bool) -> String {
+        let name = selector.map { String(cString: $0.assumingMemoryBound(to: CChar.self)) } ?? ""
+        return "\(name) \(argument) \(ofReply)"
+    }
 }
 
 @ObjCClass("NSXPCInterface")
@@ -93,6 +101,16 @@ public class NSXPCInterface: NSObject {
     @ObjCMethod("interfaceForSelector:argumentIndex:ofReply:")
     func interface(selector: UnsafeRawPointer?, argument: UInt, ofReply: Bool) -> UnsafeMutableRawPointer? { nil }
 
+    @ObjCMethod("setXPCType:forSelector:argumentIndex:ofReply:")
+    func setXPCType(_ type: UnsafeMutableRawPointer?, selector: UnsafeRawPointer?, argument: UInt, ofReply: Bool) {
+        Storage.get(objcObject, as: InterfaceStorage.self)?.xpcTypes[InterfaceStorage.key(selector, argument, ofReply)] = type
+    }
+
+    @ObjCMethod("XPCTypeForSelector:argumentIndex:ofReply:")
+    func xpcType(selector: UnsafeRawPointer?, argument: UInt, ofReply: Bool) -> UnsafeMutableRawPointer? {
+        Storage.get(objcObject, as: InterfaceStorage.self)?.xpcTypes[InterfaceStorage.key(selector, argument, ofReply)]
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -112,6 +130,13 @@ final class ConnectionStorage {
     var interruptionHandler: id?
     var invalidationHandler: id?
     var invalidated = false
+    var serviceName: String?
+    /// The endpoint it was made with (retained), and the listener's state.
+    var endpoint: ObjCObject?
+    var listener: ListenerStorage?
+    var resumed = false
+    /// The listener's end, which this end keeps (+1) once accepted.
+    var acceptedPeer: id?
 
     func replace(_ old: inout id?, with new: id?) {
         _ = ObjC.retain(new)
@@ -207,10 +232,40 @@ public class NSXPCConnection: NSObject {
     }
 
     @ObjCMethod("init") func initialize() -> Self { ensureStorage() }
-    @ObjCMethod("initWithServiceName:") func initialize(serviceName: UnsafeMutableRawPointer?) -> Self { ensureStorage() }
-    @ObjCMethod("initWithListenerEndpoint:") func initialize(endpoint: UnsafeMutableRawPointer?) -> Self { ensureStorage() }
+
+    /// macOS's: no service of the name runs here, so nothing answers.
+    @ObjCMethod("initWithServiceName:")
+    func initialize(serviceName: UnsafeMutableRawPointer?) -> Self {
+        let result = ensureStorage()
+        storage?.serviceName = Strings.value(of: serviceName)
+        return result
+    }
+
+    /// A connection to the listener whose endpoint it is, made when this end
+    /// is resumed and the listener too.
+    @ObjCMethod("initWithListenerEndpoint:")
+    func initialize(endpoint: UnsafeMutableRawPointer?) -> Self {
+        let result = ensureStorage()
+        storage?.endpoint = endpoint.map { ObjCObject($0) }
+        storage?.listener = NSXPCListenerEndpoint.listener(of: endpoint)
+        return result
+    }
+
     @ObjCMethod("initWithMachServiceName:options:")
-    func initialize(machService: UnsafeMutableRawPointer?, options: UInt) -> Self { ensureStorage() }
+    func initialize(machService: UnsafeMutableRawPointer?, options: UInt) -> Self {
+        let result = ensureStorage()
+        storage?.serviceName = Strings.value(of: machService)
+        return result
+    }
+
+    @ObjCMethod("serviceName") func serviceName() -> String? { storage?.serviceName }
+    @ObjCMethod("endpoint") func endpoint() -> UnsafeMutableRawPointer? { storage?.endpoint?.id }
+
+    /// The connection whose message is being handled: messages here go
+    /// straight to the exported object, with no connection in between, so
+    /// none.
+    @ObjCClassMethod("currentConnection")
+    static func currentConnection(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { nil }
 
     @ObjCMethod("remoteObjectInterface")
     func remoteObjectInterface() -> UnsafeMutableRawPointer? { storage?.remoteInterface }
@@ -268,8 +323,33 @@ public class NSXPCConnection: NSObject {
     @ObjCMethod("synchronousRemoteObjectProxyWithErrorHandler:")
     func synchronousRemoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { remoteObjectProxy() }
 
-    @ObjCMethod("resume") func resume() {}
+    /// Connects an endpoint's connection to its listener, once both are resumed.
+    @ObjCMethod("resume")
+    func resume() {
+        guard let storage, !storage.resumed, !storage.invalidated else { return }
+        storage.resumed = true
+        guard let listener = storage.listener else { return }
+        if listener.resumed {
+            NSXPCListener.accept(objcObject, listener)
+        } else {
+            listener.pending.append(ObjCObject(objcObject))
+        }
+    }
+
+    @ObjCMethod("activate") func activate() { resume() }
     @ObjCMethod("suspend") func suspend() {}
+
+    /// Calls the block once the messages sent before it are: they all are,
+    /// as they are delivered as they are sent, so on a background queue now.
+    @ObjCMethod("scheduleSendBarrierBlock:")
+    func scheduleSendBarrierBlock(_ block: UnsafeMutableRawPointer?) {
+        guard let block = block.flatMap({ ObjC.retainBlock($0) }).map({ ObjCObject(objCOwned: $0) }) else { return }
+        ItemProviderQueue.background {
+            Blocks.invoke(block.id, as: (@convention(c) (id) -> Void).self)(block.id)
+        }
+    }
+
+    @ObjCMethod("auditSessionIdentifier") func auditSessionIdentifier() -> Int32 { 0 }
     @ObjCMethod("auditToken") func auditToken() -> Int { 0 }
     @ObjCMethod("processIdentifier") func processIdentifier() -> Int32 { getpid() }
     @ObjCMethod("effectiveUserIdentifier") func effectiveUserIdentifier() -> UInt32 { geteuid() }
@@ -279,6 +359,7 @@ public class NSXPCConnection: NSObject {
     func invalidate() {
         guard let storage, !storage.invalidated else { return }
         storage.invalidated = true
+        storage.listener?.pending.removeAll { $0.id == objcObject }
         if let handler = storage.invalidationHandler {
             Blocks.invoke(handler, as: (@convention(c) (id) -> Void).self)(handler)
         }
@@ -290,7 +371,7 @@ public class NSXPCConnection: NSObject {
             storage.peer?.peer = nil
             storage.peer = nil
             for old in [storage.remoteInterface, storage.exportedInterface, storage.exportedObject,
-                        storage.interruptionHandler, storage.invalidationHandler] {
+                        storage.interruptionHandler, storage.invalidationHandler, storage.acceptedPeer] {
                 if let old { ObjC.release(old) }
             }
         }
@@ -299,8 +380,22 @@ public class NSXPCConnection: NSObject {
     }
 }
 
-/// An NSXPCListener: nothing is ever connected to one, as connections are
-/// made by the extension host; it accepts no work and starts no service.
+/// A listener's state, which its endpoints share.
+final class ListenerStorage {
+    /// The listener, unretained: its endpoints may outlive it.
+    var object: id?
+    /// Unretained, as the property is weak.
+    var delegate: id?
+    var resumed = false
+    var invalidated = false
+    /// Connections to an endpoint, resumed before the listener was.
+    var pending: [ObjCObject] = []
+}
+
+/// An NSXPCListener. A service's (+serviceListener, a Mach service's) is
+/// never connected to, as no other process runs here; an anonymous
+/// listener's endpoint makes connections in this process, which its
+/// delegate accepts as Darwin's does, joined end to end like an extension's.
 @ObjCClass("NSXPCListener")
 public class NSXPCListener: NSObject {
     nonisolated(unsafe) static var listenerClass: Class!
@@ -310,8 +405,20 @@ public class NSXPCListener: NSObject {
         listenerClass = cls.storage
     }
 
+    var storage: ListenerStorage {
+        if let storage = Storage.get(objcObject, as: ListenerStorage.self) { return storage }
+        let storage = ListenerStorage()
+        storage.object = objcObject
+        Storage.set(objcObject, storage)
+        return storage
+    }
+
     private static func make(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
-        Storage.allocate(cls.pointer).flatMap { ObjC.autorelease($0) }
+        guard let object = Storage.allocate(cls.pointer) else { return nil }
+        let storage = ListenerStorage()
+        storage.object = object
+        Storage.set(object, storage)
+        return ObjC.autorelease(object)
     }
 
     @ObjCClassMethod("anonymousListener")
@@ -320,14 +427,85 @@ public class NSXPCListener: NSObject {
     @ObjCClassMethod("serviceListener")
     static func service(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { make(cls) }
 
-    @ObjCMethod("init") func initialize() -> Self { self }
-    @ObjCMethod("initWithMachServiceName:") func initialize(name: UnsafeMutableRawPointer?) -> Self { self }
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        _ = storage
+        return self
+    }
 
-    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { nil }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: UnsafeMutableRawPointer?) {}
-    @ObjCMethod("resume") func resume() {}
-    @ObjCMethod("suspend") func suspend() {}
-    @ObjCMethod("invalidate") func invalidate() {}
+    @ObjCMethod("initWithMachServiceName:")
+    func initialize(name: UnsafeMutableRawPointer?) -> Self {
+        _ = storage
+        return self
+    }
+
+    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { storage.delegate }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: UnsafeMutableRawPointer?) { storage.delegate = delegate }
+
+    /// A new endpoint each time, as on Darwin, each its own (not equal to another).
+    @ObjCMethod("endpoint")
+    func endpoint() -> UnsafeMutableRawPointer? { NSXPCListenerEndpoint.make(for: storage) }
+
+    /// Accepts the connections made to its endpoints meanwhile.
+    @ObjCMethod("resume")
+    func resume() {
+        let storage = self.storage
+        guard !storage.resumed, !storage.invalidated else { return }
+        storage.resumed = true
+        let pending = storage.pending
+        storage.pending = []
+        for connection in pending { NSXPCListener.accept(connection.id, storage) }
+    }
+
+    @ObjCMethod("activate") func activate() { resume() }
+    @ObjCMethod("suspend") func suspend() { storage.resumed = false }
+
+    @ObjCMethod("invalidate")
+    func invalidate() {
+        let storage = self.storage
+        storage.invalidated = true
+        storage.resumed = false
+        let pending = storage.pending
+        storage.pending = []
+        for connection in pending { _ = ObjC.send(connection.id, ObjC.selector("invalidate")) }
+    }
+
+    /// Makes the listener's end of a connection and asks the delegate to
+    /// accept it: if it does, the two ends are joined (the client's keeps
+    /// the listener's); if not, or there is no delegate, the client's end
+    /// is invalidated.
+    static func accept(_ client: id, _ listener: ListenerStorage) {
+        guard let clientStorage = Storage.get(client, as: ConnectionStorage.self), !clientStorage.invalidated else { return }
+        guard !listener.invalidated, let listenerObject = listener.object, let delegate = listener.delegate,
+              let server = NSXPCConnection.create(), let serverStorage = Storage.get(server, as: ConnectionStorage.self) else {
+            _ = ObjC.send(client, ObjC.selector("invalidate"))
+            return
+        }
+        let selector = ObjC.selector("listener:shouldAcceptNewConnection:")
+        typealias ShouldAccept = @convention(c) (id?, SEL, id?, id?) -> Bool
+        let accepted = ObjC.sendBool(delegate, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector))
+            && unsafeBitCast(ObjC.msgSend, to: ShouldAccept.self)(delegate, selector, listenerObject, server)
+        guard accepted else {
+            ObjC.release(server)
+            _ = ObjC.send(client, ObjC.selector("invalidate"))
+            return
+        }
+        clientStorage.peer = serverStorage
+        serverStorage.peer = clientStorage
+        if let old = clientStorage.acceptedPeer { ObjC.release(old) }
+        clientStorage.acceptedPeer = server
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        if let storage = Storage.get(objcObject, as: ListenerStorage.self) {
+            storage.object = nil
+            storage.invalidated = true
+            storage.pending = []
+        }
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: NSXPCListener.listenerClass)
+    }
 }
 
 // MARK: - Extension contexts
@@ -376,6 +554,25 @@ open class NSExtensionContext: NSObject {
 
     @ObjCMethod("cancelRequestWithError:")
     func cancelRequest(error: UnsafeMutableRawPointer?) {}
+
+    /// Asks the host app to open the URL: the app is the host here, so
+    /// UIApplication opens it, when there is one; else the handler is told
+    /// it wasn't opened.
+    @ObjCMethod("openURL:completionHandler:")
+    func openURL(_ url: UnsafeMutableRawPointer?, completionHandler: UnsafeMutableRawPointer?) {
+        let selector = ObjC.selector("openURL:options:completionHandler:")
+        if let url, let application = ObjC.send(classNamed("UIApplication"), ObjC.selector("sharedApplication")),
+           ObjC.sendBool(application, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector)) {
+            typealias Open = @convention(c) (id?, SEL, id?, id?, id?) -> Void
+            let options = send(classNamed("NSDictionary"), "dictionary")
+            unsafeBitCast(ObjC.msgSend, to: Open.self)(application, selector, url, options, completionHandler)
+            return
+        }
+        guard let handler = completionHandler.flatMap({ ObjC.retainBlock($0) }).map({ ObjCObject(objCOwned: $0) }) else { return }
+        ItemProviderQueue.background {
+            Blocks.invoke(handler.id, as: (@convention(c) (id, Bool) -> Void).self)(handler.id, false)
+        }
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {

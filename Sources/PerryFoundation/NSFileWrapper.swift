@@ -275,5 +275,210 @@ public class NSFileWrapper: NSObject {
         return Self.write(storage, path: FileManagers.path(url), error: error)
     }
 
-    @ObjCMethod("serializedRepresentation") func serializedRepresentation() -> UnsafeMutableRawPointer? { nil }
+    /// The wrapper in the NeXT RTFD pasteboard format, as Darwin
+    /// serializes one (see FileWrapperArchive).
+    @ObjCMethod("serializedRepresentation")
+    func serializedRepresentation() -> UnsafeMutableRawPointer? {
+        DataObjects.autoreleased(Data(FileWrapperArchive.serialized(storage)))
+    }
+
+    /// A wrapper from -serializedRepresentation's bytes; nil for others.
+    @ObjCMethod("initWithSerializedRepresentation:")
+    func initialize(serializedRepresentation data: UnsafeMutableRawPointer?) -> Self? {
+        guard let made = FileWrapperArchive.wrapper(serialized: [UInt8](DataObjects.data(data))) else { return nil }
+        return become(made)
+    }
+}
+
+/// NSFileWrapper's serialized form, the NeXT RTFD pasteboard format: "rtfd",
+/// a zero word, then the item. An item is a version word (3) and a table
+/// of named entries: the count, each name (length, then bytes), each
+/// entry's length, then the entries; every number a 32-bit little-endian
+/// word. A file's or link's entry is a list (a count, then each chunk's
+/// length and bytes) of its contents or destination path; a directory's is
+/// an item of its own. Each table's "." entry is a list of one table that
+/// gives each entry's 16 bytes of attributes: modification time,
+/// permissions, kind (1 a directory, 4 a link, 2 the item itself), and 1
+/// for the item itself. A lone file or link is an item whose ".." entry is
+/// its contents, with __@PreferredName@__ and __@UTF8PreferredName@__ for
+/// its preferred name.
+private enum FileWrapperArchive {
+    static let magic: [UInt8] = Array("rtfd".utf8)
+
+    private static func word(_ value: Int) -> [UInt8] {
+        withUnsafeBytes(of: UInt32(truncatingIfNeeded: value).littleEndian) { Array($0) }
+    }
+
+    private static func list(_ chunks: [[UInt8]]) -> [UInt8] {
+        chunks.reduce(word(chunks.count)) { $0 + word($1.count) + $1 }
+    }
+
+    private static func table(_ entries: [(name: String, data: [UInt8])]) -> [UInt8] {
+        var bytes = word(entries.count)
+        for entry in entries { bytes += word(entry.name.utf8.count) + Array(entry.name.utf8) }
+        for entry in entries { bytes += word(entry.data.count) }
+        for entry in entries { bytes += entry.data }
+        return bytes
+    }
+
+    private static func attributes(_ entries: [(name: String, permissions: Int, kind: Int, own: Int)]) -> [UInt8] {
+        list([table(entries.map { (name: $0.name, data: word(0) + word($0.permissions) + word($0.kind) + word($0.own)) })])
+    }
+
+    private static func contents(_ storage: FileWrapperStorage) -> [UInt8] {
+        storage.kind == .symbolicLink ? Array((storage.destination.map { FileManagers.path($0) } ?? "").utf8)
+            : [UInt8](DataObjects.data(storage.contents))
+    }
+
+    /// A directory's item.
+    private static func item(_ storage: FileWrapperStorage) -> [UInt8] {
+        var entries: [(name: String, data: [UInt8])] = []
+        var kinds: [(name: String, permissions: Int, kind: Int, own: Int)] = []
+        for child in storage.children.sorted(by: { $0.key < $1.key }) {
+            guard let childStorage = Storage.get(child.wrapper, as: FileWrapperStorage.self) else { continue }
+            switch childStorage.kind {
+            case .directory:
+                entries.append((child.key, item(childStorage)))
+                kinds.append((child.key, 0o777, 1, 0))
+            case .symbolicLink:
+                entries.append((child.key, list([contents(childStorage)])))
+                kinds.append((child.key, 0o666, 4, 0))
+            case .regular:
+                entries.append((child.key, list([contents(childStorage)])))
+                kinds.append((child.key, 0o666, 0, 0))
+            }
+        }
+        entries.append((".", attributes(kinds)))
+        return word(3) + table(entries)
+    }
+
+    static func serialized(_ storage: FileWrapperStorage) -> [UInt8] {
+        guard storage.kind != .directory else { return magic + word(0) + item(storage) }
+        var entries: [(name: String, data: [UInt8])] = [("..", list([contents(storage)]))]
+        if let name = storage.preferredFilename {
+            entries.append(("__@PreferredName@__", list([Array(name.utf8)])))
+            entries.append(("__@UTF8PreferredName@__", list([Array(name.utf8)])))
+        }
+        entries.append((".", attributes([("..", 0o666, storage.kind == .symbolicLink ? 6 : 2, 1)])))
+        return magic + word(0) + word(3) + table(entries)
+    }
+
+    // MARK: Reading
+
+    private struct Reader {
+        let bytes: [UInt8]
+        var offset = 0
+
+        init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+        mutating func word() -> Int? {
+            guard offset + 4 <= bytes.count else { return nil }
+            defer { offset += 4 }
+            return (0..<4).reduce(0) { $0 | Int(bytes[offset + $1]) << (8 * $1) }
+        }
+
+        mutating func chunk(_ count: Int) -> [UInt8]? {
+            guard count >= 0, offset + count <= bytes.count else { return nil }
+            defer { offset += count }
+            return Array(bytes[offset..<offset + count])
+        }
+    }
+
+    private static func readList(_ bytes: [UInt8]) -> [[UInt8]]? {
+        var reader = Reader(bytes)
+        guard let count = reader.word(), count < 1 << 20 else { return nil }
+        var chunks: [[UInt8]] = []
+        for _ in 0..<count {
+            guard let length = reader.word(), let chunk = reader.chunk(length) else { return nil }
+            chunks.append(chunk)
+        }
+        return chunks
+    }
+
+    private static func readTable(_ reader: inout Reader) -> [String: [UInt8]]? {
+        guard let count = reader.word(), count < 1 << 20 else { return nil }
+        var names: [String] = [], lengths: [Int] = []
+        for _ in 0..<count {
+            guard let length = reader.word(), let name = reader.chunk(length) else { return nil }
+            names.append(String(decoding: name, as: UTF8.self))
+        }
+        for _ in 0..<count {
+            guard let length = reader.word() else { return nil }
+            lengths.append(length)
+        }
+        var entries: [String: [UInt8]] = [:]
+        for (name, length) in zip(names, lengths) {
+            guard let data = reader.chunk(length) else { return nil }
+            entries[name] = data
+        }
+        return entries
+    }
+
+    /// An item's table, after its version word.
+    private static func readItem(_ bytes: [UInt8]) -> [String: [UInt8]]? {
+        var reader = Reader(bytes)
+        guard reader.word() != nil else { return nil }
+        return readTable(&reader)
+    }
+
+    /// Each entry's kind word, from the "." entry's table.
+    private static func kinds(_ entries: [String: [UInt8]]) -> [String: Int] {
+        guard let dot = entries["."], let first = readList(dot)?.first else { return [:] }
+        var reader = Reader(first)
+        guard let table = readTable(&reader) else { return [:] }
+        return table.compactMapValues { attributes -> Int? in
+            var fields = Reader(attributes)
+            _ = fields.word()
+            _ = fields.word()
+            return fields.word()
+        }
+    }
+
+    /// A wrapper (+1) of a stored kind and contents.
+    private static func object(_ storage: FileWrapperStorage) -> id? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(NSFileWrapper.wrapperClass)) else { return nil }
+        Storage.set(object, storage)
+        return object
+    }
+
+    private static func leaf(_ data: [UInt8], kind: Int) -> FileWrapperStorage? {
+        guard let chunks = readList(data) else { return nil }
+        let bytes = chunks.reduce([], +)
+        if kind & 4 != 0 {
+            let storage = FileWrapperStorage(kind: .symbolicLink)
+            storage.destination = URL(filePath: String(decoding: bytes, as: UTF8.self))
+            return storage
+        }
+        let storage = FileWrapperStorage(kind: .regular)
+        storage.contents = ObjC.retain(DataObjects.autoreleased(Data(bytes)))
+        return storage
+    }
+
+    private static func directory(_ entries: [String: [UInt8]]) -> FileWrapperStorage? {
+        let storage = FileWrapperStorage(kind: .directory)
+        let entryKinds = Self.kinds(entries)
+        for (name, data) in entries.sorted(by: { $0.key < $1.key }) where name != "." {
+            let kind = entryKinds[name] ?? 0
+            let child: FileWrapperStorage?
+            if kind & 1 != 0 {
+                child = readItem(data).flatMap(directory)
+            } else {
+                child = leaf(data, kind: kind)
+            }
+            guard let child, let wrapper = object(child) else { return nil }
+            child.filename = name
+            child.preferredFilename = name
+            storage.children.append((name, wrapper))
+        }
+        return storage
+    }
+
+    static func wrapper(serialized bytes: [UInt8]) -> FileWrapperStorage? {
+        guard bytes.count >= 12, Array(bytes[0..<4]) == magic, let entries = readItem(Array(bytes[8...])) else { return nil }
+        guard let own = entries[".."] else { return directory(entries) }
+        guard let storage = leaf(own, kind: kinds(entries)[".."] ?? 2) else { return nil }
+        let name = (entries["__@UTF8PreferredName@__"] ?? entries["__@PreferredName@__"]).flatMap(readList)?.first
+        storage.preferredFilename = name.map { String(decoding: $0, as: UTF8.self) }
+        return storage
+    }
 }

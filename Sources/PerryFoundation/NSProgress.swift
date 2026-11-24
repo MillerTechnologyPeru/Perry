@@ -241,6 +241,62 @@ public class NSProgress: NSObject {
         if let value { storage.userInfo[key] = ObjC.retain(value.id) }
     }
 
+    // MARK: File progress
+
+    // Darwin keeps these in the user info, under their keys (another file
+    // exports the key constants; they are named by value here): a nil value
+    // removes the entry.
+
+    private func userInfoValue(_ key: String) -> ObjCObject? { storage.userInfo[key].map { ObjCObject($0) } }
+
+    private func setUserInfoCopy(_ value: ObjCObject?, forKey key: String) {
+        let copy = value.flatMap { ObjC.send($0.id, Selectors.copyWithZone, nil) }
+        setUserInfoObject(copy.map { ObjCObject($0) }, forKey: key)
+        ObjC.release(copy)
+    }
+
+    @ObjCMethod("estimatedTimeRemaining")
+    func estimatedTimeRemaining() -> ObjCObject? { userInfoValue("NSProgressEstimatedTimeRemainingKey") }
+    @ObjCMethod("setEstimatedTimeRemaining:")
+    func setEstimatedTimeRemaining(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressEstimatedTimeRemainingKey") }
+
+    @ObjCMethod("throughput") func throughput() -> ObjCObject? { userInfoValue("NSProgressThroughputKey") }
+    @ObjCMethod("setThroughput:")
+    func setThroughput(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressThroughputKey") }
+
+    @ObjCMethod("fileOperationKind") func fileOperationKind() -> ObjCObject? { userInfoValue("NSProgressFileOperationKindKey") }
+    @ObjCMethod("setFileOperationKind:")
+    func setFileOperationKind(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressFileOperationKindKey") }
+
+    @ObjCMethod("fileURL") func fileURL() -> ObjCObject? { userInfoValue("NSProgressFileURLKey") }
+    @ObjCMethod("setFileURL:") func setFileURL(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressFileURLKey") }
+
+    @ObjCMethod("fileTotalCount") func fileTotalCount() -> ObjCObject? { userInfoValue("NSProgressFileTotalCountKey") }
+    @ObjCMethod("setFileTotalCount:")
+    func setFileTotalCount(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressFileTotalCountKey") }
+
+    @ObjCMethod("fileCompletedCount") func fileCompletedCount() -> ObjCObject? { userInfoValue("NSProgressFileCompletedCountKey") }
+    @ObjCMethod("setFileCompletedCount:")
+    func setFileCompletedCount(_ value: ObjCObject?) { setUserInfoCopy(value, forKey: "NSProgressFileCompletedCountKey") }
+
+    // MARK: Publishing (macOS)
+
+    // Progress shared between processes through the file coordination
+    // service, which isn't here: publishing reaches no one, and a
+    // subscriber hears of no one's progress.
+
+    @ObjCMethod("publish") func publish() {}
+    @ObjCMethod("unpublish") func unpublish() {}
+    /// Whether the progress was published before the subscriber came: no
+    /// progress is ever handed to one here.
+    @ObjCMethod("isOld") func isOld() -> Bool { false }
+
+    /// A token for +removeSubscriber:; the handler is never called.
+    @ObjCClassMethod("addSubscriberForFileURL:withPublishingHandler:")
+    static func addSubscriber(fileURL: ObjCObject?, publishingHandler: ObjCObject?) -> ObjCObject { ObjCObject.new() }
+
+    @ObjCClassMethod("removeSubscriber:") static func removeSubscriber(_ subscriber: ObjCObject?) {}
+
     // MARK: Cancelling and pausing
 
     @ObjCMethod("isCancellable") func isCancellable() -> Bool { storage.cancellable }

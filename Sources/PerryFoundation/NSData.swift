@@ -366,6 +366,19 @@ public class NSData: NSObject {
             .map { setStorage(DataStorage($0)) }
     }
 
+    /// The deprecated form, which skips characters that aren't Base64
+    /// (line breaks), as NSDataBase64DecodingIgnoreUnknownCharacters does.
+    @ObjCMethod("initWithBase64Encoding:")
+    func initialize(base64Encoding string: String?) -> Self? {
+        string.flatMap { Data(base64Encoded: $0, options: .ignoreUnknownCharacters) }.map { setStorage(DataStorage($0)) }
+    }
+
+    /// Adopts the buffer, which is freed with the data.
+    @ObjCMethod("initWithBytesNoCopy:length:")
+    func initialize(noCopy bytes: UnsafeMutableRawPointer?, length: UInt) -> Self {
+        setStorage(DataStorage(adopting: bytes, count: Int(length), freeWhenDone: true))
+    }
+
     /// From Base64 text as data, ASCII.
     @ObjCMethod("initWithBase64EncodedData:options:")
     func initialize(base64Data encoded: NSData, options: UInt) -> Self? {
@@ -519,6 +532,31 @@ public class NSData: NSObject {
         url.url.isFileURL && (try? data.write(to: url.url, options: atomically ? .atomic : [])) != nil
     }
 
+    // MARK: Compressing
+
+    /// NSDataCompressionAlgorithm: LZFSE 0, LZ4 1, LZMA 2 and zlib 3 (raw
+    /// DEFLATE), coded as libcompression codes them. A failure is
+    /// NSCompressionFailedError (5376); an unknown algorithm raises.
+    @ObjCMethod("compressedDataUsingAlgorithm:error:")
+    func compressedData(algorithm: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSData? {
+        guard let output = DataCompressionCodec.code(data, algorithm: algorithm, encode: true) else {
+            error?.pointee = DataCompressionCodec.failure(encode: true)
+            return nil
+        }
+        return DataObjects.owned(DataStorage(output))
+    }
+
+    /// A failure, such as data that isn't in the algorithm's format, is
+    /// NSDecompressionFailedError (5377).
+    @ObjCMethod("decompressedDataUsingAlgorithm:error:")
+    func decompressedData(algorithm: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSData? {
+        guard let output = DataCompressionCodec.code(data, algorithm: algorithm, encode: false) else {
+            error?.pointee = DataCompressionCodec.failure(encode: false)
+            return nil
+        }
+        return DataObjects.owned(DataStorage(output))
+    }
+
     // MARK: Copying
 
     @ObjCMethod("copyWithZone:")
@@ -607,6 +645,110 @@ public class NSMutableData: NSData {
         guard let other else { return storage.replace(location: 0, length: storage.count, with: nil, count: 0) }
         other.data.withUnsafeBytes {
             storage.replace(location: 0, length: storage.count, with: $0.baseAddress, count: $0.count)
+        }
+    }
+
+    /// Zeroes the range's bytes, lengthening the data to reach its end.
+    @ObjCMethod("resetBytesInRange:")
+    func resetBytes(in range: NSRange) {
+        let start = Int(range.location), end = Int(range.location + range.length)
+        if end > storage.count { storage.setCount(end) }
+        if let bytes = storage.bytes, end > start { memset(bytes + start, 0, end - start) }
+    }
+
+    /// Replaces the bytes with their compressed form; on failure they stay
+    /// as they were.
+    @ObjCMethod("compressUsingAlgorithm:error:")
+    func compress(algorithm: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        recode(algorithm: algorithm, encode: true, error: error)
+    }
+
+    @ObjCMethod("decompressUsingAlgorithm:error:")
+    func decompress(algorithm: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        recode(algorithm: algorithm, encode: false, error: error)
+    }
+
+    private func recode(algorithm: Int, encode: Bool, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        guard let output = DataCompressionCodec.code(data, algorithm: algorithm, encode: encode) else {
+            error?.pointee = DataCompressionCodec.failure(encode: encode)
+            return false
+        }
+        output.withUnsafeBytes { storage.replace(location: 0, length: storage.count, with: $0.baseAddress, count: $0.count) }
+        return true
+    }
+}
+
+/// NSData's compression, through libcompression's streams: Perry's
+/// provider of libcompression codes each format, so it's found there.
+private enum DataCompressionCodec {
+    /// compression_stream.
+    struct Stream {
+        var destination: UnsafeMutablePointer<UInt8>?
+        var destinationSize: Int
+        var source: UnsafePointer<UInt8>?
+        var sourceSize: Int
+        var state: UnsafeMutableRawPointer?
+    }
+
+    typealias Initialize = @convention(c) (UnsafeMutableRawPointer, Int32, UInt32) -> Int32
+    typealias Process = @convention(c) (UnsafeMutableRawPointer, Int32) -> Int32
+    typealias Destroy = @convention(c) (UnsafeMutableRawPointer) -> Int32
+
+    nonisolated(unsafe) static let library: UnsafeMutableRawPointer? =
+        dlopen("libPerrycompression.so", RTLD_NOW | RTLD_NOLOAD) ?? dlopen("libPerrycompression.so", RTLD_NOW)
+    nonisolated(unsafe) static let initialize = library.flatMap { dlsym($0, "_compression_stream_init") }
+        .map { unsafeBitCast($0, to: Initialize.self) }
+    nonisolated(unsafe) static let process = library.flatMap { dlsym($0, "_compression_stream_process") }
+        .map { unsafeBitCast($0, to: Process.self) }
+    nonisolated(unsafe) static let destroy = library.flatMap { dlsym($0, "_compression_stream_destroy") }
+        .map { unsafeBitCast($0, to: Destroy.self) }
+
+    /// libcompression's algorithm for an NSDataCompressionAlgorithm.
+    static func algorithm(_ value: Int) -> UInt32 {
+        switch value {
+        case 0: return 0x801   // COMPRESSION_LZFSE
+        case 1: return 0x100   // COMPRESSION_LZ4
+        case 2: return 0x306   // COMPRESSION_LZMA
+        case 3: return 0x205   // COMPRESSION_ZLIB
+        default:
+            Exceptions.raise(name: "NSInvalidArgumentException", reason: "Unrecognized compression algorithm value: \(value)")
+        }
+    }
+
+    static func failure(encode: Bool) -> UnsafeMutableRawPointer? {
+        Errors.autoreleased(domain: Errors.cocoaDomain, code: encode ? 5376 : 5377, description: nil)
+    }
+
+    /// The bytes coded in one finalized stream; nil if they can't be, as for
+    /// empty input to decode, which Darwin refuses too.
+    static func code(_ input: Data, algorithm value: Int, encode: Bool) -> Data? {
+        let kind = Self.algorithm(value)
+        guard encode || !input.isEmpty, let initialize = Self.initialize, let process = Self.process,
+              let destroy = Self.destroy else { return nil }
+        var stream = Stream(destination: nil, destinationSize: 0, source: nil, sourceSize: 0, state: nil)
+        guard initialize(&stream, encode ? 0 : 1, kind) == 0 else { return nil }
+        defer { _ = destroy(&stream) }
+        let bytes = [UInt8](input)
+        let chunk = 65_536
+        var buffer = [UInt8](repeating: 0, count: chunk)
+        var output = Data()
+        return bytes.withUnsafeBufferPointer { source -> Data? in
+            stream.source = source.baseAddress
+            stream.sourceSize = source.count
+            while true {
+                let remaining = stream.sourceSize
+                // COMPRESSION_STREAM_FINALIZE: all the input is there.
+                let status = buffer.withUnsafeMutableBufferPointer { room -> Int32 in
+                    stream.destination = room.baseAddress
+                    stream.destinationSize = room.count
+                    return process(&stream, 1)
+                }
+                let produced = chunk - stream.destinationSize
+                output.append(contentsOf: buffer[0..<produced])
+                // COMPRESSION_STATUS_END and COMPRESSION_STATUS_OK.
+                if status == 1 { return output }
+                guard status == 0, produced > 0 || stream.sourceSize < remaining else { return nil }
+            }
         }
     }
 }

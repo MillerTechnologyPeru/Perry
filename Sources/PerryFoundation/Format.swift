@@ -189,6 +189,9 @@ enum Format {
             let wordSized = ["l", "z", "t"].contains(length)
             let wide = ["ll", "q", "j"].contains(length) || (wordSized && MemoryLayout<Int>.size == 8)
             let cLength = length == "q" ? "ll" : (length == "L" ? "" : length)
+            // short and char (h, hh), which the int an argument is passed as
+            // is cut to, as Darwin's printf cuts it.
+            let narrow = ["h", "hh"].contains(length) ? length : ""
             let raw: UInt64
             switch conversion {
             case "%":
@@ -199,12 +202,12 @@ enum Format {
                 raw = wide ? arguments.next64() : arguments.next()
                 output += wide ? c(spec + cLength + String(conversion), Int64(bitPattern: raw))
                     : wordSized ? c(spec + cLength + String(conversion), Int(truncatingIfNeeded: raw))
-                    : c(spec + String(conversion), Int32(truncatingIfNeeded: raw))
+                    : c(spec + narrow + String(conversion), Int32(truncatingIfNeeded: raw))
             case "u", "o", "x", "X":
                 raw = wide ? arguments.next64() : arguments.next()
                 output += wide ? c(spec + cLength + String(conversion), raw)
                     : wordSized ? c(spec + cLength + String(conversion), UInt(truncatingIfNeeded: raw))
-                    : c(spec + String(conversion), UInt32(truncatingIfNeeded: raw))
+                    : c(spec + narrow + String(conversion), UInt32(truncatingIfNeeded: raw))
             case "c":
                 output += c(spec + "c", Int32(truncatingIfNeeded: arguments.next()), encoding: .macOSRoman)
             case "C":

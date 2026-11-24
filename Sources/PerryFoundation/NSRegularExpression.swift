@@ -152,14 +152,26 @@ enum Regexes {
     }
 }
 
-/// A match's ranges, and what a data detector found.
+/// A match's ranges, and what a data detector found or a checking
+/// result's factory was given. Objects are retained.
 final class CheckingResultStorage {
     let ranges: [NSRange]
     let regex: id?
     /// NSTextCheckingType: regular expression, else what was detected.
     var type: UInt64 = DataDetectors.regularExpression
     var url: URL?
+    /// The NSURL a link result was made with, given back as it was.
+    var urlObject: id? { didSet { replaceRetained(oldValue, urlObject) } }
     var phoneNumber: String?
+    /// An address's or transit information's NSTextChecking*Key dictionary.
+    var components: id? { didSet { replaceRetained(oldValue, components) } }
+    var date: id? { didSet { replaceRetained(oldValue, date) } }
+    var timeZone: id? { didSet { replaceRetained(oldValue, timeZone) } }
+    var duration: Double = 0
+    var replacementString: String?
+    var alternativeStrings: id? { didSet { replaceRetained(oldValue, alternativeStrings) } }
+    var grammarDetails: id? { didSet { replaceRetained(oldValue, grammarDetails) } }
+    var orthography: id? { didSet { replaceRetained(oldValue, orthography) } }
 
     init(ranges: [NSRange], regex: id?) {
         self.ranges = ranges
@@ -168,6 +180,62 @@ final class CheckingResultStorage {
 
     deinit {
         ObjC.release(regex)
+        for object in [urlObject, components, date, timeZone, alternativeStrings, grammarDetails, orthography] { ObjC.release(object) }
+    }
+
+    private func replaceRetained(_ old: id?, _ new: id?) {
+        guard old != new else { return }
+        _ = ObjC.retain(new)
+        ObjC.release(old)
+    }
+
+    /// A copy whose ranges are moved by `offset`, with what else it holds.
+    func moved(by offset: Int) -> CheckingResultStorage {
+        let shifted = ranges.map {
+            $0.location == notFound ? $0 : NSRange(location: UInt(max(0, Int($0.location) + offset)), length: $0.length)
+        }
+        let copy = CheckingResultStorage(ranges: shifted, regex: regex)
+        copy.type = type
+        copy.url = url
+        copy.urlObject = urlObject
+        copy.phoneNumber = phoneNumber
+        copy.components = components
+        copy.date = date
+        copy.timeZone = timeZone
+        copy.duration = duration
+        copy.replacementString = replacementString
+        copy.alternativeStrings = alternativeStrings
+        copy.grammarDetails = grammarDetails
+        copy.orthography = orthography
+        return copy
+    }
+}
+
+/// NSTextCheckingType's values.
+enum CheckingTypes {
+    static let orthography: UInt64 = 1 << 0, spelling: UInt64 = 1 << 1, grammar: UInt64 = 1 << 2, date: UInt64 = 1 << 3
+    static let address: UInt64 = 1 << 4, link: UInt64 = 1 << 5, quote: UInt64 = 1 << 6, dash: UInt64 = 1 << 7
+    static let replacement: UInt64 = 1 << 8, correction: UInt64 = 1 << 9, regularExpression: UInt64 = 1 << 10
+    static let phoneNumber: UInt64 = 1 << 11, transitInformation: UInt64 = 1 << 12
+
+    /// The name Darwin's exceptions give a result of the type: its
+    /// subclass's.
+    static func className(_ type: UInt64) -> String {
+        switch type {
+        case orthography: "NSOrthographyCheckingResult"
+        case spelling: "NSSpellCheckingResult"
+        case grammar: "NSGrammarCheckingResult"
+        case date: "NSDateCheckingResult"
+        case address: "NSAddressCheckingResult"
+        case link: "NSLinkCheckingResult"
+        case quote: "NSQuoteCheckingResult"
+        case dash: "NSDashCheckingResult"
+        case replacement: "NSReplacementCheckingResult"
+        case correction: "NSCorrectionCheckingResult"
+        case phoneNumber: "NSPhoneNumberCheckingResult"
+        case transitInformation: "NSTransitInformationCheckingResult"
+        default: "NSRegularExpressionCheckingResult"
+        }
     }
 }
 
@@ -354,7 +422,11 @@ public class NSRegularExpression: NSObject {
     }
 }
 
-/// NSTextCheckingResult, of the regular-expression type.
+/// NSTextCheckingResult: a regular expression's match, what a data
+/// detector found, or a result made with one of the class's factories
+/// (address, correction, dash, date, grammar, link, orthography, phone
+/// number, quote, replacement, spelling, transit information). Darwin makes
+/// a private subclass for each type; here one class holds any of them.
 @ObjCClass("NSTextCheckingResult")
 public final class NSTextCheckingResult: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
@@ -370,17 +442,141 @@ public final class NSTextCheckingResult: NSObject {
         ObjC.superDealloc(objcObject, from: Regexes.resultClass)
     }
 
+    // MARK: Factories
+
+    /// A new result (+0) of `type` over `range`, with what `fill` gives it.
+    static func make(_ type: UInt64, _ range: NSRange, _ fill: (CheckingResultStorage) -> Void = { _ in }) -> UnsafeMutableRawPointer? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(Regexes.resultClass)) else { return nil }
+        let result = CheckingResultStorage(ranges: [range], regex: nil)
+        result.type = type
+        fill(result)
+        Storage.set(object, result)
+        return ObjC.autorelease(object)
+    }
+
+    @ObjCClassMethod("orthographyCheckingResultWithRange:orthography:")
+    static func orthographyResult(range: NSRange, orthography: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.orthography, range) { $0.orthography = orthography?.id }
+    }
+
+    @ObjCClassMethod("spellCheckingResultWithRange:")
+    static func spellingResult(range: NSRange) -> UnsafeMutableRawPointer? { make(CheckingTypes.spelling, range) }
+
+    /// The details: dictionaries with NSGrammarRange, NSGrammarUserDescription
+    /// and NSGrammarCorrections.
+    @ObjCClassMethod("grammarCheckingResultWithRange:details:")
+    static func grammarResult(range: NSRange, details: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.grammar, range) { $0.grammarDetails = details?.id }
+    }
+
+    @ObjCClassMethod("dateCheckingResultWithRange:date:")
+    static func dateResult(range: NSRange, date: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.date, range) { $0.date = date?.id }
+    }
+
+    @ObjCClassMethod("dateCheckingResultWithRange:date:timeZone:duration:")
+    static func dateResult(range: NSRange, date: ObjCObject?, timeZone: ObjCObject?, duration: Double) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.date, range) {
+            $0.date = date?.id
+            $0.timeZone = timeZone?.id
+            $0.duration = duration
+        }
+    }
+
+    /// The components: NSTextCheckingNameKey, NSTextCheckingStreetKey and the
+    /// rest, by value.
+    @ObjCClassMethod("addressCheckingResultWithRange:components:")
+    static func addressResult(range: NSRange, components: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.address, range) { $0.components = components?.id }
+    }
+
+    @ObjCClassMethod("linkCheckingResultWithRange:URL:")
+    static func linkResult(range: NSRange, url: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.link, range) {
+            $0.urlObject = url?.id
+            $0.url = URLs.url(url?.id)
+        }
+    }
+
+    @ObjCClassMethod("quoteCheckingResultWithRange:replacementString:")
+    static func quoteResult(range: NSRange, replacementString: String?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.quote, range) { $0.replacementString = replacementString }
+    }
+
+    @ObjCClassMethod("dashCheckingResultWithRange:replacementString:")
+    static func dashResult(range: NSRange, replacementString: String?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.dash, range) { $0.replacementString = replacementString }
+    }
+
+    @ObjCClassMethod("replacementCheckingResultWithRange:replacementString:")
+    static func replacementResult(range: NSRange, replacementString: String?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.replacement, range) { $0.replacementString = replacementString }
+    }
+
+    @ObjCClassMethod("correctionCheckingResultWithRange:replacementString:")
+    static func correctionResult(range: NSRange, replacementString: String?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.correction, range) { $0.replacementString = replacementString }
+    }
+
+    @ObjCClassMethod("correctionCheckingResultWithRange:replacementString:alternativeStrings:")
+    static func correctionResult(range: NSRange, replacementString: String?, alternativeStrings: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.correction, range) {
+            $0.replacementString = replacementString
+            $0.alternativeStrings = alternativeStrings?.id
+        }
+    }
+
+    /// The first range is the whole match's, the others its groups'.
+    @ObjCClassMethod("regularExpressionCheckingResultWithRanges:count:regularExpression:")
+    static func regularExpressionResult(ranges: UnsafeMutablePointer<NSRange>?, count: UInt,
+                                        regularExpression: ObjCObject?) -> UnsafeMutableRawPointer? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(Regexes.resultClass)) else { return nil }
+        let list = ranges.map { Array(UnsafeBufferPointer(start: $0, count: Int(count))) } ?? []
+        Storage.set(object, CheckingResultStorage(ranges: list, regex: regularExpression?.id))
+        return ObjC.autorelease(object)
+    }
+
+    @ObjCClassMethod("phoneNumberCheckingResultWithRange:phoneNumber:")
+    static func phoneNumberResult(range: NSRange, phoneNumber: String?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.phoneNumber, range) { $0.phoneNumber = phoneNumber }
+    }
+
+    /// The components: NSTextCheckingAirlineKey and NSTextCheckingFlightKey.
+    @ObjCClassMethod("transitInformationCheckingResultWithRange:components:")
+    static func transitResult(range: NSRange, components: ObjCObject?) -> UnsafeMutableRawPointer? {
+        make(CheckingTypes.transitInformation, range) { $0.components = components?.id }
+    }
+
+    // MARK: Properties
+
     /// NSTextCheckingTypeRegularExpression.
     @ObjCMethod("resultType") func resultType() -> UInt64 { storage?.type ?? DataDetectors.regularExpression }
-    @ObjCMethod("URL") func url() -> ObjCObject? { storage?.url.flatMap { URLs.autoreleased($0) }.map(ObjCObject.init) }
+
+    @ObjCMethod("URL")
+    func url() -> UnsafeMutableRawPointer? {
+        guard let storage else { return nil }
+        return storage.urlObject ?? storage.url.flatMap { URLs.autoreleased($0) }
+    }
+
     @ObjCMethod("phoneNumber") func phoneNumber() -> String? { storage?.phoneNumber }
     @ObjCMethod("range") func range() -> NSRange { storage?.ranges.first ?? NSRange(location: notFound, length: 0) }
     @ObjCMethod("numberOfRanges") func numberOfRanges() -> UInt { UInt(storage?.ranges.count ?? 0) }
+    @ObjCMethod("orthography") func orthography() -> UnsafeMutableRawPointer? { storage?.orthography }
+    @ObjCMethod("grammarDetails") func grammarDetails() -> UnsafeMutableRawPointer? { storage?.grammarDetails }
+    @ObjCMethod("date") func date() -> UnsafeMutableRawPointer? { storage?.date }
+    @ObjCMethod("timeZone") func timeZone() -> UnsafeMutableRawPointer? { storage?.timeZone }
+    @ObjCMethod("duration") func duration() -> Double { storage?.duration ?? 0 }
+    /// An address's or transit information's components; nil for others.
+    @ObjCMethod("components") func components() -> UnsafeMutableRawPointer? { storage?.components }
+    @ObjCMethod("addressComponents") func addressComponents() -> UnsafeMutableRawPointer? { storage?.components }
+    @ObjCMethod("replacementString") func replacementString() -> String? { storage?.replacementString }
+    @ObjCMethod("alternativeStrings") func alternativeStrings() -> UnsafeMutableRawPointer? { storage?.alternativeStrings }
 
     @ObjCMethod("rangeAtIndex:")
     func range(at index: UInt) -> NSRange {
-        guard let ranges = storage?.ranges, Int(index) < ranges.count else {
-            foundationFatal("-[NSTextCheckingResult rangeAtIndex:]: index \(index) out of bounds")
+        let ranges = storage?.ranges ?? []
+        guard Int(index) < ranges.count else {
+            Exceptions.raise(name: "NSRangeException", reason: "-[\(CheckingTypes.className(resultType())) rangeAtIndex:]: range index (\(index)) >= number of ranges (\(ranges.count))")
         }
         return ranges[Int(index)]
     }
@@ -395,13 +591,11 @@ public final class NSTextCheckingResult: NSObject {
 
     @ObjCMethod("regularExpression") func regularExpression() -> UnsafeMutableRawPointer? { storage?.regex }
 
+    /// A result of the same type, holding the same things, its ranges moved.
     @ObjCMethod("resultByAdjustingRangesWithOffset:")
     func adjusted(offset: Int) -> UnsafeMutableRawPointer? {
         guard let storage, let object = Storage.allocate(UnsafeMutableRawPointer(Regexes.resultClass)) else { return nil }
-        let ranges = storage.ranges.map {
-            $0.location == notFound ? $0 : NSRange(location: UInt(Int($0.location) + offset), length: $0.length)
-        }
-        Storage.set(object, CheckingResultStorage(ranges: ranges, regex: storage.regex))
+        Storage.set(object, storage.moved(by: offset))
         return ObjC.autorelease(object)
     }
 

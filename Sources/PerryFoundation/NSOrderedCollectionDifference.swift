@@ -136,10 +136,50 @@ public class NSOrderedCollectionDifference: NSObject {
         return self
     }
 
+    /// Insertions of `insertedObjects` at `insertIndexes` and removals of
+    /// `removedObjects` from `removeIndexes`, paired in ascending order.
+    @ObjCMethod("initWithInsertIndexes:insertedObjects:removeIndexes:removedObjects:")
+    func initialize(insertIndexes: UnsafeMutableRawPointer?, insertedObjects: UnsafeMutableRawPointer?,
+                    removeIndexes: UnsafeMutableRawPointer?, removedObjects: UnsafeMutableRawPointer?) -> Self {
+        initialize(insertIndexes: insertIndexes, insertedObjects: insertedObjects, removeIndexes: removeIndexes,
+                   removedObjects: removedObjects, additionalChanges: nil)
+    }
+
+    /// The same, with further changes (NSOrderedCollectionChange objects).
+    @ObjCMethod("initWithInsertIndexes:insertedObjects:removeIndexes:removedObjects:additionalChanges:")
+    func initialize(insertIndexes: UnsafeMutableRawPointer?, insertedObjects: UnsafeMutableRawPointer?,
+                    removeIndexes: UnsafeMutableRawPointer?, removedObjects: UnsafeMutableRawPointer?,
+                    additionalChanges: UnsafeMutableRawPointer?) -> Self {
+        func changes(_ indexes: UnsafeMutableRawPointer?, _ objects: UnsafeMutableRawPointer?, insertion: Bool) -> [id] {
+            guard let indexes else { return [] }
+            let objects = Arrays.elements(objects)
+            return IndexSets.storage(indexes).indexes.enumerated().compactMap { offset, index in
+                NSOrderedCollectionChange.make(object: offset < objects.count ? objects[offset] : nil, isInsertion: insertion, index: index)
+            }
+        }
+        let made = changes(insertIndexes, insertedObjects, insertion: true) + changes(removeIndexes, removedObjects, insertion: false)
+        let all = made + Arrays.elements(additionalChanges)
+        let difference = NSOrderedCollectionDifference.make(changes: all)
+        made.forEach { ObjC.release($0) }
+        if let source = Storage.get(difference, as: DifferenceStorage.self) { Storage.set(objcObject, source) }
+        if let difference { ObjC.release(difference) }
+        return self
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: NSOrderedCollectionDifference.differenceClass)
+    }
+
+    /// A difference of the changes the block returns for each change, the
+    /// removals and then the insertions.
+    @ObjCMethod("differenceByTransformingChangesWithBlock:")
+    func transformingChanges(block: ObjCObject) -> UnsafeMutableRawPointer? {
+        typealias Invoke = @convention(c) (id, id) -> id?
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let changes = (storage.removals + storage.insertions).compactMap { invoke(block.id, $0) }
+        return ObjC.autorelease(NSOrderedCollectionDifference.make(changes: changes))
     }
 
     @ObjCMethod("insertions") func insertions() -> UnsafeMutableRawPointer? { Arrays.autoreleased(storage.insertions) }

@@ -489,6 +489,169 @@ final class NSFileManager: NSObject {
         return Dictionaries.owned(entries)
     }
 
+    // MARK: Comparing, linking and trashing
+
+    /// Whether two items have the same contents: the same bytes for files,
+    /// the same destination for symbolic links, and for directories the
+    /// same names, each with the same contents. An item that isn't there
+    /// equals nothing.
+    @ObjCMethod("contentsEqualAtPath:andPath:")
+    func contentsEqual(atPath first: String?, andPath second: String?) -> Bool {
+        guard let first, let second else { return false }
+        return FileManagers.contentsEqual(first, second)
+    }
+
+    @ObjCMethod("createSymbolicLinkAtURL:withDestinationURL:error:")
+    func createSymbolicLink(at url: NSURL?, withDestinationURL destination: NSURL?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let url, let destination else { return false }
+        // A URL with no scheme is a relative path, which the link keeps.
+        let target = destination.url.scheme == nil ? destination.url.relativePath : FileManagers.path(destination.url)
+        let path = FileManagers.path(url.url)
+        guard symlink(target, path) == 0 else {
+            FileManagers.reportErrno(errorPointer, errno, path)
+            return false
+        }
+        return true
+    }
+
+    /// The deprecated form, with no error.
+    @ObjCMethod("createSymbolicLinkAtPath:pathContent:")
+    func createSymbolicLink(atPath path: String?, pathContent destination: String?) -> Bool {
+        guard let path, let destination else { return false }
+        return symlink(destination, path) == 0
+    }
+
+    @ObjCMethod("pathContentOfSymbolicLinkAtPath:")
+    func pathContentOfSymbolicLink(atPath path: String?) -> String? {
+        guard let path else { return nil }
+        return try? files.destinationOfSymbolicLink(atPath: path)
+    }
+
+    /// The deprecated form of -setAttributes:ofItemAtPath:error:.
+    @ObjCMethod("changeFileAttributes:atPath:")
+    func changeFileAttributes(_ attributes: NSDictionary?, atPath path: String?) -> Bool {
+        setAttributes(attributes, ofItemAtPath: path, error: nil)
+    }
+
+    /// The deprecated form of -attributesOfFileSystemForPath:error:.
+    @ObjCMethod("fileSystemAttributesAtPath:")
+    func fileSystemAttributes(atPath path: String?) -> NSDictionary? { fileSystemAttributes(forPath: path, error: nil) }
+
+    /// A hard link to a file; a directory is made anew, with links to
+    /// what it holds, as Darwin links one.
+    @ObjCMethod("linkItemAtPath:toPath:error:")
+    func linkItem(atPath source: String?, toPath destination: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let source, let destination else { return false }
+        let failure = FileManagers.hardLink(source, destination)
+        guard failure == 0 else {
+            FileManagers.reportErrno(errorPointer, failure, failure == ENOENT ? source : destination)
+            return false
+        }
+        return true
+    }
+
+    @ObjCMethod("linkItemAtURL:toURL:error:")
+    func linkItem(at source: NSURL?, to destination: NSURL?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let source, let destination else { return false }
+        return linkItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
+    }
+
+    @ObjCMethod("linkPath:toPath:handler:")
+    func linkPath(_ source: String?, toPath destination: String?, handler: ObjCObject?) -> Bool {
+        linkItem(atPath: source, toPath: destination, error: nil)
+    }
+
+    /// Moves the item to the Trash in the home directory, under a name of
+    /// its own there ("name 2.ext" when the name is taken).
+    @ObjCMethod("trashItemAtURL:resultingItemURL:error:")
+    func trashItem(at url: NSURL?, resultingItemURL: UnsafeMutablePointer<id?>?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let url, url.url.isFileURL, let trash = FileManagers.directory(102) else { return false }
+        let source = FileManagers.path(url.url)
+        guard access(source, F_OK) == 0 || FileManagers.isSymbolicLink(source) else {
+            FileManagers.reportErrno(errorPointer, ENOENT, source)
+            return false
+        }
+        guard createDirectory(atPath: trash, intermediates: true, attributes: nil, error: errorPointer) else { return false }
+        let name = Paths.lastComponent(source)
+        let ext = Paths.pathExtension(name)
+        let stem = ext.isEmpty ? name : String(name.dropLast(ext.count + 1))
+        var destination = Paths.appending(trash, name)
+        var number = 2
+        while access(destination, F_OK) == 0 || FileManagers.isSymbolicLink(destination) {
+            destination = Paths.appending(trash, "\(stem) \(number)" + (ext.isEmpty ? "" : "." + ext))
+            number += 1
+        }
+        guard moveItem(atPath: source, toPath: destination, error: errorPointer) else { return false }
+        resultingItemURL?.pointee = URLs.autoreleased(URLs.fileURL(destination, isDirectory: nil))
+        return true
+    }
+
+    /// The volumes a person would see, the root first. The keys' values
+    /// aren't fetched ahead: they're read when asked for.
+    @ObjCMethod("mountedVolumeURLsIncludingResourceValuesForKeys:options:")
+    func mountedVolumeURLs(includingResourceValuesForKeys keys: ObjCObject?, options: UInt) -> NSArray? {
+        Arrays.owned(FileVolume.browsable().compactMap { URLs.autoreleased($0.url) })
+    }
+
+    // MARK: iCloud
+
+    /// No file is in iCloud, so none can be shared: Darwin's error for a
+    /// file it can't publish.
+    @ObjCMethod("URLForPublishingUbiquitousItemAtURL:expirationDate:error:")
+    func urlForPublishingUbiquitousItem(at url: NSURL?, expirationDate: UnsafeMutablePointer<id?>?,
+                                        error errorPointer: UnsafeMutablePointer<id?>?) -> NSURL? {
+        let name = url.map { Paths.lastComponent(FileManagers.path($0.url)) } ?? ""
+        errorPointer?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 256, description: "The file “\(name)” couldn’t be opened.")
+        return nil
+    }
+
+    /// Without iCloud nothing can be moved into it
+    /// (NSUbiquitousFileUnavailableError), and nothing is in it to move out.
+    @ObjCMethod("setUbiquitous:itemAtURL:destinationURL:error:")
+    func setUbiquitous(_ flag: Bool, itemAt url: ObjCObject?, destinationURL: ObjCObject?,
+                       error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        if flag {
+            FileManagers.reportNotUbiquitous(errorPointer, url)
+        } else {
+            let name = url.map { Paths.lastComponent(FileManagers.path(URLs.url($0.id))) } ?? ""
+            errorPointer?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 256, description: "The file “\(name)” couldn’t be opened.")
+        }
+        return false
+    }
+
+    /// The error a file that isn't in iCloud gets, autoreleased.
+    private func notUbiquitous(_ url: ObjCObject?) -> id? {
+        var error: id?
+        FileManagers.reportNotUbiquitous(&error, url)
+        return error
+    }
+
+    @ObjCMethod("fetchLatestRemoteVersionOfItemAtURL:completionHandler:")
+    func fetchLatestRemoteVersionOfItem(at url: ObjCObject?, completionHandler: ObjCObject?) {
+        FileServiceCompletions.fail(completionHandler?.id, error: notUbiquitous(url), takesResult: true)
+    }
+
+    @ObjCMethod("uploadLocalVersionOfUbiquitousItemAtURL:withConflictResolutionPolicy:completionHandler:")
+    func uploadLocalVersionOfUbiquitousItem(at url: ObjCObject?, withConflictResolutionPolicy policy: Int, completionHandler: ObjCObject?) {
+        FileServiceCompletions.fail(completionHandler?.id, error: notUbiquitous(url), takesResult: true)
+    }
+
+    @ObjCMethod("pauseSyncForUbiquitousItemAtURL:completionHandler:")
+    func pauseSyncForUbiquitousItem(at url: ObjCObject?, completionHandler: ObjCObject?) {
+        FileServiceCompletions.fail(completionHandler?.id, error: notUbiquitous(url), takesResult: false)
+    }
+
+    @ObjCMethod("resumeSyncForUbiquitousItemAtURL:withBehavior:completionHandler:")
+    func resumeSyncForUbiquitousItem(at url: ObjCObject?, withBehavior behavior: Int, completionHandler: ObjCObject?) {
+        FileServiceCompletions.fail(completionHandler?.id, error: notUbiquitous(url), takesResult: false)
+    }
+
+    /// No file provider has the file: the handler gets Darwin's error.
+    @ObjCMethod("getFileProviderServicesForItemAtURL:completionHandler:")
+    func getFileProviderServicesForItem(at url: NSURL?, completionHandler: ObjCObject?) {
+        FileServiceCompletions.fail(completionHandler?.id, error: FileServiceCompletions.noFileProvider(url?.url), takesResult: true)
+    }
+
     // MARK: Standard directories
 
     /// NSSearchPathDirectory in NSUserDomainMask: one URL, in the home directory.
@@ -616,6 +779,67 @@ extension FileManagers {
         let name = url.map { path(URLs.url($0.id)) } ?? ""
         error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4353,
                                              description: "The file “\(name.split(separator: "/").last.map(String.init) ?? name)” is not available in iCloud.")
+    }
+
+    /// A failed call's errno as Foundation's file error:
+    /// NSFileWriteFileExistsError (516), NSFileReadNoSuchFileError (260),
+    /// NSFileWriteNoPermissionError (513), NSFileWriteOutOfSpaceError (640),
+    /// else NSFileWriteUnknownError (512).
+    static func reportErrno(_ error: UnsafeMutablePointer<id?>?, _ code: Int32, _ path: String) {
+        let cocoa: Int
+        switch code {
+        case EEXIST: cocoa = 516
+        case ENOENT: cocoa = 260
+        case EACCES, EPERM, EROFS: cocoa = 513
+        case ENOSPC: cocoa = 640
+        default: cocoa = 512
+        }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: cocoa,
+                                             description: "The operation couldn’t be completed. (\(path))")
+    }
+
+    static func isSymbolicLink(_ path: String) -> Bool {
+        var info = stat()
+        return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFLNK
+    }
+
+    /// Links `destination` to `source`'s file, or makes a directory of
+    /// links for a directory; 0, or the errno that stopped it.
+    static func hardLink(_ source: String, _ destination: String) -> Int32 {
+        var info = stat()
+        guard lstat(source, &info) == 0 else { return errno }
+        guard info.st_mode & S_IFMT == S_IFDIR else { return Glibc.link(source, destination) == 0 ? 0 : errno }
+        guard mkdir(destination, info.st_mode & 0o7777) == 0 else { return errno }
+        for name in ((try? FileManager.default.contentsOfDirectory(atPath: source)) ?? []).sorted() {
+            let failure = hardLink(Paths.appending(source, name), Paths.appending(destination, name))
+            if failure != 0 { return failure }
+        }
+        return 0
+    }
+
+    /// Whether two items' contents are the same.
+    static func contentsEqual(_ first: String, _ second: String) -> Bool {
+        var a = stat(), b = stat()
+        guard lstat(first, &a) == 0, lstat(second, &b) == 0 else { return false }
+        if first == second { return true }
+        let type = a.st_mode & S_IFMT
+        guard type == b.st_mode & S_IFMT else { return false }
+        switch type {
+        case S_IFREG:
+            guard a.st_size == b.st_size else { return false }
+            if a.st_dev == b.st_dev && a.st_ino == b.st_ino { return true }
+            return FileManager.default.contents(atPath: first) == FileManager.default.contents(atPath: second)
+        case S_IFLNK:
+            let files = FileManager.default
+            return (try? files.destinationOfSymbolicLink(atPath: first)) == (try? files.destinationOfSymbolicLink(atPath: second))
+        case S_IFDIR:
+            let firstNames = ((try? FileManager.default.contentsOfDirectory(atPath: first)) ?? []).sorted()
+            let secondNames = ((try? FileManager.default.contentsOfDirectory(atPath: second)) ?? []).sorted()
+            guard firstNames == secondNames else { return false }
+            return firstNames.allSatisfy { contentsEqual(Paths.appending(first, $0), Paths.appending(second, $0)) }
+        default:
+            return a.st_rdev == b.st_rdev
+        }
     }
 
     /// Reports a failure as Foundation does: an NSError in the Cocoa domain.

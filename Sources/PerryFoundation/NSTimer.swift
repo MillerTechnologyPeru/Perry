@@ -191,6 +191,24 @@ public final class NSTimer: NSObject {
                                             block: block)))
     }
 
+    /// A timer that invokes the invocation, which it retains, as its
+    /// message: the invocation's target and selector are the timer's.
+    private static func make(_ interval: Double, invocation: ObjCObject, repeats: Bool) -> TimerStorage {
+        _ = ObjC.send(invocation.id, ObjC.selector("retainArguments"))
+        return TimerStorage(fireDate: absoluteTimeNow() + interval, interval: Timers.clamp(interval), repeats: repeats,
+                            target: invocation.id, selector: ObjC.selector("invoke"), userInfo: nil, block: nil)
+    }
+
+    @ObjCClassMethod("scheduledTimerWithTimeInterval:invocation:repeats:")
+    static func scheduled(interval: Double, invocation: ObjCObject, repeats: Bool) -> NSTimer {
+        Timers.schedule(make(interval, invocation: invocation, repeats: repeats))
+    }
+
+    @ObjCClassMethod("timerWithTimeInterval:invocation:repeats:")
+    static func timer(interval: Double, invocation: ObjCObject, repeats: Bool) -> NSTimer {
+        NSTimer(objCOwned: Timers.make(make(interval, invocation: invocation, repeats: repeats)))
+    }
+
     // MARK: Initializers, for timers allocated and then added to a run loop
 
     @ObjCMethod("initWithFireDate:interval:repeats:block:")

@@ -430,68 +430,173 @@ public final class NSConnection: NSObject {
 
 /// Byte counts as people read them: "12 bytes", "1.2 MB", "3 GB", in
 /// powers of 1000 (file and decimal styles) or 1024 (memory and binary).
-@ObjCClass("NSByteCountFormatter")
-public final class NSByteCountFormatter: NSFormatter {
+/// The unit is the largest allowed that there is one of, once rounded to
+/// three digits; adaptive formatting writes kilobytes whole, megabytes
+/// with one fraction digit and larger units with two, rounding half up, as
+/// on Darwin. The units' names are English.
+final class ByteCountFormatterStorage {
     var countStyle = 0
+    var allowedUnits: UInt = 0
     var allowsNonnumeric = true
     var includesUnit = true
     var includesCount = true
+    var includesActualByteCount = false
     var adaptive = true
+    var zeroPadsFractionDigits = false
+    var formattingContext = 0
+}
+
+@ObjCClass("NSByteCountFormatter")
+public final class NSByteCountFormatter: NSFormatter {
+    nonisolated(unsafe) static var formatterClass: Class!
+
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        formatterClass = cls.storage
+    }
+
+    /// The settings, kept with the object: the formatter isn't a Swift
+    /// peer, so stored properties wouldn't last from one message to the next.
+    var settings: ByteCountFormatterStorage {
+        if let settings = Storage.get(objcObject, as: ByteCountFormatterStorage.self) { return settings }
+        let settings = ByteCountFormatterStorage()
+        Storage.set(objcObject, settings)
+        return settings
+    }
+
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        _ = settings
+        return self
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: NSByteCountFormatter.formatterClass)
+    }
 
     @ObjCClassMethod("stringFromByteCount:countStyle:")
     static func string(fromByteCount count: Int64, countStyle: Int) -> String { format(count, style: countStyle) }
 
-    static func format(_ count: Int64, style: Int, includesUnit: Bool = true, includesCount: Bool = true,
-                       allowsNonnumeric: Bool = true) -> String {
-        if count == 0 && allowsNonnumeric && includesCount { return includesUnit ? "Zero KB" : "Zero" }
-        let base: Double = style == 2 || style == 3 ? 1024 : 1000
-        let units = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
-        var value = Double(count.magnitude)
-        var unit = 0
-        while value >= base && unit < units.count - 1 {
-            value /= base
-            unit += 1
+    /// NSByteCountFormatterUnits' units, smallest first; the last,
+    /// yottabytes, stands for all from it up.
+    private static let unitNames = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+
+    static func format(_ count: Int64, style: Int, allowedUnits: UInt = 0, includesUnit: Bool = true, includesCount: Bool = true,
+                       allowsNonnumeric: Bool = true, includesActualByteCount: Bool = false, adaptive: Bool = true,
+                       zeroPads: Bool = false) -> String {
+        if count == 0 && allowsNonnumeric && includesCount && includesUnit {
+            // Bytes when they're among a choice of units, else kilobytes.
+            return allowedUnits & 1 != 0 && allowedUnits != 0xFFFF ? "Zero bytes" : "Zero KB"
         }
-        let sign = count < 0 ? "-" : ""
+        let allowed = allowedUnits == 0 ? 0xFFFF : allowedUnits
+        var units = (0..<unitNames.count).filter { $0 == 8 ? allowed & 0xFF00 != 0 : allowed & (1 << UInt($0)) != 0 }
+        if units.isEmpty { units = [0] }
+        let base: Double = style == 1 || style == 3 ? 1024 : 1000
+        let magnitude = Double(count.magnitude)
+        var unit = units[0]
+        for candidate in units where magnitude / pow(base, Double(candidate)) >= 0.9995 { unit = candidate }
+        let name = unit == 0 && count.magnitude == 1 ? "byte" : unitNames[unit]
         let number: String
         if unit == 0 {
-            number = "\(count)"
+            number = NumberFormatterStorage.roundingHalfUp(fractionDigits: (0, 0)).string(from: Numbers.make(nil, .signed(count))!) ?? "\(count)"
         } else {
-            let digits = unit == 1 ? 0 : value < 10 ? 1 : 0
-            let rounded = (value * pow(10, Double(digits))).rounded() / pow(10, Double(digits))
-            number = sign + (digits == 0 ? "\(Int(rounded))" : "\(rounded)")
+            let value = Double(count) / pow(base, Double(unit))
+            let formatter: NumberFormatterStorage
+            if adaptive {
+                let digits = unit == 1 ? 0 : unit == 2 ? 1 : 2
+                formatter = .roundingHalfUp(fractionDigits: (zeroPads ? digits : 0, digits))
+            } else {
+                formatter = .roundingHalfUp(significantDigits: (zeroPads ? 3 : 1, 3))
+            }
+            number = formatter.string(fromDouble: value)
         }
-        let name = unit == 0 && count.magnitude == 1 ? "byte" : units[unit]
+        var text: String
         switch (includesCount, includesUnit) {
-        case (true, true): return number + " " + name
-        case (true, false): return number
-        case (false, _): return name
+        case (true, true): text = number + " " + name
+        case (true, false): text = number
+        case (false, _): text = name
         }
+        if includesActualByteCount && unit != 0 {
+            let exact = NumberFormatterStorage.roundingHalfUp(fractionDigits: (0, 0)).string(from: Numbers.make(nil, .signed(count))!) ?? "\(count)"
+            text += " (" + exact + (count.magnitude == 1 ? " byte)" : " bytes)")
+        }
+        return text
     }
 
     @ObjCMethod("stringFromByteCount:")
     func string(fromByteCount count: Int64) -> String {
-        NSByteCountFormatter.format(count, style: countStyle, includesUnit: includesUnit, includesCount: includesCount,
-                                    allowsNonnumeric: allowsNonnumeric)
+        let current = settings
+        return NSByteCountFormatter.format(count, style: current.countStyle, allowedUnits: current.allowedUnits,
+                                           includesUnit: current.includesUnit, includesCount: current.includesCount,
+                                           allowsNonnumeric: current.allowsNonnumeric,
+                                           includesActualByteCount: current.includesActualByteCount, adaptive: current.adaptive,
+                                           zeroPads: current.zeroPadsFractionDigits)
     }
 
+    /// An information storage measurement's whole bytes.
+    private static func byteCount(of measurement: id) -> Int64 {
+        let data = Units.measurement(measurement)
+        let bytes = data.unit.map { Units.baseValue(data.value, of: $0) } ?? data.value
+        guard bytes.isFinite else { return 0 }
+        return Int64(max(min(bytes, 9.2e18), -9.2e18).rounded(.towardZero))
+    }
+
+    @ObjCClassMethod("stringFromMeasurement:countStyle:")
+    static func string(fromMeasurement measurement: ObjCObject, countStyle: Int) -> String {
+        format(byteCount(of: measurement.objcObject), style: countStyle)
+    }
+
+    @ObjCMethod("stringFromMeasurement:")
+    func string(fromMeasurement measurement: ObjCObject) -> String {
+        string(fromByteCount: NSByteCountFormatter.byteCount(of: measurement.objcObject))
+    }
+
+    /// Numbers as byte counts, and information storage measurements; nil
+    /// for anything else.
     @ObjCMethod("stringForObjectValue:")
     override func formatterString(forObjectValue value: ObjCObject?) -> String? {
         guard let value else { return nil }
+        if let measurement = Units.measurementClass, ObjC.isKind(value.id, of: measurement) {
+            return string(fromMeasurement: value)
+        }
+        guard ObjC.isKind(value.id, of: Numbers.numberClass) else { return nil }
         typealias Fn = @convention(c) (id?, SEL) -> Int64
         return string(fromByteCount: unsafeBitCast(ObjC.msgSend, to: Fn.self)(value.id, ObjC.selector("longLongValue")))
     }
 
-    @ObjCMethod("countStyle") func countStyleValue() -> Int { countStyle }
-    @ObjCMethod("setCountStyle:") func setCountStyle(_ value: Int) { countStyle = value }
-    @ObjCMethod("allowsNonnumericFormatting") func allowsNonnumericFormatting() -> Bool { allowsNonnumeric }
-    @ObjCMethod("setAllowsNonnumericFormatting:") func setAllowsNonnumericFormatting(_ value: Bool) { allowsNonnumeric = value }
-    @ObjCMethod("includesUnit") func includesUnitValue() -> Bool { includesUnit }
-    @ObjCMethod("setIncludesUnit:") func setIncludesUnit(_ value: Bool) { includesUnit = value }
-    @ObjCMethod("includesCount") func includesCountValue() -> Bool { includesCount }
-    @ObjCMethod("setIncludesCount:") func setIncludesCount(_ value: Bool) { includesCount = value }
-    @ObjCMethod("isAdaptive") func isAdaptive() -> Bool { adaptive }
-    @ObjCMethod("setAdaptive:") func setAdaptive(_ value: Bool) { adaptive = value }
-    @ObjCMethod("allowedUnits") func allowedUnits() -> UInt { 0 }
-    @ObjCMethod("setAllowedUnits:") func setAllowedUnits(_ value: UInt) {}
+    @ObjCMethod("countStyle") func countStyleValue() -> Int { settings.countStyle }
+    @ObjCMethod("setCountStyle:") func setCountStyle(_ value: Int) { settings.countStyle = value }
+    @ObjCMethod("allowsNonnumericFormatting") func allowsNonnumericFormatting() -> Bool { settings.allowsNonnumeric }
+    @ObjCMethod("setAllowsNonnumericFormatting:") func setAllowsNonnumericFormatting(_ value: Bool) { settings.allowsNonnumeric = value }
+    @ObjCMethod("includesUnit") func includesUnitValue() -> Bool { settings.includesUnit }
+    @ObjCMethod("setIncludesUnit:") func setIncludesUnit(_ value: Bool) { settings.includesUnit = value }
+    @ObjCMethod("includesCount") func includesCountValue() -> Bool { settings.includesCount }
+    @ObjCMethod("setIncludesCount:") func setIncludesCount(_ value: Bool) { settings.includesCount = value }
+    /// Whether a count in a larger unit adds its bytes: "1.2 MB (1,234,567 bytes)".
+    @ObjCMethod("includesActualByteCount") func includesActualByteCountValue() -> Bool { settings.includesActualByteCount }
+    @ObjCMethod("setIncludesActualByteCount:")
+    func setIncludesActualByteCount(_ value: Bool) { settings.includesActualByteCount = value }
+    /// Whether the fraction digits depend on the unit; otherwise three
+    /// significant digits.
+    @ObjCMethod("isAdaptive") func isAdaptive() -> Bool { settings.adaptive }
+    @ObjCMethod("setAdaptive:") func setAdaptive(_ value: Bool) { settings.adaptive = value }
+    /// Whether trailing zeros stay: "1.0 MB".
+    @ObjCMethod("zeroPadsFractionDigits") func zeroPadsFractionDigitsValue() -> Bool { settings.zeroPadsFractionDigits }
+    @ObjCMethod("setZeroPadsFractionDigits:") func setZeroPadsFractionDigits(_ value: Bool) { settings.zeroPadsFractionDigits = value }
+    /// NSByteCountFormatterUnits; 0 for any.
+    @ObjCMethod("allowedUnits") func allowedUnits() -> UInt { settings.allowedUnits }
+    @ObjCMethod("setAllowedUnits:") func setAllowedUnits(_ value: UInt) { settings.allowedUnits = value }
+    /// Kept: English unit names don't change with it.
+    @ObjCMethod("formattingContext") func formattingContextValue() -> Int { settings.formattingContext }
+    @ObjCMethod("setFormattingContext:") func setFormattingContext(_ value: Int) { settings.formattingContext = value }
+
+    /// Byte counts aren't parsed, on Darwin either.
+    @ObjCMethod("getObjectValue:forString:errorDescription:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                        errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        value?.pointee = nil
+        return false
+    }
 }

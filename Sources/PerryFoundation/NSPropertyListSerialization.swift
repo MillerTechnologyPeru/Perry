@@ -684,6 +684,36 @@ public final class NSPropertyListSerialization: NSObject {
         return PropertyLists.object(value, mutability: options)
     }
 
+    /// Writes the property list to an open stream with -write:maxLength:;
+    /// the bytes written, or 0 and the error. The OpenStep format, which
+    /// is read only, raises, as on Darwin.
+    @ObjCClassMethod("writePropertyList:toStream:format:options:error:")
+    static func write(_ plist: ObjCObject?, toStream stream: ObjCObject?, format: UInt, options: UInt,
+                      error: UnsafeMutablePointer<id?>?) -> Int {
+        guard format == PropertyLists.xml || format == PropertyLists.binary else {
+            Exceptions.raise(name: "NSInvalidArgumentException", reason: "Invalid property list format")
+        }
+        guard let value = PropertyLists.value(plist?.id) else {
+            error?.pointee = Self.error(3851, "Property list invalid for format: \(format)")
+            return 0
+        }
+        let bytes = format == PropertyLists.binary ? PropertyLists.binary(value) : Array(PropertyLists.xml(value).utf8)
+        typealias Write = @convention(c) (id?, SEL, UnsafePointer<UInt8>, UInt) -> Int
+        let write = unsafeBitCast(ObjC.msgSend, to: Write.self)
+        var written = 0
+        while written < bytes.count, let stream = stream?.id {
+            let count = bytes.withUnsafeBufferPointer {
+                write(stream, ObjC.selector("write:maxLength:"), $0.baseAddress! + written, UInt(bytes.count - written))
+            }
+            guard count > 0 else {
+                error?.pointee = Self.error(3852, "The stream couldn’t be written to.")    // NSPropertyListWriteStreamError
+                return 0
+            }
+            written += count
+        }
+        return written
+    }
+
     @ObjCClassMethod("propertyList:isValidForFormat:")
     static func isValid(_ plist: ObjCObject?, for format: UInt) -> Bool {
         format != PropertyLists.openStep && PropertyLists.value(plist?.id) != nil
@@ -712,6 +742,14 @@ final class ArchiverStorage {
     var fields: [[String: ArchiveValue]] = []
     var uids: [UnsafeMutableRawPointer: Int] = [:]
     var classUIDs: [[String]: Int] = [:]
+    /// The UIDs set aside for objects only encoded conditionally so far:
+    /// filled when one is encoded, and dropped as $null when the archive is
+    /// finished if it never was.
+    var conditionals: [UnsafeMutableRawPointer: Int] = [:]
+    /// -setClassName:forClass:'s names for this archiver.
+    var classNames: [String: String] = [:]
+    /// The NSKeyedArchiverDelegate, not retained.
+    var delegate: id?
     var requiresSecureCoding: Bool
     var format = PropertyLists.binary
     var encoded: id?
@@ -739,6 +777,38 @@ final class ArchiverStorage {
         return objects.count - 1
     }
 
+    /// The name a class is archived under: this archiver's, then every
+    /// archiver's, then its own.
+    func archivedName(_ name: String) -> String {
+        classNames[name] ?? Archivers.classNames[name] ?? name
+    }
+
+    /// Drops the UIDs of objects only ever encoded conditionally: their
+    /// references become $null and the objects after them move down.
+    func dropConditionals() {
+        let unfilled = Set(conditionals.values)
+        conditionals = [:]
+        guard !unfilled.isEmpty else { return }
+        var mapping = [Int](repeating: 0, count: objects.count)
+        var next = 0
+        for index in objects.indices where !unfilled.contains(index) {
+            mapping[index] = next
+            next += 1
+        }
+        func remap(_ value: ArchiveValue) -> ArchiveValue {
+            switch value {
+            case .uid(let index): return .uid(index < mapping.count && !unfilled.contains(index) ? mapping[index] : 0)
+            case .array(let values): return .array(values.map(remap))
+            case .dictionary(let entries): return .dictionary(entries.mapValues(remap))
+            default: return value
+            }
+        }
+        objects = objects.indices.filter { !unfilled.contains($0) }.map { remap(objects[$0]) }
+        top = top.mapValues(remap)
+        uids = uids.mapValues { mapping[$0] }
+        classUIDs = classUIDs.mapValues { mapping[$0] }
+    }
+
     var archive: ArchiveValue {
         .dictionary(["$archiver": .string("NSKeyedArchiver"), "$objects": .array(objects), "$top": .dictionary(top),
                      "$version": .integer(100000)])
@@ -747,6 +817,8 @@ final class ArchiverStorage {
 
 enum Archivers {
     nonisolated(unsafe) static var archiverClass: Class!
+    /// +setClassName:forClass:'s names, for every archiver.
+    nonisolated(unsafe) static var classNames: [String: String] = [:]
 
     static func storage(_ object: id?) -> ArchiverStorage? { Storage.get(object, as: ArchiverStorage.self) }
 
@@ -761,19 +833,53 @@ enum Archivers {
         return names
     }
 
+    /// The delegate's method, when it has it.
+    private static func delegate(_ storage: ArchiverStorage, _ name: String) -> (id, SEL)? {
+        let selector = ObjC.selector(name)
+        guard let delegate = storage.delegate, KeyValueCoding.responds(delegate, selector) else { return nil }
+        return (delegate, selector)
+    }
+
     /// Encodes an object, returning its UID.
     static func encode(_ original: id?, in archiver: id, storage: ArchiverStorage) -> ArchiveValue {
         guard let original else { return .uid(0) }
         if let uid = storage.uids[original] { return .uid(uid) }
+        // A UID set aside when the object was encoded conditionally.
+        let reserved = storage.conditionals.removeValue(forKey: original)
         // What the object archives as: the object it answers
         // -replacementObjectForKeyedArchiver: with (Interface Builder's
-        // objects substitute their runtime counterparts), encoded once.
-        let object = original
-        if let replaced = ObjC.send(original, ObjC.selector("replacementObjectForKeyedArchiver:"), archiver), replaced != original {
-            let value = encode(replaced, in: archiver, storage: storage)
-            if case .uid(let uid) = value { storage.uids[original] = uid }
-            return value
+        // objects substitute their runtime counterparts), then the one the
+        // delegate gives, encoded once.
+        var object = original
+        if let replaced = ObjC.send(original, ObjC.selector("replacementObjectForKeyedArchiver:"), archiver) {
+            object = replaced
         }
+        if case let (delegate, selector)? = self.delegate(storage, "archiver:willEncodeObject:") {
+            guard let replaced = ObjC.send(delegate, selector, archiver, object) else {
+                if let reserved { storage.conditionals[original] = reserved }
+                return .uid(0)
+            }
+            if replaced != object, case let (delegate, selector)? = self.delegate(storage, "archiver:willReplaceObject:withObject:") {
+                typealias F = @convention(c) (id?, SEL, id?, id?, id?) -> Void
+                unsafeBitCast(ObjC.msgSend, to: F.self)(delegate, selector, archiver, object, replaced)
+            }
+            object = replaced
+        }
+        if object != original {
+            if let uid = storage.uids[object] {
+                storage.uids[original] = uid
+                return .uid(uid)
+            }
+        }
+        let index: Int
+        if let reserved {
+            index = reserved
+        } else {
+            index = storage.objects.count
+            storage.objects.append(.null)
+        }
+        storage.uids[original] = index
+        storage.uids[object] = index
         // Plain values sit in $objects as themselves.
         let plain: ArchiveValue?
         if ObjC.isKind(object, of: Numbers.numberClass) {
@@ -786,19 +892,28 @@ enum Archivers {
             plain = nil
         }
         if let plain {
-            storage.objects.append(plain)
-            storage.uids[object] = storage.objects.count - 1
-            return .uid(storage.objects.count - 1)
+            storage.objects[index] = plain
+        } else {
+            storage.fields.append([:])
+            let names = contents(object, in: archiver, storage: storage)
+            var fields = storage.fields.removeLast()
+            fields["$class"] = .uid(storage.classUID(names.map(storage.archivedName)))
+            storage.objects[index] = .dictionary(fields)
         }
-        let index = storage.objects.count
-        storage.objects.append(.null)
-        storage.uids[object] = index
-        storage.fields.append([:])
-        let names = contents(object, in: archiver, storage: storage)
-        var fields = storage.fields.removeLast()
-        fields["$class"] = .uid(storage.classUID(names))
-        storage.objects[index] = .dictionary(fields)
+        if case let (delegate, selector)? = self.delegate(storage, "archiver:didEncodeObject:") {
+            _ = ObjC.send(delegate, selector, archiver, object)
+        }
         return .uid(index)
+    }
+
+    /// An object's UID if it is encoded unconditionally somewhere; until
+    /// then one set aside for it.
+    static func encodeConditional(_ object: id?, storage: ArchiverStorage) -> ArchiveValue {
+        guard let object else { return .uid(0) }
+        if let uid = storage.uids[object] ?? storage.conditionals[object] { return .uid(uid) }
+        storage.objects.append(.null)
+        storage.conditionals[object] = storage.objects.count - 1
+        return .uid(storage.objects.count - 1)
     }
 
     /// Encodes an object's contents into the current fields; its class
@@ -846,10 +961,7 @@ enum Archivers {
         // -classForKeyedArchiver (a key-value observed object as its own class).
         let cls = ObjC.send(object, ObjC.selector("classForKeyedArchiver")).map { $0.assumingMemoryBound(to: perry_class_storage.self) }
             ?? ObjC.objectGetClass(object)!
-        if storage.requiresSecureCoding,
-           !ObjC.sendBool(UnsafeMutableRawPointer(cls), ObjC.selector("respondsToSelector:"),
-                          UnsafeMutableRawPointer(mutating: ObjC.selector("supportsSecureCoding")))
-            || !ObjC.sendBool(UnsafeMutableRawPointer(cls), ObjC.selector("supportsSecureCoding"), nil) {
+        if storage.requiresSecureCoding, !Unarchivers.supportsSecureCoding(UnsafeMutableRawPointer(cls)) {
             if storage.failure == nil {
                 storage.failure = ObjC.retain(Errors.make(domain: Errors.cocoaDomain, code: 4866, entries: [
                     ("NSDebugDescription", Strings.autoreleased("This coder requires that classes conform to NSSecureCoding"))]))
@@ -859,15 +971,41 @@ enum Archivers {
         return hierarchy(cls)
     }
 
-    /// The archive's bytes in the archiver's format.
-    static func finish(_ storage: ArchiverStorage) -> id {
+    /// The archive's bytes in the archiver's format, made once: the
+    /// delegate is told before and after.
+    static func finish(_ storage: ArchiverStorage, archiver: id?) -> id {
         if let encoded = storage.encoded { return encoded }
+        if let archiver, case let (delegate, selector)? = self.delegate(storage, "archiverWillFinish:") {
+            _ = ObjC.send(delegate, selector, archiver)
+        }
+        storage.dropConditionals()
         let bytes = storage.format == PropertyLists.xml ? Array(PropertyLists.xml(storage.archive).utf8)
                                                         : PropertyLists.binary(storage.archive)
         let data = DataObjects.autoreleased(Data(bytes))!
         storage.encoded = ObjC.retain(data)
         if let output = storage.output { _ = ObjC.send(output, ObjC.selector("setData:"), data) }
+        if let archiver, case let (delegate, selector)? = self.delegate(storage, "archiverDidFinish:") {
+            _ = ObjC.send(delegate, selector, archiver)
+        }
         return data
+    }
+
+    /// A scalar of the type an Objective-C type encoding names, at
+    /// `address`, as an archive value; nil for another type.
+    static func scalar(_ type: UInt8, at address: UnsafeRawPointer) -> ArchiveValue? {
+        switch type {
+        case UInt8(ascii: "c"): return .integer(Int64(address.loadUnaligned(as: Int8.self)))
+        case UInt8(ascii: "C"), UInt8(ascii: "B"): return .integer(Int64(address.loadUnaligned(as: UInt8.self)))
+        case UInt8(ascii: "s"): return .integer(Int64(address.loadUnaligned(as: Int16.self)))
+        case UInt8(ascii: "S"): return .integer(Int64(address.loadUnaligned(as: UInt16.self)))
+        case UInt8(ascii: "i"), UInt8(ascii: "l"): return .integer(Int64(address.loadUnaligned(as: Int32.self)))
+        case UInt8(ascii: "I"), UInt8(ascii: "L"): return .integer(Int64(address.loadUnaligned(as: UInt32.self)))
+        case UInt8(ascii: "q"): return .integer(address.loadUnaligned(as: Int64.self))
+        case UInt8(ascii: "Q"): return .integer(Int64(bitPattern: address.loadUnaligned(as: UInt64.self)))
+        case UInt8(ascii: "f"): return .real(Double(address.loadUnaligned(as: Float.self)))
+        case UInt8(ascii: "d"): return .real(address.loadUnaligned(as: Double.self))
+        default: return nil
+        }
     }
 }
 
@@ -893,9 +1031,10 @@ public class NSKeyedArchiver: NSCoder {
         ObjC.superDealloc(objcObject, from: Archivers.archiverClass)
     }
 
+    /// Not requiring secure coding, as Darwin's -init.
     @ObjCMethod("init")
     func initialize() -> Self {
-        Storage.set(objcObject, ArchiverStorage(requiresSecureCoding: true))
+        Storage.set(objcObject, ArchiverStorage(requiresSecureCoding: false))
         return self
     }
 
@@ -925,7 +1064,7 @@ public class NSKeyedArchiver: NSCoder {
             error?.pointee = ObjC.autorelease(ObjC.retain(failure))
             return nil
         }
-        return Archivers.finish(storage)
+        return Archivers.finish(storage, archiver: archiver)
     }
 
     @ObjCClassMethod("archivedDataWithRootObject:")
@@ -940,26 +1079,54 @@ public class NSKeyedArchiver: NSCoder {
         return FileManager.default.createFile(atPath: path, contents: DataObjects.data(data))
     }
 
+    /// Every archiver's name for a class, or nil to archive it under its own.
+    @ObjCClassMethod("setClassName:forClass:")
+    static func setClassName(_ name: String?, forClass cls: UnsafeMutableRawPointer?) {
+        guard let cls else { return }
+        Archivers.classNames[ObjC.name(ofClass: cls)] = name
+    }
+
+    @ObjCClassMethod("classNameForClass:")
+    static func className(forClass cls: UnsafeMutableRawPointer?) -> String? {
+        cls.flatMap { Archivers.classNames[ObjC.name(ofClass: $0)] }
+    }
+
+    /// This archiver's name for a class, ahead of every archiver's.
+    @ObjCMethod("setClassName:forClass:")
+    func setClassName(_ name: String?, forClass cls: UnsafeMutableRawPointer?) {
+        guard let cls else { return }
+        storage.classNames[ObjC.name(ofClass: cls)] = name
+    }
+
+    /// This archiver's own name for the class only; nil if it has none.
+    @ObjCMethod("classNameForClass:")
+    func className(forClass cls: UnsafeMutableRawPointer?) -> String? {
+        cls.flatMap { storage.classNames[ObjC.name(ofClass: $0)] }
+    }
+
     @ObjCMethod("requiresSecureCoding") override func requiresSecureCoding() -> Bool { storage.requiresSecureCoding }
     @ObjCMethod("setRequiresSecureCoding:") func setRequiresSecureCoding(_ value: Bool) { storage.requiresSecureCoding = value }
     @ObjCMethod("allowsKeyedCoding") override func allowsKeyedCoding() -> Bool { true }
     @ObjCMethod("outputFormat") func outputFormat() -> UInt { storage.format }
     @ObjCMethod("setOutputFormat:") func setOutputFormat(_ format: UInt) { storage.format = format }
-    @ObjCMethod("finishEncoding") func finishEncoding() { _ = Archivers.finish(storage) }
-    @ObjCMethod("encodedData") func encodedData() -> UnsafeMutableRawPointer { Archivers.finish(storage) }
+    @ObjCMethod("finishEncoding") func finishEncoding() { _ = Archivers.finish(storage, archiver: objcObject) }
+    @ObjCMethod("encodedData") func encodedData() -> UnsafeMutableRawPointer { Archivers.finish(storage, archiver: objcObject) }
     @ObjCMethod("error") func error() -> UnsafeMutableRawPointer? { storage.failure }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: ObjCObject?) {}
-    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { nil }
+    /// The NSKeyedArchiverDelegate, not retained, told of each object
+    /// encoded and of the finish.
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: UnsafeMutableRawPointer?) { storage.delegate = delegate }
+    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { storage.delegate }
 
     @ObjCMethod("encodeObject:forKey:")
     func encode(_ object: ObjCObject?, forKey key: String) {
         storage.set(key, Archivers.encode(object?.id, in: objcObject, storage: storage))
     }
 
-    /// Only an object encoded elsewhere is referred to; otherwise nil.
+    /// An object encoded unconditionally somewhere in the archive, before
+    /// or after, is referred to; otherwise nil is.
     @ObjCMethod("encodeConditionalObject:forKey:")
     func encodeConditional(_ object: ObjCObject?, forKey key: String) {
-        storage.set(key, .uid(object.flatMap { storage.uids[$0.id] } ?? 0))
+        storage.set(key, Archivers.encodeConditional(object?.id, storage: storage))
     }
 
     @ObjCMethod("encodeRootObject:")
@@ -973,34 +1140,70 @@ public class NSKeyedArchiver: NSCoder {
     }
 
     @ObjCMethod("encodeObject:") func encode(_ object: ObjCObject?) { encode(object, forKey: nextKey()) }
+    @ObjCMethod("encodeConditionalObject:") func encodeConditional(_ object: ObjCObject?) { encodeConditional(object, forKey: nextKey()) }
 
     /// A value of the scalar types an Objective-C type encoding names, a
-    /// C string, or an object.
+    /// C string, an object, or a C array of them.
     @ObjCMethod("encodeValueOfObjCType:at:")
     func encodeValue(ofObjCType type: UnsafePointer<CChar>?, at address: UnsafeRawPointer?) {
         guard let type, let address else { return }
-        let key = nextKey()
-        switch UInt8(bitPattern: type.pointee) {
-        case UInt8(ascii: "c"): storage.set(key, .integer(Int64(address.load(as: Int8.self))))
-        case UInt8(ascii: "C"), UInt8(ascii: "B"): storage.set(key, .integer(Int64(address.load(as: UInt8.self))))
-        case UInt8(ascii: "s"): storage.set(key, .integer(Int64(address.load(as: Int16.self))))
-        case UInt8(ascii: "S"): storage.set(key, .integer(Int64(address.load(as: UInt16.self))))
-        case UInt8(ascii: "i"): storage.set(key, .integer(Int64(address.load(as: Int32.self))))
-        case UInt8(ascii: "I"): storage.set(key, .integer(Int64(address.load(as: UInt32.self))))
-        case UInt8(ascii: "l"), UInt8(ascii: "q"): storage.set(key, .integer(address.load(as: Int64.self)))
-        case UInt8(ascii: "L"), UInt8(ascii: "Q"): storage.set(key, .integer(Int64(bitPattern: address.load(as: UInt64.self))))
-        case UInt8(ascii: "f"): storage.set(key, .real(Double(address.load(as: Float.self))))
-        case UInt8(ascii: "d"): storage.set(key, .real(address.load(as: Double.self)))
+        let encoding = ArchiveTypes.bare(Array(UnsafeRawBufferPointer(start: type, count: strlen(type))))
+        guard let first = encoding.first else { return }
+        if first == UInt8(ascii: "[") {
+            let (count, element) = ArchiveTypes.array(encoding)
+            return encodeArray(element, count: count, at: address)
+        }
+        storage.set(nextKey(), value(first, at: address, type: type))
+    }
+
+    private func value(_ first: UInt8, at address: UnsafeRawPointer, type: UnsafePointer<CChar>) -> ArchiveValue {
+        if let scalar = Archivers.scalar(first, at: address) { return scalar }
+        switch first {
         case UInt8(ascii: "@"):
             let object = address.load(as: UnsafeMutableRawPointer?.self)
-            storage.set(key, Archivers.encode(object, in: objcObject, storage: storage))
+            return Archivers.encode(object, in: objcObject, storage: storage)
         case UInt8(ascii: "*"):
             let string = address.load(as: UnsafePointer<CChar>?.self).map { String(cString: $0) }
-            storage.set(key, Archivers.encode(string.map { Strings.autoreleased($0) }, in: objcObject, storage: storage))
+            return Archivers.encode(string.map { Strings.autoreleased($0) }, in: objcObject, storage: storage)
         default:
             foundationFatal("-[NSKeyedArchiver encodeValueOfObjCType:at:]: unsupported type \(String(cString: type))")
         }
     }
+
+    /// A C array as Darwin's keyed archiver keeps one: an
+    /// _NSKeyedCoderOldStyleArray of its count, element size and type and
+    /// the elements under "$0", "$1"….
+    private func encodeArray(_ element: [UInt8], count: Int, at address: UnsafeRawPointer) {
+        let key = nextKey()
+        guard let first = element.first else { return }
+        let size = ArchiveTypes.layout(element).size
+        let index = storage.objects.count
+        storage.objects.append(.null)
+        var fields: [String: ArchiveValue] = ["NS.count": .integer(Int64(count)), "NS.size": .integer(Int64(size)),
+                                              "NS.type": .integer(Int64(first))]
+        (element + [0]).withUnsafeBufferPointer { buffer in
+            buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { type in
+                for position in 0..<count { fields["$\(position)"] = value(first, at: address + position * size, type: type) }
+            }
+        }
+        fields["$class"] = .uid(storage.classUID(["_NSKeyedCoderOldStyleArray", "NSObject"]))
+        storage.objects[index] = .dictionary(fields)
+        storage.set(key, .uid(index))
+    }
+
+    @ObjCMethod("encodeArrayOfObjCType:count:at:")
+    func encodeArray(ofObjCType type: UnsafePointer<CChar>?, count: UInt, at address: UnsafeRawPointer?) {
+        guard let type, let address else { return }
+        encodeArray(ArchiveTypes.bare(Array(UnsafeRawBufferPointer(start: type, count: strlen(type)))), count: Int(count), at: address)
+    }
+
+    /// Bytes, as data under the next key.
+    @ObjCMethod("encodeBytes:length:")
+    func encode(bytes: UnsafeRawPointer?, length: UInt) {
+        storage.set(nextKey(), .data(bytes.map { Array(UnsafeRawBufferPointer(start: $0, count: Int(length))) } ?? []))
+    }
+
+    @ObjCMethod("encodeDataObject:") func encodeDataObject(_ data: ObjCObject?) { encode(data) }
 
     @ObjCMethod("encodeBool:forKey:") func encode(bool value: Bool, forKey key: String) { storage.set(key, .bool(value)) }
     @ObjCMethod("encodeInt:forKey:") func encode(int value: Int32, forKey key: String) { storage.set(key, .integer(Int64(value))) }

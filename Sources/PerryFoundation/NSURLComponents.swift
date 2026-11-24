@@ -109,6 +109,15 @@ public final class NSURLComponents: NSObject {
         return ObjC.retain(objcObject)
     }
 
+    /// With `encode`, characters a URL can't hold are percent-encoded
+    /// rather than making the string invalid.
+    @ObjCMethod("initWithString:encodingInvalidCharacters:")
+    func initialize(string: String, encodingInvalidCharacters encode: Bool) -> UnsafeMutableRawPointer? {
+        guard let components = URLComponents(string: string, encodingInvalidCharacters: encode) else { return nil }
+        Storage.set(objcObject, ComponentsStorage(components))
+        return ObjC.retain(objcObject)
+    }
+
     @ObjCMethod("initWithURL:resolvingAgainstBaseURL:")
     func initialize(url: NSURL, resolvingAgainstBaseURL resolve: Bool) -> UnsafeMutableRawPointer? {
         guard let components = URLComponents(url: url.url, resolvingAgainstBaseURL: resolve) else { return nil }
@@ -167,6 +176,8 @@ public final class NSURLComponents: NSObject {
     @ObjCMethod("percentEncodedHost") func percentEncodedHost() -> String? { components.percentEncodedHost }
     @ObjCMethod("setPercentEncodedHost:") func setPercentEncodedHost(_ value: String?) { components.percentEncodedHost = value }
     @ObjCMethod("encodedHost") func encodedHost() -> String? { components.encodedHost }
+    /// The host as it goes in the URL: IDNA's ASCII form, or percent-encoded.
+    @ObjCMethod("setEncodedHost:") func setEncodedHost(_ value: String?) { components.encodedHost = value }
     @ObjCMethod("percentEncodedPath") func percentEncodedPath() -> String { components.percentEncodedPath }
     @ObjCMethod("setPercentEncodedPath:") func setPercentEncodedPath(_ value: String?) { components.percentEncodedPath = value ?? "" }
     @ObjCMethod("percentEncodedQuery") func percentEncodedQuery() -> String? { components.percentEncodedQuery }

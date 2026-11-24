@@ -610,9 +610,10 @@ extension NSString {
         return index > start
     }
 
-    /// The encoding the contents convert to fastest: they are Unicode.
+    /// The encoding the contents convert to fastest: ASCII for ASCII
+    /// text, as on Darwin, otherwise Unicode.
     @ObjCMethod("fastestEncoding")
-    func fastestEncoding() -> UInt { StringEncoding.unicode }
+    func fastestEncoding() -> UInt { value.utf16.allSatisfy { $0 < 0x80 } ? StringEncoding.ascii : StringEncoding.unicode }
 
     /// A pointer straight to the contents, which Swift tries before reading
     /// them a character at a time: an immutable string's own NUL-terminated
@@ -1173,4 +1174,443 @@ extension NSString {
 
 extension String {
     func leftPadded(to length: Int) -> String { String(repeating: "0", count: max(0, length - count)) + self }
+}
+
+// MARK: - Encoding detection
+
+/// +stringEncodingForData:encodingOptions:convertedString:usedLossyConversion:
+/// as Darwin answers it: a byte order mark's encoding, then the suggested
+/// encodings in order, then ASCII, UTF-8 and, for other bytes, Windows
+/// Latin 1 or ISO Latin 1; the first that converts the bytes. With
+/// NSStringEncodingDetectionUseOnlySuggestedEncodingsKey only the suggested
+/// ones are tried. Encodings in the disallowed list are skipped. When none
+/// converts, lossy conversion (allowed unless the options say not) gives
+/// UTF-8 with the substitution string for what doesn't convert. ASCII, as
+/// CoreFoundation converts it, takes bytes above 127 as ISO Latin 1.
+enum StringEncodingDetection {
+    static let suggestedKey = "NSStringEncodingDetectionSuggestedEncodingsKey"
+    static let disallowedKey = "NSStringEncodingDetectionDisallowedEncodingsKey"
+    static let onlySuggestedKey = "NSStringEncodingDetectionUseOnlySuggestedEncodingsKey"
+    static let allowLossyKey = "NSStringEncodingDetectionAllowLossyKey"
+    static let fromWindowsKey = "NSStringEncodingDetectionFromWindowsKey"
+    static let substitutionKey = "NSStringEncodingDetectionLossySubstitutionKey"
+
+    struct Result {
+        var encoding: UInt
+        var string: String?
+        var lossy = false
+    }
+
+    private static func option(_ options: id?, _ key: String) -> id? {
+        Dictionaries.value(options, for: Strings.autoreleased(key))
+    }
+
+    private static func flag(_ options: id?, _ key: String) -> Bool? {
+        option(options, key).map { ObjC.sendBool($0, ObjC.selector("boolValue"), nil) }
+    }
+
+    private static func encodings(_ options: id?, _ key: String) -> [UInt] {
+        Arrays.elements(option(options, key)).map { ObjC.sendUInt($0, ObjC.selector("unsignedIntegerValue")) }
+    }
+
+    /// The bytes in an encoding, as detection converts them.
+    static func decode(_ bytes: [UInt8], _ encoding: UInt) -> String? {
+        switch encoding {
+        case StringEncoding.ascii:
+            return bytes.withUnsafeBytes { StringEncoding.decode($0, StringEncoding.isoLatin1) }
+        case StringEncoding.utf8:
+            let body = bytes.starts(with: [0xef, 0xbb, 0xbf]) ? Array(bytes.dropFirst(3)) : bytes
+            return body.withUnsafeBytes { StringEncoding.decode($0, StringEncoding.utf8) }
+        case StringEncoding.unicode:
+            guard bytes.count % 2 == 0 else { return nil }
+            return bytes.withUnsafeBytes { StringEncoding.decode($0, StringEncoding.unicode) }
+        case 12:
+            // Windows Latin 1 leaves five bytes undefined.
+            guard !bytes.contains(where: { [0x81, 0x8d, 0x8f, 0x90, 0x9d].contains($0) }) else { return nil }
+            return bytes.withUnsafeBytes { StringEncoding.decode($0, 12) }
+        default:
+            return bytes.withUnsafeBytes { StringEncoding.decode($0, encoding) }
+        }
+    }
+
+    static func detect(_ bytes: [UInt8], options: id?) -> Result {
+        let suggested = encodings(options, suggestedKey), disallowed = Set(encodings(options, disallowedKey))
+        let onlySuggested = flag(options, onlySuggestedKey) ?? false
+        let allowLossy = flag(options, allowLossyKey) ?? true
+        var candidates: [UInt] = []
+        func add(_ encoding: UInt) {
+            if !disallowed.contains(encoding), !candidates.contains(encoding) { candidates.append(encoding) }
+        }
+        if !onlySuggested {
+            if bytes.starts(with: [0xef, 0xbb, 0xbf]) { add(StringEncoding.utf8) }
+            if bytes.starts(with: [0xff, 0xfe, 0, 0]) || bytes.starts(with: [0, 0, 0xfe, 0xff]) { add(StringEncoding.utf32) }
+            if bytes.starts(with: [0xff, 0xfe]) || bytes.starts(with: [0xfe, 0xff]) { add(StringEncoding.unicode) }
+        }
+        suggested.forEach(add)
+        if !onlySuggested {
+            if bytes.isEmpty || bytes.contains(where: { $0 >= 0x80 }) {
+                add(StringEncoding.utf8)
+            } else {
+                add(StringEncoding.ascii)
+            }
+            add(StringEncoding.utf8)
+            if flag(options, fromWindowsKey) ?? false || bytes.contains(where: { (0x80...0x9f).contains($0) }) { add(12) }
+            add(StringEncoding.isoLatin1)
+        }
+        for encoding in candidates {
+            if let string = decode(bytes, encoding) { return Result(encoding: encoding, string: string) }
+        }
+        guard allowLossy, let first = candidates.first else {
+            // Darwin names the first encoding it tried, with no string.
+            return Result(encoding: onlySuggested ? (candidates.first ?? 0) : 0, string: nil)
+        }
+        let substitution = Strings.value(of: option(options, substitutionKey)) ?? "\u{FFFD}"
+        let encoding = candidates.contains(StringEncoding.utf8) ? StringEncoding.utf8 : first
+        guard encoding == StringEncoding.utf8 else { return Result(encoding: encoding, string: nil) }
+        return Result(encoding: encoding, string: lossyUTF8(bytes, substitution), lossy: true)
+    }
+
+    /// UTF-8, each ill-formed sequence replaced by `substitution`.
+    private static func lossyUTF8(_ bytes: [UInt8], _ substitution: String) -> String {
+        var result = ""
+        var iterator = bytes.makeIterator()
+        var decoder = UTF8()
+        loop: while true {
+            switch decoder.decode(&iterator) {
+            case .scalarValue(let scalar): result.unicodeScalars.append(scalar)
+            case .error: result += substitution
+            case .emptyInput: break loop
+            }
+        }
+        return result
+    }
+}
+
+// MARK: - Transforms
+
+// The transforms' and the detection options' names are in
+// FoundationConstantsMore.swift.
+
+/// Folding and comparing as NSString's options say.
+enum StringFolding {
+    static let caseInsensitive: UInt = 1, diacriticInsensitive: UInt = 128, widthInsensitive: UInt = 256
+
+    /// Canonically decomposed, by ICU.
+    static func decomposed(_ text: String) -> String {
+        var status: Int32 = 0
+        guard let form = swift_unorm2_getNFDInstance(&status), status <= 0 else { return text }
+        let units = Array(text.utf16)
+        var result = [UInt16](repeating: 0, count: units.count * 4 + 16)
+        let length = swift_unorm2_normalize(form, units, Int32(units.count), &result, Int32(result.count), &status)
+        guard status <= 0, length >= 0 else { return text }
+        return String(decoding: result.prefix(Int(length)), as: UTF16.self)
+    }
+
+    /// The text folded: case to lower case, diacritics removed (combining
+    /// marks after canonical decomposition), full-width forms to their
+    /// ASCII and space.
+    static func fold(_ text: String, _ options: UInt) -> String {
+        var result = text
+        if options & diacriticInsensitive != 0 {
+            let marks = decomposed(result).unicodeScalars.filter { $0.properties.generalCategory != .nonspacingMark }
+            result = String(String.UnicodeScalarView(marks)).precomposedNFC
+        }
+        if options & widthInsensitive != 0 {
+            result = String(String.UnicodeScalarView(result.unicodeScalars.map { scalar -> Unicode.Scalar in
+                switch scalar.value {
+                case 0xFF01...0xFF5E: return Unicode.Scalar(scalar.value - 0xFEE0)!
+                case 0x3000: return " "
+                default: return scalar
+                }
+            }))
+        }
+        if options & caseInsensitive != 0 { result = result.lowercased() }
+        return result
+    }
+}
+
+private extension String {
+    /// Canonically composed, by ICU.
+    var precomposedNFC: String {
+        var status: Int32 = 0
+        guard let form = swift_unorm2_getNFCInstance(&status), status <= 0 else { return self }
+        let units = Array(utf16)
+        var result = [UInt16](repeating: 0, count: units.count * 2 + 16)
+        let length = swift_unorm2_normalize(form, units, Int32(units.count), &result, Int32(result.count), &status)
+        guard status <= 0, length >= 0 else { return self }
+        return String(decoding: result.prefix(Int(length)), as: UTF16.self)
+    }
+}
+
+/// NSString's encoding detection, folding, transforms and the C string
+/// methods from before encodings.
+@ObjCCategory("StringConversions")
+extension NSString {
+    /// The encoding the data is most likely in, or 0; the string it makes
+    /// and whether that was lossy. See StringEncodingDetection.
+    @ObjCClassMethod("stringEncodingForData:encodingOptions:convertedString:usedLossyConversion:")
+    static func stringEncoding(forData data: NSData?, encodingOptions options: UnsafeMutableRawPointer?,
+                               convertedString: UnsafeMutablePointer<id?>?, usedLossyConversion: UnsafeMutablePointer<Bool>?) -> UInt {
+        let result = StringEncodingDetection.detect(Array(data?.data ?? Data()), options: options)
+        convertedString?.pointee = result.string.map { Strings.autoreleased($0) }
+        usedLossyConversion?.pointee = result.lossy
+        return result.encoding
+    }
+
+    // MARK: C strings before encodings
+
+    /// `length` bytes in the default C string encoding.
+    private static func decodeDefault(_ bytes: UnsafeRawPointer?, length: UInt) -> String {
+        guard let bytes else { return "" }
+        let buffer = UnsafeRawBufferPointer(start: bytes, count: Int(length))
+        return StringEncoding.decode(buffer, StringEncoding.utf8) ?? StringEncoding.decode(buffer, StringEncoding.isoLatin1) ?? ""
+    }
+
+    @ObjCClassMethod("stringWithCString:length:")
+    static func string(_ cls: ObjCClass, cString: UnsafePointer<CChar>?, length: UInt) -> ObjCObject? {
+        cString.map { ObjCObject(Strings.autoreleased(decodeDefault($0, length: length), of: cls.pointer)) }
+    }
+
+    @ObjCMethod("initWithCString:length:")
+    func initialize(cString: UnsafePointer<CChar>?, length: UInt) -> Self? {
+        guard let cString else { return nil }
+        Storage.set(objcObject, StringStorage(NSString.decodeDefault(cString, length: length)))
+        return self
+    }
+
+    /// The bytes are copied, then freed if the string was to own them.
+    @ObjCMethod("initWithCStringNoCopy:length:freeWhenDone:")
+    func initialize(cStringNoCopy bytes: UnsafeMutablePointer<CChar>?, length: UInt, freeWhenDone: Bool) -> Self? {
+        guard let bytes else { return nil }
+        Storage.set(objcObject, StringStorage(NSString.decodeDefault(bytes, length: length)))
+        if freeWhenDone { free(bytes) }
+        return self
+    }
+
+    /// In the default C string encoding, UTF-8, which loses nothing.
+    @ObjCMethod("lossyCString")
+    func lossyCString() -> UnsafePointer<CChar>? { Strings.utf8(objcObject) }
+
+    /// The characters of `range` in the default C string encoding, as many
+    /// whole characters as fit in `maxLength` bytes, then a zero; the rest
+    /// of the range is given back.
+    @ObjCMethod("getCString:maxLength:range:remainingRange:")
+    func getCString(_ buffer: UnsafeMutablePointer<CChar>?, maxLength: UInt, range: NSRange, remainingRange: UnsafeMutablePointer<NSRange>?) {
+        guard let buffer else { return }
+        let units = Array(value.utf16)
+        let start = min(Int(range.location), units.count), end = min(start + Int(range.length), units.count)
+        var used = 0, index = start
+        while index < end {
+            let width = UTF16.isLeadSurrogate(units[index]) && index + 1 < end ? 2 : 1
+            let bytes = Array(String(decoding: units[index..<index + width], as: UTF16.self).utf8)
+            guard used + bytes.count <= Int(maxLength) else { break }
+            for byte in bytes {
+                buffer[used] = CChar(bitPattern: byte)
+                used += 1
+            }
+            index += width
+        }
+        buffer[used] = 0
+        remainingRange?.pointee = NSRange(location: UInt(index), length: UInt(end - index))
+    }
+
+    /// The smallest encoding that holds the string without loss: ASCII,
+    /// else Mac OS Roman, else Unicode.
+    @ObjCMethod("smallestEncoding")
+    func smallestEncoding() -> UInt {
+        if value.unicodeScalars.allSatisfy(\.isASCII) { return StringEncoding.ascii }
+        if StringEncoding.encode(value, 30) != nil { return 30 }
+        return StringEncoding.unicode
+    }
+
+    // MARK: No-copy strings with deallocators
+
+    /// The bytes are copied, so the deallocator is called with them at
+    /// once rather than when the string goes; a string that can't be made
+    /// leaves them to the caller.
+    @ObjCMethod("initWithBytesNoCopy:length:encoding:deallocator:")
+    func initialize(bytesNoCopy bytes: UnsafeMutableRawPointer?, length: UInt, encoding: UInt, deallocator: UnsafeMutableRawPointer?) -> Self? {
+        guard let decoded = StringEncoding.decode(UnsafeRawBufferPointer(start: bytes, count: Int(length)), encoding) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        if let deallocator {
+            Blocks.invoke(deallocator, as: (@convention(c) (id, UnsafeMutableRawPointer?, UInt) -> Void).self)(deallocator, bytes, length)
+        }
+        return self
+    }
+
+    @ObjCMethod("initWithCharactersNoCopy:length:deallocator:")
+    func initialize(charactersNoCopy characters: UnsafeMutablePointer<UInt16>?, length: UInt, deallocator: UnsafeMutableRawPointer?) -> Self {
+        let text = characters.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(length)), as: UTF16.self) } ?? ""
+        Storage.set(objcObject, StringStorage(text))
+        if let deallocator {
+            Blocks.invoke(deallocator, as: (@convention(c) (id, UnsafeMutablePointer<UInt16>?, UInt) -> Void).self)(deallocator, characters, length)
+        }
+        return self
+    }
+
+    // MARK: Folding and comparing
+
+    /// The longest prefix both strings share, in whole characters compared
+    /// as the options fold them (canonically equivalent ones match); the
+    /// receiver's own characters.
+    @ObjCMethod("commonPrefixWithString:options:")
+    func commonPrefix(with other: String?, options: UInt) -> String {
+        var prefix = ""
+        for (mine, theirs) in zip(value, other ?? "") {
+            guard mine == theirs || StringFolding.fold(String(mine), options) == StringFolding.fold(String(theirs), options) else { break }
+            prefix.append(mine)
+        }
+        return prefix
+    }
+
+    @ObjCMethod("stringByFoldingWithOptions:locale:")
+    func folding(options: UInt, locale: ObjCObject?) -> String { StringFolding.fold(value, options) }
+
+    /// The range of `other` as a search in Finder finds it: ignoring case,
+    /// diacritics and width, on whole characters.
+    @ObjCMethod("localizedStandardRangeOfString:")
+    func localizedStandardRange(of other: String?) -> NSRange {
+        let options = StringFolding.caseInsensitive | StringFolding.diacriticInsensitive | StringFolding.widthInsensitive
+        let needle = Array(StringFolding.fold(other ?? "", options).utf16)
+        guard !needle.isEmpty else { return NSRange(location: notFound, length: 0) }
+        // Each character folded, where it starts in the string, and where
+        // it starts in the folded text.
+        var folded: [UInt16] = [], starts: [(original: Int, folded: Int, length: Int)] = []
+        var offset = 0
+        for character in value {
+            let units = String(character).utf16.count
+            starts.append((offset, folded.count, units))
+            folded += StringFolding.fold(String(character), options).utf16
+            offset += units
+        }
+        guard needle.count <= folded.count else { return NSRange(location: notFound, length: 0) }
+        for (index, start) in starts.enumerated() where folded.count - start.folded >= needle.count {
+            guard Array(folded[start.folded..<start.folded + needle.count]) == needle else { continue }
+            // The match must end where a character's folding ends.
+            let end = start.folded + needle.count
+            var last: Int?
+            for candidate in index..<starts.count {
+                let foldedEnd = candidate + 1 < starts.count ? starts[candidate + 1].folded : folded.count
+                if foldedEnd == end { last = candidate }
+                if foldedEnd >= end { break }
+            }
+            guard let last else { continue }
+            let tail = starts[last]
+            return NSRange(location: UInt(start.original), length: UInt(tail.original + tail.length - start.original))
+        }
+        return NSRange(location: notFound, length: 0)
+    }
+
+    // MARK: Transforms
+
+    /// The string through an ICU transform (NSStringTransform's names
+    /// are ICU's IDs), or nil for one ICU doesn't know.
+    @ObjCMethod("stringByApplyingTransform:reverse:")
+    func applyingTransform(_ transform: String?, reverse: Bool) -> String? {
+        guard let transform else { return nil }
+        return ICUTransforms.apply(transform, to: value, reverse: reverse)
+    }
+
+    // MARK: Paths
+
+    @ObjCMethod("stringsByAppendingPaths:")
+    func appendingPaths(_ paths: NSArray?) -> NSArray {
+        let paths = Arrays.elements(paths?.objcObject).compactMap { Strings.value(of: $0) }
+        return Arrays.owned(paths.map { Strings.autoreleased(Paths.appending(value, $0)) })
+    }
+
+    /// The paths in the receiver's directory that begin with its last
+    /// component (and have one of the extensions, when there are some):
+    /// the longest prefix they share, the matches sorted, and their count.
+    @ObjCMethod("completePathIntoString:caseSensitive:matchesIntoArray:filterTypes:")
+    func completePath(into outputName: UnsafeMutablePointer<id?>?, caseSensitive: Bool, matchesInto matches: UnsafeMutablePointer<id?>?,
+                      filterTypes: NSArray?) -> UInt {
+        let path = expandingTilde()
+        guard !path.isEmpty else { return 0 }
+        let directory = path.hasSuffix("/") ? path : Paths.deletingLastComponent(path)
+        let partial = path.hasSuffix("/") ? "" : Paths.lastComponent(path)
+        let types = Set(Arrays.elements(filterTypes?.objcObject).compactMap { Strings.value(of: $0) })
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.isEmpty ? "." : directory)) ?? []
+        let fold: (String) -> String = { caseSensitive ? $0 : $0.lowercased() }
+        let found = names.filter { name in
+            fold(name).hasPrefix(fold(partial)) && (types.isEmpty || types.contains(Paths.pathExtension(name)))
+        }.sorted().map { directory.isEmpty ? $0 : Paths.appending(directory, $0) }
+        guard !found.isEmpty else { return 0 }
+        if let outputName {
+            var common = Array(found[0])
+            for candidate in found.dropFirst() {
+                let other = Array(candidate)
+                var length = 0
+                while length < common.count, length < other.count, fold(String(common[length])) == fold(String(other[length])) { length += 1 }
+                common = Array(common.prefix(length))
+            }
+            outputName.pointee = Strings.autoreleased(String(common))
+        }
+        matches?.pointee = Arrays.autoreleased(found.map { Strings.autoreleased($0) })
+        return UInt(found.count)
+    }
+
+    // MARK: Contents of URLs
+
+    /// A file URL's text in the encoding it is found to be in.
+    @ObjCClassMethod("stringWithContentsOfURL:")
+    static func string(_ cls: ObjCClass, contentsOfURL url: NSURL?) -> ObjCObject? {
+        string(contentsOfURL: url, used: nil, error: nil).map { ObjCObject(Strings.autoreleased($0, of: cls.pointer)) }
+    }
+
+    @ObjCMethod("initWithContentsOfURL:")
+    func initialize(contentsOfURL url: NSURL?) -> Self? {
+        guard let decoded = Self.string(contentsOfURL: url, used: nil, error: nil) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
+    /// Written as UTF-8, to file URLs only.
+    @ObjCMethod("writeToURL:atomically:")
+    func write(to url: NSURL?, atomically: Bool) -> Bool {
+        guard let url else { return false }
+        return write(to: url, atomically: atomically, encoding: StringEncoding.utf8, error: nil)
+    }
+
+    // MARK: Variants and linguistic tags
+
+    /// A string with no width variants (only stringsdict files make them)
+    /// is its own.
+    @ObjCMethod("variantFittingPresentationWidth:")
+    func variantFitting(presentationWidth width: Int) -> NSString { self }
+
+    /// A tagger of the one scheme over the string, autoreleased.
+    private func tagger(_ scheme: id?, orthography: id?) -> id? {
+        guard let cls = "NSLinguisticTagger".withCString({ ObjC.getClass($0) }),
+              let allocated = ObjC.send(UnsafeMutableRawPointer(cls), ObjC.selector("alloc")) else { return nil }
+        typealias Initialize = @convention(c) (id?, SEL, id?, UInt) -> id?
+        let schemes = Arrays.autoreleased(scheme.map { [$0] } ?? [])
+        let tagger = unsafeBitCast(ObjC.msgSend, to: Initialize.self)(allocated, ObjC.selector("initWithTagSchemes:options:"), schemes, 0)
+        _ = ObjC.send(tagger, ObjC.selector("setString:"), objcObject)
+        if let orthography {
+            typealias SetOrthography = @convention(c) (id?, SEL, id?, NSRange) -> Void
+            unsafeBitCast(ObjC.msgSend, to: SetOrthography.self)(tagger, ObjC.selector("setOrthography:range:"), orthography,
+                                                                  NSRange(location: 0, length: UInt(value.utf16.count)))
+        }
+        return ObjC.autorelease(tagger)
+    }
+
+    /// NSLinguisticTagger's tags of the range, by word, as it gives them.
+    @ObjCMethod("enumerateLinguisticTagsInRange:scheme:options:orthography:usingBlock:")
+    func enumerateLinguisticTags(in range: NSRange, scheme: UnsafeMutableRawPointer?, options: UInt, orthography: UnsafeMutableRawPointer?,
+                                 using block: UnsafeMutableRawPointer?) {
+        guard let tagger = tagger(scheme, orthography: orthography) else { return }
+        typealias Enumerate = @convention(c) (id?, SEL, NSRange, id?, UInt, id?) -> Void
+        unsafeBitCast(ObjC.msgSend, to: Enumerate.self)(tagger, ObjC.selector("enumerateTagsInRange:scheme:options:usingBlock:"), range,
+                                                        scheme, options, block)
+    }
+
+    @ObjCMethod("linguisticTagsInRange:scheme:options:orthography:tokenRanges:")
+    func linguisticTags(in range: NSRange, scheme: UnsafeMutableRawPointer?, options: UInt, orthography: UnsafeMutableRawPointer?,
+                        tokenRanges: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        guard let tagger = tagger(scheme, orthography: orthography) else { return Arrays.autoreleased([]) }
+        typealias Tags = @convention(c) (id?, SEL, NSRange, id?, UInt, UnsafeMutablePointer<id?>?) -> id?
+        return unsafeBitCast(ObjC.msgSend, to: Tags.self)(tagger, ObjC.selector("tagsInRange:scheme:options:tokenRanges:"), range, scheme,
+                                                          options, tokenRanges)
+    }
 }

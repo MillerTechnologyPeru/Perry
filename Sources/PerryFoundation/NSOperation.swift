@@ -125,6 +125,12 @@ final class OperationStorage {
     /// and the selector; and what it returned.
     var invocation: (target: id, selector: SEL, argument: id?)?
     var result: id?
+    /// NSInvocationOperation's NSInvocation, held: the one it was made
+    /// with, or one made for its message when first asked for.
+    var invocationObject: id?
+    /// The deprecated thread priority, 0 to 1; kept, as threads here are
+    /// all scheduled alike.
+    var threadPriority = 0.5
 
     deinit {
         dependencies.forEach { ObjC.release($0) }
@@ -134,6 +140,7 @@ final class OperationStorage {
             ObjC.release(invocation.argument)
         }
         ObjC.release(result)
+        ObjC.release(invocationObject)
         ObjC.release(completionBlock)
         ObjC.release(name)
     }
@@ -350,6 +357,10 @@ public class NSOperation: NSObject {
     @ObjCMethod("qualityOfService") func qualityOfService() -> Int { storage.monitor.locked { storage.qualityOfService } }
     @ObjCMethod("setQualityOfService:")
     func setQualityOfService(_ quality: Int) { storage.monitor.locked { storage.qualityOfService = quality } }
+
+    @ObjCMethod("threadPriority") func threadPriority() -> Double { storage.monitor.locked { storage.threadPriority } }
+    @ObjCMethod("setThreadPriority:")
+    func setThreadPriority(_ priority: Double) { storage.monitor.locked { storage.threadPriority = min(max(priority, 0), 1) } }
 }
 
 /// NSBlockOperation.
@@ -398,9 +409,61 @@ public final class NSInvocationOperation: NSOperation {
         return self
     }
 
+    /// An operation that invokes the invocation, which it retains, with its
+    /// arguments.
+    @ObjCMethod("initWithInvocation:")
+    func initialize(invocation: ObjCObject?) -> Self? {
+        guard let invocation else { return nil }
+        _ = ObjC.send(invocation.id, ObjC.selector("retainArguments"))
+        let held = ObjC.retain(invocation.id)
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.invocationObject = held }
+            return storage.invocationObject
+        }
+        ObjC.release(old)
+        return self
+    }
+
+    /// The invocation the operation invokes: for one made with a target and
+    /// selector, an invocation of that message, made when first asked for.
+    @ObjCMethod("invocation")
+    func invocation() -> UnsafeMutableRawPointer? {
+        if let made = storage.monitor.locked({ storage.invocationObject }) { return made }
+        guard let message = storage.monitor.locked({ storage.invocation }),
+              let signature = ObjC.send(message.target, ObjC.selector("methodSignatureForSelector:"),
+                                        UnsafeMutableRawPointer(mutating: message.selector)),
+              let invocation = ObjC.send(UnsafeMutableRawPointer(Invocations.invocationClass),
+                                         ObjC.selector("invocationWithMethodSignature:"), signature) else { return nil }
+        _ = ObjC.send(invocation, ObjC.selector("setTarget:"), message.target)
+        _ = ObjC.send(invocation, ObjC.selector("setSelector:"), UnsafeMutableRawPointer(mutating: message.selector))
+        if (MethodSignatures.storage(signature)?.parts.count ?? 0) > 3 {
+            // The one argument, from where it is kept.
+            var argument = message.argument
+            typealias SetArgument = @convention(c) (id?, SEL, UnsafeRawPointer?, Int) -> Void
+            withUnsafePointer(to: &argument) { pointer in
+                unsafeBitCast(ObjC.msgSend, to: SetArgument.self)(invocation, ObjC.selector("setArgument:atIndex:"), pointer, 2)
+            }
+        }
+        _ = ObjC.send(invocation, ObjC.selector("retainArguments"))
+        let held = ObjC.retain(invocation)
+        let kept = storage.monitor.locked { () -> id? in
+            if let existing = storage.invocationObject { return existing }
+            storage.invocationObject = held
+            return nil
+        }
+        if let kept {
+            ObjC.release(held)
+            return kept
+        }
+        return invocation
+    }
+
     /// Sends the message, unless the operation was cancelled first.
     @ObjCMethod("main")
     func sendMessage() {
+        if let made = storage.monitor.locked({ storage.invocation == nil ? storage.invocationObject : nil }) {
+            return invoke(made)
+        }
         guard let invocation = storage.monitor.locked({ storage.invocation }) else { return }
         // Only a method returning an object has a result.
         let method = ObjC.instanceMethod(ObjC.objectGetClass(invocation.target), invocation.selector)
@@ -414,9 +477,30 @@ public final class NSInvocationOperation: NSOperation {
         ObjC.release(old)
     }
 
+    /// Invokes an invocation the operation was made with, keeping what it
+    /// returns when that is an object.
+    private func invoke(_ invocation: id) {
+        _ = ObjC.send(invocation, ObjC.selector("invoke"))
+        guard let signature = ObjC.send(invocation, ObjC.selector("methodSignature")),
+              let details = MethodSignatures.storage(signature), let type = details.parts.first,
+              String(cString: type).drop(while: { "rnNoORVAj".contains($0) }).first == "@" else { return }
+        var returned: id?
+        typealias GetReturn = @convention(c) (id?, SEL, UnsafeMutableRawPointer?) -> Void
+        withUnsafeMutablePointer(to: &returned) { pointer in
+            unsafeBitCast(ObjC.msgSend, to: GetReturn.self)(invocation, ObjC.selector("getReturnValue:"), UnsafeMutableRawPointer(pointer))
+        }
+        let result = returned.flatMap { ObjC.retain($0) }
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.result = result }
+            return storage.result
+        }
+        ObjC.release(old)
+    }
+
     @ObjCMethod("result")
     func result() -> ObjCObject? {
-        storage.monitor.locked { storage.result }.flatMap { ObjC.autorelease($0) }.map(ObjCObject.init)
+        // Retained and autoreleased: the operation keeps its own reference.
+        storage.monitor.locked { storage.result.flatMap { ObjC.retain($0) } }.flatMap { ObjC.autorelease($0) }.map(ObjCObject.init)
     }
 }
 
@@ -454,6 +538,8 @@ final class QueueStorage: @unchecked Sendable {
     var underlying: id?
     /// The last barrier added, which later operations wait for.
     var barrier: id?
+    /// The queue's progress, made when first asked for, held.
+    var progress: id?
 
     init(_ object: id, isMain: Bool = false) {
         objectPointer = object
@@ -464,6 +550,7 @@ final class QueueStorage: @unchecked Sendable {
         ObjC.release(name)
         ObjC.release(barrier)
         ObjC.release(underlying)
+        ObjC.release(progress)
     }
 
     /// PERRY_OPERATION_TRACE: each operation a queue is given, starts and
@@ -564,7 +651,15 @@ final class QueueStorage: @unchecked Sendable {
             return true
         }
         monitor.broadcast()
-        if removed { ObjC.release(operation) }
+        if removed {
+            // Each finished operation is a unit of the queue's progress, once
+            // the app has given it a total, as on Darwin.
+            if let queueProgress = monitor.locked({ self.progress }), let counts = Progresses.storage(queueProgress), counts.total > 0 {
+                typealias SetCount = @convention(c) (id?, SEL, Int64) -> Void
+                unsafeBitCast(ObjC.msgSend, to: SetCount.self)(queueProgress, ObjC.selector("setCompletedUnitCount:"), counts.completed + 1)
+            }
+            ObjC.release(operation)
+        }
         schedule()
     }
 
@@ -627,6 +722,22 @@ public final class NSOperationQueue: NSObject {
 
     @ObjCClassMethod("mainQueue")
     static func mainQueue() -> UnsafeMutableRawPointer { OperationQueues.mainQueue }
+
+    /// The queue's progress: no total, and so no fraction, until the app
+    /// sets one; each operation that finishes then completes a unit.
+    @ObjCMethod("progress")
+    func progress() -> UnsafeMutableRawPointer? {
+        let storage = self.storage
+        if let made = storage.monitor.locked({ storage.progress }) { return made }
+        let made = Progresses.make(total: 0, parent: nil)
+        let kept = storage.monitor.locked { () -> id in
+            if let existing = storage.progress { return existing }
+            storage.progress = made
+            return made
+        }
+        if kept != made { ObjC.release(made) }
+        return kept
+    }
 
     /// The queue running the calling operation; on the main thread, the
     /// main queue.

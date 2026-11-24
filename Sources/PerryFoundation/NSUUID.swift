@@ -90,6 +90,15 @@ public final class NSUUID: NSObject {
         return other.unsafeCast(to: NSUUID.self).uuid == uuid
     }
 
+    /// NSComparisonResult, by the 16 bytes in order, as memcmp compares them.
+    @ObjCMethod("compare:")
+    func compare(_ other: NSUUID) -> Int {
+        let mine = withUnsafeBytes(of: uuid?.uuid ?? UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).uuid) { Array($0) }
+        let theirs = withUnsafeBytes(of: other.uuid?.uuid ?? UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).uuid) { Array($0) }
+        for (a, b) in zip(mine, theirs) where a != b { return a < b ? -1 : 1 }
+        return 0
+    }
+
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: uuid?.hashValue ?? 0) }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSUUID { self }
 }

@@ -175,3 +175,104 @@ public func NSPageSize() -> UInt { UInt(max(sysconf(Int32(_SC_PAGESIZE)), 0)) }
 
 @c(_NSLogPageSize)
 public func NSLogPageSize() -> UInt { UInt(NSPageSize().trailingZeroBitCount) }
+
+// MARK: - Memory pages
+
+/// Zeroed pages of at least `bytes`, as vm_allocate gives them; NULL when
+/// there are none.
+@c(_NSAllocateMemoryPages)
+public func NSAllocateMemoryPages(_ bytes: UInt) -> UnsafeMutableRawPointer? {
+    guard bytes > 0 else { return nil }
+    guard let pages = mmap(nil, Int(bytes), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
+          pages != UnsafeMutableRawPointer(bitPattern: -1) else { return nil }
+    return pages
+}
+
+@c(_NSDeallocateMemoryPages)
+public func NSDeallocateMemoryPages(_ pointer: UnsafeMutableRawPointer?, _ bytes: UInt) {
+    guard let pointer, bytes > 0 else { return }
+    munmap(pointer, Int(bytes))
+}
+
+/// The bytes copied, overlapping or not.
+@c(_NSCopyMemoryPages)
+public func NSCopyMemoryPages(_ source: UnsafeRawPointer?, _ destination: UnsafeMutableRawPointer?, _ bytes: UInt) {
+    guard let source, let destination, bytes > 0 else { return }
+    memmove(destination, source, Int(bytes))
+}
+
+// MARK: - Reference counts
+
+/// NSObject's own retain, release and retainCount, which a class that
+/// overrides them calls these functions from: the root class's methods,
+/// not the object's, as Darwin's _objc_rootRetain and the others are.
+private enum RootReferenceCounts {
+    typealias Message = @convention(c) (id?, SEL) -> UnsafeMutableRawPointer?
+    typealias Count = @convention(c) (id?, SEL) -> UInt
+
+    nonisolated(unsafe) static let rootClass: Class? = ObjC.getClass("NSObject")
+
+    static func implementation(_ name: String) -> UnsafeRawPointer? {
+        ObjC.methodImplementation(rootClass, ObjC.selector(name))
+    }
+
+    static func retain(_ object: id) {
+        guard let imp = implementation("retain") else { return }
+        _ = unsafeBitCast(imp, to: Message.self)(object, ObjC.selector("retain"))
+    }
+
+    static func release(_ object: id) {
+        guard let imp = implementation("release") else { return }
+        _ = unsafeBitCast(imp, to: Message.self)(object, ObjC.selector("release"))
+    }
+
+    static func count(_ object: id) -> UInt {
+        guard let imp = implementation("retainCount") else { return 1 }
+        return unsafeBitCast(imp, to: Count.self)(object, ObjC.selector("retainCount"))
+    }
+}
+
+@c(_NSIncrementExtraRefCount)
+public func NSIncrementExtraRefCount(_ object: UnsafeMutableRawPointer?) {
+    guard let object else { return }
+    RootReferenceCounts.retain(object)
+}
+
+/// Whether the object's last reference is the one going: then the count is
+/// left for the caller to deallocate the object, as Darwin's does; else one
+/// reference is let go.
+@c(_NSDecrementExtraRefCountWasZero)
+public func NSDecrementExtraRefCountWasZero(_ object: UnsafeMutableRawPointer?) -> Bool {
+    guard let object else { return false }
+    if RootReferenceCounts.count(object) <= 1 { return true }
+    RootReferenceCounts.release(object)
+    return false
+}
+
+/// The references beyond the first.
+@c(_NSExtraRefCount)
+public func NSExtraRefCount(_ object: UnsafeMutableRawPointer?) -> UInt {
+    guard let object else { return 0 }
+    let count = RootReferenceCounts.count(object)
+    return count > 0 ? count - 1 : 0
+}
+
+/// YES: zones are one, as on Darwin, so an object may always be retained
+/// rather than copied into another.
+@c(_NSShouldRetainWithZone)
+public func NSShouldRetainWithZone(_ object: UnsafeMutableRawPointer?, _ zone: UnsafeMutableRawPointer?) -> Bool { true }
+
+// MARK: - Directories
+
+/// A user's home directory from the password database; the current
+/// user's for nil; nil for a user there is none of.
+@c(_NSHomeDirectoryForUser)
+public func NSHomeDirectoryForUser(_ name: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let name else { return NSHomeDirectory() }
+    guard let user = Strings.value(of: name), let entry = getpwnam(user), let directory = entry.pointee.pw_dir else { return nil }
+    return Strings.autoreleased(String(cString: directory))
+}
+
+/// "/".
+@c(_NSOpenStepRootDirectory)
+public func NSOpenStepRootDirectory() -> UnsafeMutableRawPointer? { Strings.autoreleased("/") }

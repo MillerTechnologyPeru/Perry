@@ -1,5 +1,6 @@
 import CPerryFoundation
 import FoundationEssentials
+import FoundationInternationalization
 import Glibc
 import PerryObjCInterop
 
@@ -208,6 +209,23 @@ public class NSDate: NSObject {
 
     @ObjCMethod("description")
     func description() -> String { Dates.description(date) }
+
+    /// With nil, the description; with a locale (or anything else, as
+    /// the dictionaries of Mac OS X's first versions), the date and time in
+    /// the full styles, in the locale (the current one for a non-locale)
+    /// and the default time zone.
+    @ObjCMethod("descriptionWithLocale:")
+    func fullDescription(locale: ObjCObject?) -> String {
+        guard let locale else { return description() }
+        // As an NSDateFormatter of the full styles formats it, through ICU:
+        // Foundation's format style names GMT "GMT", ICU "Greenwich Mean Time".
+        let formatter = DateFormatterStorage()
+        formatter.locale = Locales.locale(locale.id)
+        formatter.timeZone = TimeZones.current
+        formatter.dateStyle = 4
+        formatter.timeStyle = 4
+        return formatter.string(from: date)
+    }
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> NSDate { self }

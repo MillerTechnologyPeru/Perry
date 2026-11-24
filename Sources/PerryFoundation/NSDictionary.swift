@@ -350,6 +350,14 @@ public class NSDictionary: NSObject {
     @ObjCMethod("fileSystemNumber") func fileSystemNumber() -> Int { attributeNumber("NSFileSystemNumber").map { Int($0.int64) } ?? 0 }
     @ObjCMethod("fileSystemFileNumber") func fileSystemFileNumber() -> UInt { attributeNumber("NSFileSystemFileNumber").map { UInt(truncatingIfNeeded: $0.int64) } ?? 0 }
     @ObjCMethod("fileIsImmutable") func fileIsImmutable() -> Bool { (attributeNumber("NSFileImmutable")?.int64 ?? 0) != 0 }
+    @ObjCMethod("fileIsAppendOnly") func fileIsAppendOnly() -> Bool { (attributeNumber("NSFileAppendOnly")?.int64 ?? 0) != 0 }
+    @ObjCMethod("fileExtensionHidden") func fileExtensionHidden() -> Bool { (attributeNumber("NSFileExtensionHidden")?.int64 ?? 0) != 0 }
+    @ObjCMethod("fileGroupOwnerAccountName") func fileGroupOwnerAccountName() -> ObjCObject? { attribute("NSFileGroupOwnerAccountName").map(ObjCObject.init) }
+    @ObjCMethod("fileOwnerAccountID") func fileOwnerAccountID() -> ObjCObject? { attribute("NSFileOwnerAccountID").map(ObjCObject.init) }
+    @ObjCMethod("fileGroupOwnerAccountID") func fileGroupOwnerAccountID() -> ObjCObject? { attribute("NSFileGroupOwnerAccountID").map(ObjCObject.init) }
+    /// OSType codes: 0 when absent.
+    @ObjCMethod("fileHFSCreatorCode") func fileHFSCreatorCode() -> UInt32 { attributeNumber("NSFileHFSCreatorCode").map { UInt32(truncatingIfNeeded: $0.int64) } ?? 0 }
+    @ObjCMethod("fileHFSTypeCode") func fileHFSTypeCode() -> UInt32 { attributeNumber("NSFileHFSTypeCode").map { UInt32(truncatingIfNeeded: $0.int64) } ?? 0 }
 
     @ObjCMethod("objectForKeyedSubscript:")
     func object(subscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
@@ -438,6 +446,45 @@ public class NSDictionary: NSObject {
     @ObjCMethod("keysOfEntriesWithOptions:passingTest:")
     func keysOfEntries(options: UInt, passingTest block: ObjCBlock) -> ObjCObject { keysOfEntries(passingTest: block) }
 
+    /// The keys, in the order the comparator sorts their values: a stable
+    /// sort, whatever the options.
+    @ObjCMethod("keysSortedByValueWithOptions:usingComparator:")
+    func keysSortedByValue(options: UInt, comparator: ObjCBlock) -> NSArray {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        return Arrays.owned(entries.sorted { compare(comparator.object, $0.value, $1.value) < 0 }.map(\.key))
+    }
+
+    /// The values and keys, unretained, into buffers of count slots each;
+    /// either may be NULL.
+    @ObjCMethod("getObjects:andKeys:count:")
+    func getObjects(_ objects: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, andKeys keys: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                    count: UInt) {
+        for (index, entry) in entries.prefix(Int(count)).enumerated() {
+            objects?[index] = entry.value
+            keys?[index] = entry.key
+        }
+    }
+
+    /// Into buffers long enough for every entry: deprecated, as there is no
+    /// knowing that they are.
+    @ObjCMethod("getObjects:andKeys:")
+    func getObjects(_ objects: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, andKeys keys: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        let all = entries
+        getObjects(objects, andKeys: keys, count: UInt(all.count))
+    }
+
+    /// The options (concurrent, reverse) change nothing for a dictionary,
+    /// whose entries have no order: they run in turn.
+    @ObjCMethod("enumerateKeysAndObjectsWithOptions:usingBlock:")
+    func enumerate(options: UInt, block: ObjCBlock) { enumerate(block: block) }
+
+    /// A key set for +[NSMutableDictionary dictionaryWithSharedKeySet:]: the
+    /// keys, copied. Its dictionaries take other keys too, as Darwin's do.
+    @ObjCClassMethod("sharedKeySetForKeys:")
+    static func sharedKeySet(_ cls: ObjCClass, forKeys keys: ObjCObject?) -> UnsafeMutableRawPointer? {
+        SharedKeySets.make(Arrays.elements(keys?.id))
+    }
+
     @ObjCMethod("enumerateKeysAndObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Void).self)
@@ -512,6 +559,14 @@ public class NSMutableDictionary: NSDictionary {
         return self
     }
 
+    /// An empty mutable dictionary for the key set's keys. Darwin's
+    /// NSSharedKeyDictionary stores them compactly; any key may be added.
+    @ObjCClassMethod("dictionaryWithSharedKeySet:")
+    static func dictionary(_ cls: ObjCClass, sharedKeySet keySet: ObjCObject?) -> NSDictionary {
+        let capacity = UInt(SharedKeySets.keys(keySet?.objcObject).count)
+        return Dictionaries.subclassed(cls.pointer, capacity: capacity) ?? Dictionaries.owned([], cls: cls.pointer)
+    }
+
     @ObjCMethod("copyWithZone:")
     override func copy(zone: UnsafeMutableRawPointer?) -> NSDictionary { Dictionaries.owned(Dictionaries.entries(objcObject)) }
 
@@ -573,6 +628,68 @@ public class NSMutableDictionary: NSDictionary {
         storage.removeAll()
         for entry in entries { storage.set(entry.value, for: entry.key) }
     }
+}
+
+/// The keys of +[NSDictionary sharedKeySetForKeys:], each copied once.
+final class SharedKeySetStorage {
+    let keys: [id]
+
+    init(_ keys: [id]) {
+        var seen: Set<ObjectKey> = []
+        self.keys = keys.filter { seen.insert(ObjectKey(object: $0)).inserted }
+            .map { ObjC.send($0, Selectors.copyWithZone, nil) ?? ObjC.retain($0)! }
+    }
+
+    deinit { keys.forEach { ObjC.release($0) } }
+}
+
+enum SharedKeySets {
+    nonisolated(unsafe) static var keySetClass: Class!
+
+    static func keys(_ object: id?) -> [id] { Storage.get(object, as: SharedKeySetStorage.self)?.keys ?? [] }
+
+    /// A new key set, autoreleased.
+    static func make(_ keys: [id]) -> id? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(keySetClass)) else { return nil }
+        Storage.set(object, SharedKeySetStorage(keys))
+        return ObjC.autorelease(object)
+    }
+}
+
+/// +[NSDictionary sharedKeySetForKeys:]'s opaque key set, which answers
+/// what Darwin's does for its keys.
+@ObjCClass("NSSharedKeySet")
+public final class NSSharedKeySet: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        SharedKeySets.keySetClass = cls.storage
+    }
+
+    private var keys: [id] { SharedKeySets.keys(objcObject) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: SharedKeySets.keySetClass)
+    }
+
+    @ObjCMethod("count") func count() -> UInt { UInt(keys.count) }
+    @ObjCMethod("allKeys") func allKeys() -> NSArray { Arrays.owned(keys) }
+
+    /// The key's position, or NSNotFound.
+    @ObjCMethod("indexForKey:")
+    func index(forKey key: ObjCObject?) -> UInt {
+        guard let key else { return notFound }
+        return keys.firstIndex { ObjectKey(object: $0) == ObjectKey(object: key.id) }.map { UInt($0) } ?? notFound
+    }
+
+    @ObjCMethod("keyAtIndex:")
+    func key(at index: UInt) -> UnsafeMutableRawPointer? {
+        let all = keys
+        return Int(index) < all.count ? all[Int(index)] : nil
+    }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { ObjC.retain(objcObject) }
 }
 
 /// + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil — value, key pairs.

@@ -90,6 +90,32 @@ VARIADIC perry_imp_initSetWithObjects, perry_foundation_initSetWithObjects, 3
 VARIADIC perry_imp_initWithObjectsAndKeys, perry_foundation_initWithObjectsAndKeys, 3
     .hidden perry_imp_raiseFormat
 VARIADIC perry_imp_raiseFormat, perry_foundation_raiseFormat, 4
+    .hidden perry_imp_encodeValuesOfObjCTypes
+VARIADIC perry_imp_encodeValuesOfObjCTypes, perry_foundation_encodeValuesOfObjCTypes, 3
+    .hidden perry_imp_decodeValuesOfObjCTypes
+VARIADIC perry_imp_decodeValuesOfObjCTypes, perry_foundation_decodeValuesOfObjCTypes, 3
+    .hidden perry_imp_initWithFormatLocale
+VARIADIC perry_imp_initWithFormatLocale, perry_foundation_initWithFormatLocale, 4
+    .hidden perry_imp_localizedAttributedStringWithFormat
+VARIADIC perry_imp_localizedAttributedStringWithFormat, perry_foundation_localizedAttributedStringWithFormat, 3
+    .hidden perry_imp_localizedAttributedStringWithFormatOptions
+VARIADIC perry_imp_localizedAttributedStringWithFormatOptions, perry_foundation_localizedAttributedStringWithFormatOptions, 4
+    .hidden perry_imp_localizedAttributedStringWithFormatContext
+VARIADIC perry_imp_localizedAttributedStringWithFormatContext, perry_foundation_localizedAttributedStringWithFormatContext, 4
+    .hidden perry_imp_appendLocalizedFormat
+VARIADIC perry_imp_appendLocalizedFormat, perry_foundation_appendLocalizedFormat, 3
+    .hidden perry_imp_stringWithValidatedFormat
+VARIADIC perry_imp_stringWithValidatedFormat, perry_foundation_stringWithValidatedFormat, 5
+    .hidden perry_imp_initWithValidatedFormat
+VARIADIC perry_imp_initWithValidatedFormat, perry_foundation_initWithValidatedFormat, 5
+    .hidden perry_imp_localizedAttributedStringWithFormatOptionsContext
+VARIADIC perry_imp_localizedAttributedStringWithFormatOptionsContext, perry_foundation_localizedAttributedStringWithFormatOptionsContext, 5
+    .hidden perry_imp_attributedInitWithFormat
+VARIADIC perry_imp_attributedInitWithFormat, perry_foundation_attributedInitWithFormat, 5
+    .hidden perry_imp_initWithValidatedFormatLocale
+VARIADIC perry_imp_initWithValidatedFormatLocale, perry_foundation_initWithValidatedFormatLocale, 6
+    .hidden perry_imp_attributedInitWithFormatContext
+VARIADIC perry_imp_attributedInitWithFormatContext, perry_foundation_attributedInitWithFormatContext, 6
 
 #endif
 

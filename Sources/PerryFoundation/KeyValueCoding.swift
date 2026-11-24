@@ -93,7 +93,17 @@ enum KeyValueCoding {
         }
     }
 
+    /// Whether the object is one of Foundation's collections, whose
+    /// -valueForKey: and -setValue:forKey: reach their members.
+    static func isCollection(_ object: id) -> Bool {
+        ObjC.isKind(object, of: Arrays.arrayClass) || ObjC.isKind(object, of: Sets.setClass)
+            || ObjC.isKind(object, of: OrderedSets.setClass) || ObjC.isKind(object, of: Dictionaries.dictionaryClass)
+    }
+
     static func value(_ object: id, _ key: String) -> id? {
+        // A collection's "@key" is the collection's own key, as Darwin's
+        // collections hand it to NSObject's -valueForKey: ("@count").
+        if key.hasPrefix("@"), key.count > 1, isCollection(object) { return accessorValue(object, String(key.dropFirst())) }
         if ObjC.isKind(object, of: Dictionaries.dictionaryClass) {
             return Dictionaries.value(object, for: Strings.autoreleased(key))
         }
@@ -112,6 +122,12 @@ enum KeyValueCoding {
         if ObjC.isKind(object, of: OrderedSets.setClass) {
             return OrderedSets.make(OrderedSets.setClass, OrderedSets.storage(object).members.compactMap(element))
         }
+        return accessorValue(object, key)
+    }
+
+    /// The key's value by the object's accessors, indexed accessors or
+    /// instance variable, as NSObject's -valueForKey: finds it.
+    static func accessorValue(_ object: id, _ key: String) -> id? {
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
         // get<Key>, <key>, is<Key>, then _<key>, as Foundation looks.
         for name in ["get" + capitalized, key, "is" + capitalized, "_" + key] {
@@ -133,6 +149,18 @@ enum KeyValueCoding {
             let keyObject = Strings.autoreleased(key)
             if let value { _ = ObjC.send(object, ObjC.selector("setObject:forKey:"), value, keyObject) }
             else { _ = ObjC.send(object, ObjC.selector("removeObjectForKey:"), keyObject) }
+            return
+        }
+        // An array's, a set's or an ordered set's members are each sent
+        // -setValue:forKey:, as Darwin's collections do.
+        let members: [id]?
+        if ObjC.isKind(object, of: Arrays.arrayClass) { members = Arrays.elements(object) }
+        else if ObjC.isKind(object, of: Sets.setClass) { members = Sets.elements(object) }
+        else if ObjC.isKind(object, of: OrderedSets.setClass) { members = OrderedSets.storage(object).members }
+        else { members = nil }
+        if let members {
+            let keyObject = Strings.autoreleased(key)
+            for member in members { _ = ObjC.send(member, ObjC.selector("setValue:forKey:"), value, keyObject) }
             return
         }
         // set<Key>:, then _set<Key>:, as Foundation looks.
@@ -581,17 +609,7 @@ extension NSArray {
     /// A stable sort by each descriptor in turn.
     @ObjCMethod("sortedArrayUsingDescriptors:")
     func sorted(usingDescriptors descriptors: ObjCObject?) -> ObjCObject {
-        let keys = descriptors.map { Arrays.elements($0.objcObject) } ?? []
-        let compare = ObjC.selector("compareObject:toObject:")
-        let sorted = Arrays.elements(objcObject).enumerated().sorted { a, b in
-            for descriptor in keys {
-                let order = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id, SEL, id, id) -> Int).self)(
-                    descriptor, compare, a.element, b.element)
-                if order != 0 { return order < 0 }
-            }
-            return a.offset < b.offset
-        }.map(\.element)
-        return ObjCObject(Arrays.autoreleased(sorted))
+        ObjCObject(Arrays.autoreleased(SortDescriptors.sorted(Arrays.elements(objcObject), by: descriptors?.objcObject)))
     }
 }
 

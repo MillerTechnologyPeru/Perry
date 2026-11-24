@@ -1,5 +1,6 @@
 import CPerryFoundation
 import FoundationEssentials
+import Glibc
 import PerryObjCInterop
 
 // NSHashTable, NSMapTable and NSPointerArray: collections whose members may
@@ -16,6 +17,8 @@ struct PointerOptions {
     let retains: Bool
     let equality: Bool
     let copies: Bool
+    /// C strings (3 << 8), compared by their characters.
+    let cStrings: Bool
 
     init(_ raw: UInt) {
         let memory = raw & 0xff, personality = raw & 0xff00
@@ -24,6 +27,7 @@ struct PointerOptions {
         retains = memory == 0 && objects
         equality = personality == 0
         copies = raw & 0x10000 != 0 && objects
+        cStrings = personality == 0x300
     }
 
     static let strong = PointerOptions(0)
@@ -60,6 +64,7 @@ final class PointerSlot {
 
 private func same(_ a: id?, _ b: id?, _ options: PointerOptions) -> Bool {
     guard let a, let b else { return a == b }
+    if options.cStrings { return a == b || strcmp(a.assumingMemoryBound(to: CChar.self), b.assumingMemoryBound(to: CChar.self)) == 0 }
     return a == b || (options.equality && ObjC.sendBool(a, Selectors.isEqual, b))
 }
 
@@ -139,8 +144,11 @@ public final class NSHashTable: NSObject {
         return self
     }
 
+    /// The functions' options; functions set on them aren't called.
     @ObjCMethod("initWithPointerFunctions:capacity:")
-    func initialize(functions: ObjCObject?, capacity: UInt) -> Self { initialize(options: 0, capacity: capacity) }
+    func initialize(functions: ObjCObject?, capacity: UInt) -> Self {
+        initialize(options: PointerFunctionsObjects.options(functions?.objcObject), capacity: capacity)
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -174,7 +182,8 @@ public final class NSHashTable: NSObject {
     @ObjCMethod("allObjects") func allObjects() -> UnsafeMutableRawPointer? { Arrays.autoreleased(state.members) }
     @ObjCMethod("setRepresentation") func setRepresentation() -> UnsafeMutableRawPointer? { Sets.autoreleased(state.members) }
     @ObjCMethod("objectEnumerator") func objectEnumerator() -> ObjCObject { Enumerators.make(state.members) }
-    @ObjCMethod("pointerFunctions") func pointerFunctions() -> UnsafeMutableRawPointer? { nil }
+    /// A new NSPointerFunctions for the table's options.
+    @ObjCMethod("pointerFunctions") func pointerFunctions() -> UnsafeMutableRawPointer? { PointerFunctionsObjects.make(options: state.rawOptions) }
 
     @ObjCMethod("unionHashTable:")
     func union(_ other: ObjCObject?) { for member in HashTables.state(other?.id)?.members ?? [] { state.add(member) } }
@@ -318,6 +327,13 @@ public final class NSMapTable: NSObject {
         return self
     }
 
+    /// The functions' options; functions set on them aren't called.
+    @ObjCMethod("initWithKeyPointerFunctions:valuePointerFunctions:capacity:")
+    func initialize(keyFunctions: ObjCObject?, valueFunctions: ObjCObject?, capacity: UInt) -> Self {
+        initialize(keyOptions: PointerFunctionsObjects.options(keyFunctions?.objcObject),
+                   valueOptions: PointerFunctionsObjects.options(valueFunctions?.objcObject), capacity: capacity)
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -350,8 +366,10 @@ public final class NSMapTable: NSObject {
     @ObjCMethod("objectEnumerator") func objectEnumerator() -> ObjCObject { Enumerators.make(state.live.map(\.value)) }
     @ObjCMethod("dictionaryRepresentation")
     func dictionaryRepresentation() -> UnsafeMutableRawPointer? { Dictionaries.autoreleased(state.live) }
-    @ObjCMethod("keyPointerFunctions") func keyPointerFunctions() -> UnsafeMutableRawPointer? { nil }
-    @ObjCMethod("valuePointerFunctions") func valuePointerFunctions() -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("keyPointerFunctions")
+    func keyPointerFunctions() -> UnsafeMutableRawPointer? { PointerFunctionsObjects.make(options: state.rawKeyOptions) }
+    @ObjCMethod("valuePointerFunctions")
+    func valuePointerFunctions() -> UnsafeMutableRawPointer? { PointerFunctionsObjects.make(options: state.rawValueOptions) }
 
     /// for (id key in table) enumerates the keys.
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
@@ -414,12 +432,24 @@ public final class NSPointerArray: NSObject {
     @ObjCClassMethod("weakObjectsPointerArray")
     static func weakObjects(_ cls: ObjCClass) -> UnsafeMutableRawPointer { PointerArrays.make(5, cls: cls.pointer) }
 
+    @ObjCClassMethod("pointerArrayWithPointerFunctions:")
+    static func make(_ cls: ObjCClass, functions: ObjCObject?) -> UnsafeMutableRawPointer {
+        PointerArrays.make(PointerFunctionsObjects.options(functions?.objcObject), cls: cls.pointer)
+    }
+
     @ObjCMethod("init") func initialize() -> Self { initialize(options: 0) }
     @ObjCMethod("initWithOptions:")
     func initialize(options: UInt) -> Self {
         Storage.set(objcObject, PointerArrayState(options))
         return self
     }
+
+    /// The functions' options; functions set on them aren't called.
+    @ObjCMethod("initWithPointerFunctions:")
+    func initialize(functions: ObjCObject?) -> Self { initialize(options: PointerFunctionsObjects.options(functions?.objcObject)) }
+
+    /// A new NSPointerFunctions for the array's options.
+    @ObjCMethod("pointerFunctions") func pointerFunctions() -> UnsafeMutableRawPointer? { PointerFunctionsObjects.make(options: state.rawOptions) }
 
     @ObjCMethod("dealloc")
     func dealloc() {

@@ -1,4 +1,6 @@
 import CPerryFoundation
+import FoundationEssentials
+import FoundationInternationalization
 import Glibc
 import PerryObjCInterop
 import Synchronization
@@ -340,6 +342,33 @@ public class NSNumber: NSValue {
     @ObjCMethod("floatValue") func floatValue() -> Float { Float(number.double) }
     @ObjCMethod("stringValue") func stringValue() -> String { number.description }
     @ObjCMethod("description") override func description() -> String { number.description }
+
+    /// The number as an NSDecimal: an integer exactly, a double as Darwin
+    /// converts it (NSDecimalNumber.swift's NSDecimal and DecimalNumbers).
+    @ObjCMethod("decimalValue") func decimalValue() -> NSDecimal { NSDecimal(DecimalNumbers.decimal(of: objcObject)) }
+
+    /// With a locale, the digits as its decimal numbers have them: grouped,
+    /// with its decimal separator; with nil, or anything not a locale, the
+    /// description. Booleans are 0 and 1 either way.
+    @ObjCMethod("descriptionWithLocale:")
+    func description(withLocale locale: ObjCObject?) -> String {
+        guard let locale, let chosen = Storage.get(locale.id, as: LocaleStorage.self)?.locale else { return number.description }
+        switch number.value {
+        case .bool: return number.description
+        case .signed(let value): return IntegerFormatStyle<Int64>(locale: chosen).format(value)
+        case .unsigned(let value): return IntegerFormatStyle<UInt64>(locale: chosen).format(value)
+        case .double(let value):
+            let text = number.description
+            let decimal = chosen.decimalSeparator ?? "."
+            // Not finite, or in exponent form: only the separator changes.
+            guard value.isFinite, !text.contains("e"), let whole = Int64(text.split(separator: ".")[0].drop { $0 == "-" }) else {
+                return text.replacing(".", with: decimal)
+            }
+            let parts = text.split(separator: ".", maxSplits: 1)
+            let grouped = IntegerFormatStyle<Int64>(locale: chosen).format(whole)
+            return (text.hasPrefix("-") ? "-" : "") + grouped + (parts.count > 1 ? decimal + parts[1] : "")
+        }
+    }
 
     // MARK: Comparing
 

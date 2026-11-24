@@ -328,6 +328,43 @@ open class NSURLCredentialStorage: NSObject {
     func defaultCredential(for space: NSObject?) -> NSObject? {
         ProtectionSpaces.space(space).flatMap { CredentialStorage.store.defaultCredential($0) }
     }
+
+    // The task variants: one store serves every task, as for a session
+    // without a credential storage of its own.
+
+    /// Calls a handler taking one object on another thread, as Darwin calls
+    /// these.
+    private func later(_ handler: ObjCBlock?, _ object: NSObject?) {
+        guard let handler else { return }
+        nonisolated(unsafe) let block = handler
+        nonisolated(unsafe) let value = object
+        SocketTaskThreads.spawn {
+            block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(block.object, value?.objcObject)
+        }
+    }
+
+    /// The handler: void (^)(NSDictionary<NSString *, NSURLCredential *> *).
+    @ObjCMethod("getCredentialsForProtectionSpace:task:completionHandler:")
+    func getCredentials(for space: NSObject?, task: NSObject?, completionHandler: ObjCBlock?) {
+        later(completionHandler, credentials(for: space))
+    }
+
+    @ObjCMethod("setCredential:forProtectionSpace:task:")
+    func setCredential(_ credential: NSObject, for space: NSObject, task: NSObject?) { setCredential(credential, for: space) }
+
+    @ObjCMethod("removeCredential:forProtectionSpace:options:task:")
+    func removeCredential(_ credential: NSObject, for space: NSObject, options: NSObject?, task: NSObject?) {
+        removeCredential(credential, for: space)
+    }
+
+    /// The handler: void (^)(NSURLCredential *).
+    @ObjCMethod("getDefaultCredentialForProtectionSpace:task:completionHandler:")
+    func getDefaultCredential(for space: NSObject?, task: NSObject?, completionHandler: ObjCBlock?) {
+        later(completionHandler, defaultCredential(for: space))
+    }
+
+    @ObjCMethod("setDefaultCredential:forProtectionSpace:task:")
+    func setDefaultCredential(_ credential: NSObject, for space: NSObject, task: NSObject?) { setDefaultCredential(credential, for: space) }
 }
 
 // MARK: - Challenges

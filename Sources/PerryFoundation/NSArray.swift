@@ -126,6 +126,74 @@ enum Arrays {
     static var constantMutationCounter: UnsafeMutablePointer<UInt> {
         withUnsafeMutablePointer(to: &constantMutations) { $0 }
     }
+
+    /// The indexes among `indexes` (every one when nil) whose element passes
+    /// the test block (BOOL (^)(id, NSUInteger, BOOL *)), in ascending
+    /// order; tried from the last with NSEnumerationReverse (2), and only up
+    /// to the first that passes with `first`. Concurrent tries run in order.
+    static func passing(_ elements: [id], _ indexes: [Int]?, options: UInt, block: id, first: Bool, method: String) -> [Int] {
+        var order = indexes ?? Array(elements.indices)
+        if let beyond = order.first(where: { $0 >= elements.count }) {
+            foundationFatal("\(method): index \(beyond) beyond bounds [0 .. \(elements.count - 1)]")
+        }
+        if options & 2 != 0 { order.reverse() }
+        typealias Test = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let test = Blocks.invoke(block, as: Test.self)
+        var found: [Int] = []
+        for index in order {
+            var stop = false
+            if test(block, elements[index], UInt(index), &stop) {
+                found.append(index)
+                if first { break }
+            }
+            if stop { break }
+        }
+        return found.sorted()
+    }
+
+    /// An index set of single indexes, autoreleased.
+    static func indexSet(_ indexes: [Int]) -> UnsafeMutableRawPointer? {
+        IndexSets.make(UnsafeMutableRawPointer(IndexSets.setClass), indexes.map { $0..<$0 + 1 })
+    }
+
+    /// A binary search of the range, which the comparator keeps sorted:
+    /// with NSBinarySearchingInsertionIndex (1 << 10) where the object
+    /// would go (after any equal ones with NSBinarySearchingLastEqual,
+    /// 1 << 9, else before them), otherwise an equal element's index (the
+    /// first with NSBinarySearchingFirstEqual, 1 << 8, the last with
+    /// LastEqual) or NSNotFound.
+    static func search(_ all: [id], for object: id?, in range: NSRange, options: UInt, comparator: ObjCBlock) -> UInt {
+        let start = min(Int(range.location), all.count)
+        let end = min(all.count, start + Int(range.length))
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        let insertion = options & (1 << 10) != 0, last = options & (1 << 9) != 0
+        // The first element not less than the object, or with `last` the
+        // first greater than it.
+        func bound(upper: Bool) -> Int {
+            var low = start, high = end
+            while low < high {
+                let middle = (low + high) / 2
+                let order = compare(comparator.object, all[middle], object)
+                if order < 0 || (upper && order == 0) { low = middle + 1 } else { high = middle }
+            }
+            return low
+        }
+        if insertion { return UInt(bound(upper: last)) }
+        guard object != nil else { return notFound }
+        let lower = bound(upper: false)
+        guard lower < end, compare(comparator.object, all[lower], object) == 0 else { return notFound }
+        return last ? UInt(bound(upper: true) - 1) : UInt(lower)
+    }
+}
+
+/// Darwin's arrays, sets and ordered sets can't be observed themselves:
+/// adding or removing an observer of one raises.
+enum CollectionObserving {
+    static func unsupported(_ object: id, _ method: String, _ keyPath: ObjCObject?) -> Never {
+        let path = Strings.value(of: keyPath?.objcObject) ?? "(null)"
+        Exceptions.raise(name: "NSInvalidArgumentException",
+                         reason: "[<\(ObjC.className(object)) \(object)> \(method)] is not supported. Key path: \(path)")
+    }
 }
 
 /// NSArray.
@@ -324,6 +392,26 @@ public class NSArray: NSObject {
         return found.map { UInt($0) } ?? notFound
     }
 
+    /// The first element in the range equal to `target`, or NSNotFound.
+    @ObjCMethod("indexOfObject:inRange:")
+    func index(of target: ObjCObject?, in range: NSRange) -> UInt {
+        let all = elements
+        guard Int(range.location + range.length) <= all.count else {
+            foundationFatal("-[NSArray indexOfObject:inRange:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(all.count - 1)]")
+        }
+        guard let target else { return notFound }
+        let start = Int(range.location)
+        let found: Int? = (start..<(start + Int(range.length))).first { ObjectKey(object: all[$0]) == ObjectKey(object: target.id) }
+        return found.map { UInt($0) } ?? notFound
+    }
+
+    /// The first element that the other array has one equal to.
+    @ObjCMethod("firstObjectCommonWithArray:")
+    func firstObjectCommon(with other: NSArray?) -> ObjCObject? {
+        let theirs = Set((other?.elements ?? []).map { ObjectKey(object: $0) })
+        return elements.first { theirs.contains(ObjectKey(object: $0)) }.map(ObjCObject.init)
+    }
+
     @ObjCMethod("containsObject:")
     func contains(_ target: ObjCObject?) -> Bool { index(of: target) != notFound }
 
@@ -428,28 +516,45 @@ public class NSArray: NSObject {
     /// LastEqual) or NSNotFound.
     @ObjCMethod("indexOfObject:inSortedRange:options:usingComparator:")
     func index(of target: ObjCObject?, inSortedRange range: NSRange, options: UInt, comparator: ObjCBlock) -> UInt {
-        let all = elements
-        let start = min(Int(range.location), all.count)
-        let end = min(all.count, start + Int(range.length))
-        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
-        let object = target?.id
-        let insertion = options & (1 << 10) != 0, last = options & (1 << 9) != 0
-        // The first element not less than the object, or with `last` the
-        // first greater than it.
-        func bound(upper: Bool) -> Int {
-            var low = start, high = end
-            while low < high {
-                let middle = (low + high) / 2
-                let order = compare(comparator.object, all[middle], object)
-                if order < 0 || (upper && order == 0) { low = middle + 1 } else { high = middle }
-            }
-            return low
-        }
-        if insertion { return UInt(bound(upper: last)) }
-        guard object != nil else { return notFound }
-        let lower = bound(upper: false)
-        guard lower < end, compare(comparator.object, all[lower], object) == 0 else { return notFound }
-        return last ? UInt(bound(upper: true) - 1) : UInt(lower)
+        Arrays.search(elements, for: target?.id, in: range, options: options, comparator: comparator)
+    }
+
+    /// An opaque hint for -sortedArrayUsingFunction:context:hint:, which
+    /// sorts as well without it here.
+    @ObjCMethod("sortedArrayHint")
+    func sortedArrayHint() -> UnsafeMutableRawPointer? {
+        var count = UInt64(elements.count)
+        return DataObjects.autoreleased(Data(bytes: &count, count: 8))
+    }
+
+    @ObjCMethod("sortedArrayUsingFunction:context:hint:")
+    func sorted(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?, hint: ObjCObject?) -> NSArray {
+        sorted(function: function, context: context)
+    }
+
+    /// The strings whose path extension is one of `extensions`, compared
+    /// exactly.
+    @ObjCMethod("pathsMatchingExtensions:")
+    func paths(matchingExtensions extensions: NSArray?) -> NSArray {
+        let wanted = Set((extensions?.elements ?? []).compactMap { Strings.value(of: $0) })
+        return Arrays.owned(elements.filter { element in
+            guard let path = Strings.value(of: element) else { return false }
+            return wanted.contains(Paths.pathExtension(path))
+        })
+    }
+
+    /// The first of the indexes, by NSEnumerationOptions, whose element passes.
+    @ObjCMethod("indexOfObjectAtIndexes:options:passingTest:")
+    func index(atIndexes indexes: ObjCObject, options: UInt, passingTest block: ObjCObject) -> UInt {
+        let found = Arrays.passing(elements, IndexSets.storage(indexes.id).indexes, options: options, block: block.id, first: true,
+                                   method: "-[NSArray indexOfObjectAtIndexes:options:passingTest:]")
+        return found.first.map { UInt($0) } ?? notFound
+    }
+
+    @ObjCMethod("indexesOfObjectsAtIndexes:options:passingTest:")
+    func indexes(atIndexes indexes: ObjCObject, options: UInt, passingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        Arrays.indexSet(Arrays.passing(elements, IndexSets.storage(indexes.id).indexes, options: options, block: block.id,
+                                       first: false, method: "-[NSArray indexesOfObjectsAtIndexes:options:passingTest:]"))
     }
 
     @ObjCMethod("enumerateObjectsUsingBlock:")
@@ -488,6 +593,61 @@ public class NSArray: NSObject {
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state, buffer: objects, count: count) ?? 0
+    }
+
+    // MARK: Observing
+
+    /// An array can't be observed itself: these raise, as on Darwin. Its
+    /// elements can, through the methods with indexes.
+    @ObjCMethod("addObserver:forKeyPath:options:context:")
+    func rejectObserver(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, options: UInt, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "addObserver:forKeyPath:options:context:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:context:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:context:", keyPath)
+    }
+
+    private func observed(_ indexes: ObjCObject?, _ method: String) -> [id] {
+        let all = elements
+        return IndexSets.storage(indexes?.id).indexes.map { index in
+            guard index < all.count else { foundationFatal("-[NSArray \(method)]: index \(index) beyond bounds [0 .. \(all.count - 1)]") }
+            return all[index]
+        }
+    }
+
+    /// Each element at the indexes is sent -addObserver:forKeyPath:options:context:.
+    @ObjCMethod("addObserver:toObjectsAtIndexes:forKeyPath:options:context:")
+    func addObserver(_ observer: ObjCObject?, toObjectsAtIndexes indexes: ObjCObject?, forKeyPath keyPath: ObjCObject?, options: UInt,
+                     context: UnsafeMutableRawPointer?) {
+        typealias Add = @convention(c) (id, SEL, id?, id?, UInt, UnsafeMutableRawPointer?) -> Void
+        let add = unsafeBitCast(ObjC.msgSend, to: Add.self)
+        for element in observed(indexes, "addObserver:toObjectsAtIndexes:forKeyPath:options:context:") {
+            add(element, ObjC.selector("addObserver:forKeyPath:options:context:"), observer?.objcObject, keyPath?.objcObject, options, context)
+        }
+    }
+
+    @ObjCMethod("removeObserver:fromObjectsAtIndexes:forKeyPath:")
+    func removeObserver(_ observer: ObjCObject?, fromObjectsAtIndexes indexes: ObjCObject?, forKeyPath keyPath: ObjCObject?) {
+        for element in observed(indexes, "removeObserver:fromObjectsAtIndexes:forKeyPath:") {
+            _ = ObjC.send(element, ObjC.selector("removeObserver:forKeyPath:"), observer?.objcObject, keyPath?.objcObject)
+        }
+    }
+
+    @ObjCMethod("removeObserver:fromObjectsAtIndexes:forKeyPath:context:")
+    func removeObserver(_ observer: ObjCObject?, fromObjectsAtIndexes indexes: ObjCObject?, forKeyPath keyPath: ObjCObject?,
+                        context: UnsafeMutableRawPointer?) {
+        typealias Remove = @convention(c) (id, SEL, id?, id?, UnsafeMutableRawPointer?) -> Void
+        let remove = unsafeBitCast(ObjC.msgSend, to: Remove.self)
+        for element in observed(indexes, "removeObserver:fromObjectsAtIndexes:forKeyPath:context:") {
+            remove(element, ObjC.selector("removeObserver:forKeyPath:context:"), observer?.objcObject, keyPath?.objcObject, context)
+        }
     }
 }
 
@@ -698,18 +858,80 @@ public class NSMutableArray: NSArray {
     /// A stable sort by each NSSortDescriptor in turn.
     @ObjCMethod("sortUsingDescriptors:")
     func sort(usingDescriptors descriptors: ObjCObject?) {
-        let keys = descriptors.map { Arrays.elements($0.objcObject) } ?? []
-        guard !keys.isEmpty else { return }
-        let compare = ObjC.selector("compareObject:toObject:")
-        let send = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id, SEL, id, id) -> Int).self)
-        storage.objects = storage.objects.enumerated().sorted { a, b in
-            for descriptor in keys {
-                let order = send(descriptor, compare, a.element, b.element)
-                if order != 0 { return order < 0 }
-            }
-            return a.offset < b.offset
-        }.map(\.element)
+        guard !Arrays.elements(descriptors?.objcObject).isEmpty else { return }
+        storage.objects = SortDescriptors.sorted(storage.objects, by: descriptors?.objcObject)
         storage.enumeration.mutated()
+    }
+
+    /// Replaces the elements with `replacement`, retaining the new ones
+    /// before the old ones go.
+    private func replaceAll(with replacement: [id]) {
+        for element in replacement { _ = ObjC.retain(element) }
+        let removed = storage.objects
+        storage.objects = replacement
+        storage.enumeration.mutated()
+        for element in removed { ObjC.release(element) }
+    }
+
+    private func checkRange(_ range: NSRange, _ method: String) {
+        let count = storage.objects.count
+        if Int(range.location) + Int(range.length) > count {
+            foundationFatal("-[NSMutableArray \(method)]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(count - 1)]")
+        }
+    }
+
+    /// Removes the elements in the range equal to `element`.
+    @ObjCMethod("removeObject:inRange:")
+    func remove(_ element: ObjCObject?, inRange range: NSRange) {
+        checkRange(range, "removeObject:inRange:")
+        guard let element else { return }
+        let key = ObjectKey(object: element.id), start = Int(range.location), end = start + Int(range.length)
+        replaceAll(with: storage.objects.enumerated().filter { !(start..<end).contains($0.offset) || ObjectKey(object: $0.element) != key }
+            .map(\.element))
+    }
+
+    /// Removes the elements in the range that are `element` itself.
+    @ObjCMethod("removeObjectIdenticalTo:inRange:")
+    func remove(identical element: ObjCObject?, inRange range: NSRange) {
+        checkRange(range, "removeObjectIdenticalTo:inRange:")
+        guard let element else { return }
+        let start = Int(range.location), end = start + Int(range.length)
+        replaceAll(with: storage.objects.enumerated().filter { !(start..<end).contains($0.offset) || $0.element != element.id }.map(\.element))
+    }
+
+    /// Removes the elements at a C array of indexes, in any order.
+    @ObjCMethod("removeObjectsFromIndices:numIndices:")
+    func remove(fromIndices indices: UnsafePointer<UInt>?, numIndices count: UInt) {
+        guard let indices, count > 0 else { return }
+        let doomed = Set(UnsafeBufferPointer(start: indices, count: Int(count)).map { Int($0) })
+        if let beyond = doomed.first(where: { $0 >= storage.objects.count }) {
+            Arrays.checkIndex(UInt(beyond), storage.objects.count, "removeObjectsFromIndices:numIndices:")
+        }
+        replaceAll(with: storage.objects.enumerated().filter { !doomed.contains($0.offset) }.map(\.element))
+    }
+
+    /// The elements at the indexes, in ascending order, replaced by the
+    /// array's, in order.
+    @ObjCMethod("replaceObjectsAtIndexes:withObjects:")
+    func replace(atIndexes indexes: ObjCObject, withObjects objects: NSArray?) {
+        let positions = IndexSets.storage(indexes.id).indexes, replacements = objects?.elements ?? []
+        guard positions.count == replacements.count else {
+            foundationFatal("-[NSMutableArray replaceObjectsAtIndexes:withObjects:]: count of array (\(replacements.count)) differs from count of index set (\(positions.count))")
+        }
+        var updated = storage.objects
+        for (position, replacement) in zip(positions, replacements) {
+            Arrays.checkIndex(UInt(position), updated.count, "replaceObjectsAtIndexes:withObjects:")
+            updated[position] = replacement
+        }
+        replaceAll(with: updated)
+    }
+
+    /// The array made what the difference turns it into; unchanged if the
+    /// difference doesn't apply to it.
+    @ObjCMethod("applyDifference:")
+    func apply(difference: UnsafeMutableRawPointer?) {
+        guard let changed = NSOrderedCollectionDifference.apply(difference, to: storage.objects) else { return }
+        replaceAll(with: changed)
     }
 
     @ObjCMethod("sortUsingSelector:")

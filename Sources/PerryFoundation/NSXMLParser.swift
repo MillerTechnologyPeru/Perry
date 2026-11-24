@@ -61,7 +61,15 @@ private let delegateAbortedParseError = 512
 
 /// A parser's input, settings and the parse in progress.
 final class XMLParserState {
-    let input: Data
+    var input: Data
+    /// -initWithStream:'s stream, held, read whole when the parse starts.
+    var stream: id?
+    /// NSXMLParserExternalEntityResolvingPolicy, Never (0) by default, and
+    /// whether the app set it.
+    var entityPolicy: UInt = 0
+    var entityPolicySet = false
+    /// The external entities' URLs the parser may load, copied; nil for any.
+    var allowedEntityURLs: id?
     /// The delegate; not retained.
     var delegate: UnsafeMutableRawPointer?
     var processNamespaces = false
@@ -83,6 +91,37 @@ final class XMLParserState {
 
     deinit {
         ObjC.release(error)
+        ObjC.release(stream)
+        ObjC.release(allowedEntityURLs)
+    }
+
+    /// Whether an external entity may be loaded: only when resolving them,
+    /// unless the policy set says never, and one of the allowed URLs if
+    /// those were given.
+    func mayResolve(_ systemID: UnsafePointer<xmlChar>?) -> Bool {
+        guard resolveExternalEntities, !(entityPolicySet && entityPolicy == 0) else { return false }
+        guard let allowedEntityURLs else { return true }
+        guard let systemID else { return false }
+        let wanted = String(cString: systemID)
+        let allowed = ObjC.enumerated(ObjC.send(allowedEntityURLs, Selectors.objectEnumerator)).compactMap { URLs.url($0) }
+        return allowed.contains { $0.absoluteString == wanted || $0.path == wanted || $0.lastPathComponent == wanted }
+    }
+
+    /// The stream's bytes, read to its end, once: the parse's input.
+    func readStream() {
+        guard let stream else { return }
+        if CFReadStreamGetStatus(stream) == 0 { _ = CFReadStreamOpen(stream) }
+        var contents = Data()
+        var buffer = [UInt8](repeating: 0, count: 16384)
+        while true {
+            let count = CFReadStreamRead(stream, &buffer, buffer.count)
+            if count <= 0 { break }
+            contents.append(contentsOf: buffer[..<count])
+        }
+        CFReadStreamClose(stream)
+        ObjC.release(stream)
+        self.stream = nil
+        input = contents
     }
 
     var wrapper: NSXMLParser? { parser.map { NSXMLParser(objcObject: $0, ownership: .retain) } }
@@ -155,7 +194,7 @@ private func makeHandler() -> xmlSAXHandler {
     handler.entityDecl = xmlSAX2EntityDecl
     handler.setDocumentLocator = xmlSAX2SetDocumentLocator
     handler.resolveEntity = { context, publicID, systemID in
-        guard let state = XMLParserState.from(context), state.resolveExternalEntities else { return nil }
+        guard let state = XMLParserState.from(context), state.mayResolve(systemID) else { return nil }
         return xmlSAX2ResolveEntity(context, publicID, systemID)
     }
 
@@ -315,10 +354,37 @@ public class NSXMLParser: NSObject {
         return self
     }
 
+    /// The stream's contents, read when the parse starts (opening the
+    /// stream if it isn't open yet).
+    @ObjCMethod("initWithStream:")
+    func initialize(stream: ObjCObject?) -> Self? {
+        guard let stream else { return nil }
+        let state = XMLParserState(Data())
+        state.stream = ObjC.retain(stream.id)
+        Storage.set(objcObject, state)
+        return self
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: XMLParsers.parserClass)
+    }
+
+    @ObjCMethod("externalEntityResolvingPolicy") func externalEntityResolvingPolicy() -> UInt { state?.entityPolicy ?? 0 }
+    @ObjCMethod("setExternalEntityResolvingPolicy:")
+    func setExternalEntityResolvingPolicy(_ policy: UInt) {
+        state?.entityPolicy = policy
+        state?.entityPolicySet = true
+    }
+
+    @ObjCMethod("allowedExternalEntityURLs") func allowedExternalEntityURLs() -> UnsafeMutableRawPointer? { state?.allowedEntityURLs }
+    @ObjCMethod("setAllowedExternalEntityURLs:")
+    func setAllowedExternalEntityURLs(_ urls: ObjCObject?) {
+        guard let state else { return }
+        let copy = urls.flatMap { ObjC.send($0.id, Selectors.copyWithZone, nil) }
+        ObjC.release(state.allowedEntityURLs)
+        state.allowedEntityURLs = copy
     }
 
     @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { state?.delegate }
@@ -363,6 +429,7 @@ public class NSXMLParser: NSObject {
     @ObjCMethod("parse")
     func parse() -> Bool {
         guard let state, state.context == nil else { return false }
+        state.readStream()
         var handler = makeHandler()
         guard let context = xmlCreatePushParserCtxt(&handler, nil, nil, 0, nil) else { return false }
         context.pointee._private = Unmanaged.passUnretained(state).toOpaque()

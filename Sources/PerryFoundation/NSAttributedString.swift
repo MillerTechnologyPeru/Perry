@@ -168,6 +168,24 @@ public class NSAttributedString: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         AttributedStrings.stringClass = cls.storage
+        cls.addMethod("localizedAttributedStringWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_localizedAttributedStringWithFormat), isClassMethod: true)
+        cls.addMethod("localizedAttributedStringWithFormat:options:", types: "@32@0:8@16Q24",
+                      implementation: variadicEntry(perry_imp_localizedAttributedStringWithFormatOptions), isClassMethod: true)
+        cls.addMethod("localizedAttributedStringWithFormat:context:", types: "@32@0:8@16@24",
+                      implementation: variadicEntry(perry_imp_localizedAttributedStringWithFormatContext), isClassMethod: true)
+        // Five fixed arguments: armv7's entry points take four.
+        #if !arch(arm)
+        cls.addMethod("localizedAttributedStringWithFormat:options:context:", types: "@40@0:8@16Q24@32",
+                      implementation: variadicEntry(perry_imp_localizedAttributedStringWithFormatOptionsContext), isClassMethod: true)
+        cls.addMethod("initWithFormat:options:locale:", types: "@40@0:8@16Q24@32",
+                      implementation: variadicEntry(perry_imp_attributedInitWithFormat), isClassMethod: false)
+        #endif
+        // Six: x86_64's take five.
+        #if !arch(arm) && !arch(x86_64)
+        cls.addMethod("initWithFormat:options:locale:context:", types: "@48@0:8@16Q24@32@40",
+                      implementation: variadicEntry(perry_imp_attributedInitWithFormatContext), isClassMethod: false)
+        #endif
     }
 
     var storage: AttributedStorage {
@@ -197,24 +215,26 @@ public class NSAttributedString: NSObject {
         return self
     }
 
-    /// The format's text with the arguments formatted into it, taking the
-    /// attributes of the format's first run.
+    /// The format with the arguments formatted into it, as
+    /// AttributedFormatting formats; the locale is not applied.
     @ObjCMethod("initWithFormat:options:locale:arguments:", types: "@48@0:8@16Q24@32*40")
     func initialize(format: ObjCObject?, options: UInt, locale: ObjCObject?, arguments: UnsafeRawPointer?) -> Self {
-        let source = AttributedStrings.storage(format?.objcObject)
-        let text = String(decoding: source?.units ?? [], as: UTF16.self)
-        var formatted = text
-        if let arguments {
-            var darwin = DarwinArguments(arguments)
-            formatted = Format.string(text, &darwin)
-        }
-        let storage = AttributedStorage(units: Array(formatted.utf16), attributes: nil)
-        if let first = source?.runs.first, !storage.runs.isEmpty {
-            storage.runs.forEach { ObjC.release($0.attributes) }
-            storage.runs = [AttributeRun(length: storage.units.count, attributes: ObjC.retain(first.attributes)!)]
-        }
-        Storage.set(objcObject, storage)
+        Storage.set(objcObject, AttributedFormatting.format(format?.objcObject, options: options, arguments: arguments))
         return self
+    }
+
+    /// As without the context: inflection is not applied here.
+    @ObjCMethod("initWithFormat:options:locale:context:arguments:", types: "@56@0:8@16Q24@32@40*48")
+    func initialize(format: ObjCObject?, options: UInt, locale: ObjCObject?, context: ObjCObject?, arguments: UnsafeRawPointer?) -> Self {
+        initialize(format: format, options: options, locale: locale, arguments: arguments)
+    }
+
+    /// The string with its inflection rules applied: they need Apple's
+    /// morphology data, so it is a copy, as Darwin gives for text with
+    /// none.
+    @ObjCMethod("attributedStringByInflectingString")
+    func inflectingString() -> UnsafeMutableRawPointer? {
+        AttributedStrings.make(AttributedStorage(copying: storage), mutable: false).flatMap { ObjC.autorelease($0) }
     }
 
     /// From a keyed archive or nib: the string and its attributes.
@@ -493,6 +513,8 @@ public class NSAttributedString: NSObject {
 public class NSMutableAttributedString: NSAttributedString {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         AttributedStrings.mutableClass = cls.storage
+        cls.addMethod("appendLocalizedFormat:", types: "v24@0:8@16",
+                      implementation: variadicEntry(perry_imp_appendLocalizedFormat), isClassMethod: false)
     }
 
     /// The characters as an NSMutableString: changes to it change the
@@ -702,4 +724,163 @@ public final class NSConcreteMutableAttributedString: NSMutableAttributedString 
 @c(_CFAttributedStringGetString)
 public func CFAttributedStringGetString(_ string: id?) -> id? {
     ObjC.send(string, ObjC.selector("string"))
+}
+
+// MARK: - Formatting
+
+/// Formats of attributed strings: the format's text keeps its attributes;
+/// each specifier's text takes the attributes of the specifier's first
+/// character, and an NSAttributedString argument of %@ keeps its own,
+/// over those (NSAttributedStringFormattingInsertArgumentAttributesWithoutMerging,
+/// option 1: instead of them). The locale is not applied, nor inflection.
+enum AttributedFormatting {
+    static let withoutMerging: UInt = 1
+
+    /// The end of the specifier starting with "%" at `start`: flags,
+    /// position, width, precision, length and conversion.
+    private static func specifierEnd(_ units: [UInt16], _ start: Int) -> Int {
+        var index = start + 1
+        let modifiers = Set("-+ #0'123456789$.*hlqLzjt".utf16)
+        while index < units.count, modifiers.contains(units[index]) { index += 1 }
+        return min(index + 1, units.count)
+    }
+
+    /// The position a specifier names ("%2$@" is 2), if it does.
+    private static func position(_ specifier: [UInt16]) -> Int? {
+        let digits = specifier.dropFirst().prefix { (0x30...0x39).contains($0) }
+        guard !digits.isEmpty, specifier.dropFirst(digits.count + 1).first == 0x24 else { return nil }   // $
+        return Int(String(decoding: digits, as: UTF16.self))
+    }
+
+    /// One dictionary of both runs' attributes, the argument's winning; +1.
+    private static func merged(_ base: id, _ top: id, options: UInt) -> id {
+        if options & withoutMerging != 0 { return ObjC.retain(top)! }
+        var entries = Dictionaries.entries(base)
+        for entry in Dictionaries.entries(top) {
+            entries.removeAll { AttributedStorage.equal($0.key, entry.key) }
+            entries.append(entry)
+        }
+        return Dictionaries.make(entries)
+    }
+
+    static func format(_ format: id?, options: UInt, arguments: UnsafeRawPointer?) -> AttributedStorage {
+        let source = AttributedStrings.storage(format) ?? AttributedStorage(units: Array((Strings.value(of: format) ?? "").utf16), attributes: nil)
+        let units = source.units
+        let result = AttributedStorage(units: [], attributes: nil)
+        func attributesAt(_ index: Int) -> id {
+            source.run(at: index).map { source.runs[$0.index].attributes } ?? Dictionaries.autoreleased([])
+        }
+        func append(_ text: [UInt16], _ dictionary: id) {
+            guard !text.isEmpty else { return }
+            result.units += text
+            result.runs.append(AttributeRun(length: text.count, attributes: ObjC.retain(dictionary)!))
+        }
+        var darwin = arguments.map { DarwinArguments($0) }
+        var index = 0, literalStart = 0
+        func flushLiteral(_ end: Int) {
+            for run in source.runs(in: NSRange(location: UInt(literalStart), length: UInt(end - literalStart))) {
+                result.units += units[literalStart..<literalStart + run.length]
+                result.runs.append(AttributeRun(length: run.length, attributes: ObjC.retain(run.attributes)!))
+                literalStart += run.length
+            }
+        }
+        while index < units.count {
+            guard units[index] == 0x25 else { index += 1; continue }   // %
+            flushLiteral(index)
+            let end = specifierEnd(units, index)
+            let specifier = Array(units[index..<end])
+            let attributes = attributesAt(index)
+            if specifier == [0x25, 0x25] {
+                append([0x25], attributes)
+            } else if specifier.last == 0x40, darwin != nil {   // @
+                let object: id?
+                if let position = position(specifier) {
+                    var positional = darwin!.at(position)
+                    object = positional.nextPointer()
+                } else {
+                    object = darwin!.nextPointer()
+                }
+                if let object, ObjC.isKind(object, of: AttributedStrings.stringClass), let inserted = AttributedStrings.storage(object) {
+                    var offset = 0
+                    for run in inserted.runs {
+                        let dictionary = merged(attributes, run.attributes, options: options)
+                        append(Array(inserted.units[offset..<offset + run.length]), dictionary)
+                        ObjC.release(dictionary)
+                        offset += run.length
+                    }
+                } else {
+                    append(Array((Strings.value(of: object) ?? Format.describe(object)).utf16), attributes)
+                }
+            } else if darwin != nil {
+                append(Array(Format.string(String(decoding: specifier, as: UTF16.self), &darwin!).utf16), attributes)
+            } else {
+                append(specifier, attributes)
+            }
+            index = end
+            literalStart = end
+        }
+        flushLiteral(units.count)
+        result.merge()
+        return result
+    }
+
+    /// An autoreleased attributed string of `cls`, the formatted format.
+    static func autoreleased(_ cls: id?, _ format: id?, options: UInt, arguments: UnsafeRawPointer?) -> id? {
+        guard let object = Storage.allocate(cls ?? UnsafeMutableRawPointer(AttributedStrings.stringClass)) else { return nil }
+        Storage.set(object, AttributedFormatting.format(format, options: options, arguments: arguments))
+        return ObjC.autorelease(object)
+    }
+}
+
+/// + (instancetype)localizedAttributedStringWithFormat:(NSAttributedString *)format, ...
+@c
+public func perry_foundation_localizedAttributedStringWithFormat(_ cls: id?, _ cmd: SEL?, _ format: id?,
+                                                                 _ arguments: UnsafeRawPointer?) -> id? {
+    AttributedFormatting.autoreleased(cls, format, options: 0, arguments: arguments)
+}
+
+/// + (instancetype)localizedAttributedStringWithFormat:options:, ...
+@c
+public func perry_foundation_localizedAttributedStringWithFormatOptions(_ cls: id?, _ cmd: SEL?, _ format: id?, _ options: UInt,
+                                                                        _ arguments: UnsafeRawPointer?) -> id? {
+    AttributedFormatting.autoreleased(cls, format, options: options, arguments: arguments)
+}
+
+/// + (instancetype)localizedAttributedStringWithFormat:context:, ...: the
+/// context, for inflection, is not applied.
+@c
+public func perry_foundation_localizedAttributedStringWithFormatContext(_ cls: id?, _ cmd: SEL?, _ format: id?, _ context: id?,
+                                                                        _ arguments: UnsafeRawPointer?) -> id? {
+    AttributedFormatting.autoreleased(cls, format, options: 0, arguments: arguments)
+}
+
+/// + (instancetype)localizedAttributedStringWithFormat:options:context:, ...
+@c
+public func perry_foundation_localizedAttributedStringWithFormatOptionsContext(_ cls: id?, _ cmd: SEL?, _ format: id?, _ options: UInt,
+                                                                               _ context: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    AttributedFormatting.autoreleased(cls, format, options: options, arguments: arguments)
+}
+
+/// - (instancetype)initWithFormat:options:locale:, ...
+@c
+public func perry_foundation_attributedInitWithFormat(_ object: id?, _ cmd: SEL?, _ format: id?, _ options: UInt, _ locale: id?,
+                                                      _ arguments: UnsafeRawPointer?) -> id? {
+    guard let object else { return nil }
+    Storage.set(object, AttributedFormatting.format(format, options: options, arguments: arguments))
+    return object
+}
+
+/// - (instancetype)initWithFormat:options:locale:context:, ...
+@c
+public func perry_foundation_attributedInitWithFormatContext(_ object: id?, _ cmd: SEL?, _ format: id?, _ options: UInt, _ locale: id?,
+                                                             _ context: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    perry_foundation_attributedInitWithFormat(object, cmd, format, options, locale, arguments)
+}
+
+/// - (void)appendLocalizedFormat:(NSAttributedString *)format, ...
+@c
+public func perry_foundation_appendLocalizedFormat(_ object: id?, _ cmd: SEL?, _ format: id?, _ arguments: UnsafeRawPointer?) {
+    guard let object, let storage = AttributedStrings.storage(object) else { return }
+    let formatted = AttributedFormatting.format(format, options: 0, arguments: arguments)
+    storage.replace(NSRange(location: UInt(storage.units.count), length: 0), with: formatted.units, attributes: formatted.runs)
 }

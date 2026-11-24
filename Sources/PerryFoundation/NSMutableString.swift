@@ -1,6 +1,7 @@
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
+import _FoundationICU
 
 enum MutableStrings {
     nonisolated(unsafe) static var mutableClass: Class!
@@ -99,6 +100,22 @@ public class NSMutableString: NSString {
                                method: "replaceCharactersInRange:withCharacters:length:")
     }
 
+    /// The range's characters through an ICU transform (NSStringTransform's
+    /// names are ICU's IDs); the range they take afterwards. False, and
+    /// nothing changed, for a transform ICU doesn't know.
+    @ObjCMethod("applyTransform:reverse:range:updatedRange:")
+    func applyTransform(_ transform: String?, reverse: Bool, range: NSRange, updatedRange: UnsafeMutablePointer<NSRange>?) -> Bool {
+        let units = Array(storage.value.utf16)
+        let start = Int(range.location), end = start + Int(range.length)
+        guard let transform, start <= end, end <= units.count,
+              let transformed = ICUTransforms.apply(transform, to: String(decoding: units[start..<end], as: UTF16.self), reverse: reverse)
+        else { return false }
+        MutableStrings.replace(objcObject, location: range.location, length: range.length, with: transformed,
+                               method: "applyTransform:reverse:range:updatedRange:")
+        updatedRange?.pointee = NSRange(location: range.location, length: UInt(transformed.utf16.count))
+        return true
+    }
+
     /// Each match in the range, searched with the options; the number replaced.
     @ObjCMethod("replaceOccurrencesOfString:withString:options:range:")
     func replaceOccurrences(of target: String, with replacement: String, options: UInt, range: NSRange) -> UInt {
@@ -128,4 +145,38 @@ public func perry_foundation_appendFormat(_ object: id?, _ cmd: SEL?, _ format: 
     guard let arguments else { return }
     var darwin = DarwinArguments(arguments)
     MutableStrings.storage(object).value += Format.string(Strings.value(of: format) ?? "", &darwin)
+}
+
+/// ICU's transliterators, by transform ID.
+enum ICUTransforms {
+    /// The text transliterated, forward or in reverse; nil for an ID ICU
+    /// can't open.
+    static func apply(_ transform: String, to text: String, reverse: Bool) -> String? {
+        // Darwin's XML hex transform leaves ASCII as it is, as CFString's
+        // does (XMLHex): ICU's own encodes every character, so it is
+        // filtered to the rest. Its reverse decodes any "&#x…;".
+        let identifier = transform == "Any-Hex/XML" && !reverse ? "[:^ASCII:] Any-Hex/XML" : transform
+        var status = U_ZERO_ERROR
+        let transliterator = ICU.withUChars(identifier) { id, length in
+            swift_utrans_openU(id, length, reverse ? UTRANS_REVERSE : UTRANS_FORWARD, nil, 0, nil, &status)
+        }
+        guard let transliterator, !ICU.failed(status) else { return nil }
+        defer { swift_utrans_close(transliterator) }
+        let source = Array(text.utf16)
+        var capacity = max(source.count * 4, 64)
+        while true {
+            var units = source + Array(repeating: 0, count: capacity - source.count)
+            var length = Int32(source.count), limit = length
+            status = U_ZERO_ERROR
+            units.withUnsafeMutableBufferPointer { buffer in
+                swift_utrans_transUChars(transliterator, buffer.baseAddress, &length, Int32(capacity), 0, &limit, &status)
+            }
+            if status == U_BUFFER_OVERFLOW_ERROR, capacity < 1 << 24 {
+                capacity = max(capacity * 4, Int(length) + 1)
+                continue
+            }
+            guard !ICU.failed(status) else { return nil }
+            return String(decoding: units[0..<Int(length)], as: UTF16.self)
+        }
+    }
 }

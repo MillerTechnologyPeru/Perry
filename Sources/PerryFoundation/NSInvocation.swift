@@ -291,11 +291,23 @@ public final class NSInvocation: NSObject {
     }
 
     @ObjCMethod("invoke")
-    func invoke() {
+    func invoke() { call(using: nil) }
+
+    /// Calls the implementation given with the invocation's target, selector
+    /// and arguments, in place of the method the selector names.
+    @ObjCMethod("invokeUsingIMP:")
+    func invoke(usingIMP implementation: UnsafeRawPointer?) {
+        guard let implementation else { return }
+        call(using: implementation)
+    }
+
+    private func call(using explicit: UnsafeRawPointer?) {
         guard let storage, let details = MethodSignatures.storage(storage.signature),
               let target = storage.object(at: 0) else { return }
         let imp: UnsafeRawPointer
-        if details.parts.count > 1, String(cString: details.parts[1]).hasPrefix("@?") {
+        if let explicit {
+            imp = explicit
+        } else if details.parts.count > 1, String(cString: details.parts[1]).hasPrefix("@?") {
             // A block's signature: the target is the block, called through
             // its invoke pointer with the block and then its arguments.
             guard let invoke = target.load(fromByteOffset: MemoryLayout<Int>.size + 8, as: UnsafeRawPointer?.self) else { return }

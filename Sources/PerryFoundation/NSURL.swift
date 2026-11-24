@@ -73,6 +73,27 @@ enum URLs {
     }
 
 
+    /// A file URL for `path` against a base: an absolute path ignores it,
+    /// and without one a relative path is the current directory's, as
+    /// +fileURLWithPath:relativeToURL: makes them.
+    static func fileURL(_ path: String, isDirectory: Bool?, relativeTo base: URL?) -> URL {
+        guard let base, !path.hasPrefix("/") else { return fileURL(path, isDirectory: isDirectory) }
+        let hint: URL.DirectoryHint = isDirectory.map { $0 ? .isDirectory : .notDirectory } ?? .checkFileSystem
+        return URL(filePath: path, directoryHint: hint, relativeTo: base)
+    }
+
+    /// The URL in a data representation, relative to a base: its bytes as
+    /// UTF-8, else ISO Latin 1, with the characters a URL can't hold
+    /// percent-encoded, as +URLWithDataRepresentation:relativeToURL: reads
+    /// them. Empty data is the base's own URL, with nothing of its own.
+    static func url(dataRepresentation data: Data, relativeTo base: URL?) -> URL? {
+        let text = String(bytes: data, encoding: .utf8) ?? String(data.map { Character(Unicode.Scalar($0)) })
+        if text.isEmpty { return base.flatMap { URL(string: "", relativeTo: $0) } ?? URL(string: "") }
+        if let url = URL(string: text, relativeTo: base) { return url }
+        guard let encoded = URL(string: text, encodingInvalidCharacters: true)?.relativeString else { return nil }
+        return URL(string: encoded, relativeTo: base)
+    }
+
     /// A new NSURL wrapped for returning, +0; nil for no URL.
     static func wrapped(_ url: URL?, cls: ObjCClass? = nil) -> NSURL? {
         autoreleased(url, cls: cls?.pointer).map { NSURL(objCReturnValue: $0) }
@@ -167,6 +188,75 @@ public final class NSURL: NSObject {
         setURL(path.map { URLs.fileURL($0, isDirectory: isDirectory) })
     }
 
+    /// Relative to a base: a relative path stays relative, and the base
+    /// resolves it; an absolute one ignores the base.
+    @ObjCClassMethod("fileURLWithPath:relativeToURL:")
+    static func fileURL(_ cls: ObjCClass, path: String?, relativeTo base: NSURL?) -> NSURL? {
+        guard let path else { return nil }
+        return URLs.wrapped(URLs.fileURL(path, isDirectory: nil, relativeTo: base?.url), cls: cls)
+    }
+
+    @ObjCClassMethod("fileURLWithPath:isDirectory:relativeToURL:")
+    static func fileURL(_ cls: ObjCClass, path: String?, isDirectory: Bool, relativeTo base: NSURL?) -> NSURL? {
+        guard let path else { return nil }
+        return URLs.wrapped(URLs.fileURL(path, isDirectory: isDirectory, relativeTo: base?.url), cls: cls)
+    }
+
+    @ObjCMethod("initFileURLWithPath:relativeToURL:")
+    func initialize(filePath path: String?, relativeTo base: NSURL?) -> Self? {
+        setURL(path.map { URLs.fileURL($0, isDirectory: nil, relativeTo: base?.url) })
+    }
+
+    @ObjCMethod("initFileURLWithPath:isDirectory:relativeToURL:")
+    func initialize(filePath path: String?, isDirectory: Bool, relativeTo base: NSURL?) -> Self? {
+        setURL(path.map { URLs.fileURL($0, isDirectory: isDirectory, relativeTo: base?.url) })
+    }
+
+    /// A path's bytes on disk are UTF-8 here.
+    private static func path(fileSystemRepresentation bytes: UnsafePointer<CChar>?) -> String? {
+        bytes.map { String(cString: $0) }
+    }
+
+    @ObjCClassMethod("fileURLWithFileSystemRepresentation:isDirectory:relativeToURL:")
+    static func fileURL(_ cls: ObjCClass, fileSystemRepresentation bytes: UnsafePointer<CChar>?, isDirectory: Bool,
+                        relativeTo base: NSURL?) -> NSURL? {
+        guard let path = NSURL.path(fileSystemRepresentation: bytes) else { return nil }
+        return URLs.wrapped(URLs.fileURL(path, isDirectory: isDirectory, relativeTo: base?.url), cls: cls)
+    }
+
+    @ObjCMethod("initFileURLWithFileSystemRepresentation:isDirectory:relativeToURL:")
+    func initialize(fileSystemRepresentation bytes: UnsafePointer<CChar>?, isDirectory: Bool, relativeTo base: NSURL?) -> Self? {
+        setURL(NSURL.path(fileSystemRepresentation: bytes).map { URLs.fileURL($0, isDirectory: isDirectory, relativeTo: base?.url) })
+    }
+
+    // MARK: Data representations
+
+    @ObjCClassMethod("URLWithDataRepresentation:relativeToURL:")
+    static func url(_ cls: ObjCClass, dataRepresentation data: ObjCObject?, relativeTo base: NSURL?) -> NSURL? {
+        URLs.wrapped(URLs.url(dataRepresentation: DataObjects.data(data?.id), relativeTo: base?.url), cls: cls)
+    }
+
+    @ObjCMethod("initWithDataRepresentation:relativeToURL:")
+    func initialize(dataRepresentation data: ObjCObject?, relativeTo base: NSURL?) -> Self? {
+        setURL(URLs.url(dataRepresentation: DataObjects.data(data?.id), relativeTo: base?.url))
+    }
+
+    /// As +URLWithDataRepresentation:relativeToURL:, resolved to an absolute
+    /// URL with no base.
+    @ObjCClassMethod("absoluteURLWithDataRepresentation:relativeToURL:")
+    static func absoluteURL(_ cls: ObjCClass, dataRepresentation data: ObjCObject?, relativeTo base: NSURL?) -> NSURL? {
+        URLs.wrapped(URLs.url(dataRepresentation: DataObjects.data(data?.id), relativeTo: base?.url)?.absoluteURL, cls: cls)
+    }
+
+    @ObjCMethod("initAbsoluteURLWithDataRepresentation:relativeToURL:")
+    func initialize(absoluteDataRepresentation data: ObjCObject?, relativeTo base: NSURL?) -> Self? {
+        setURL(URLs.url(dataRepresentation: DataObjects.data(data?.id), relativeTo: base?.url)?.absoluteURL)
+    }
+
+    /// The URL's relative string, as UTF-8.
+    @ObjCMethod("dataRepresentation")
+    func dataRepresentation() -> NSData { DataObjects.owned(DataStorage(Data(url.relativeString.utf8))) }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -241,8 +331,14 @@ public final class NSURL: NSObject {
         case URLResourceKeys.NSURLCreationDateKey: return date(info.st_ctim)
         case URLResourceKeys.NSURLContentAccessDateKey: return date(info.st_atim)
         case URLResourceKeys.NSURLLinkCountKey: return Numbers.make(nil, .signed(Int64(info.st_nlink)))
-        default: return nil
+        default: return URLFileValues.value(forKey: key, path: filePath, info: info)
         }
+    }
+
+    /// A key's value: the file's, else one set with
+    /// -setTemporaryResourceValue:forKey:.
+    func resourceOrTemporaryValue(forKey key: String) -> id? {
+        resourceValue(forKey: key) ?? URLResourceProperties.temporaryValue(url, key)
     }
 
     /// The size of the file system the file is on, and the room left on
@@ -261,7 +357,7 @@ public final class NSURL: NSObject {
 
     @ObjCMethod("getResourceValue:forKey:error:")
     func getResourceValue(_ value: UnsafeMutablePointer<id?>?, forKey key: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool {
-        value?.pointee = key.flatMap { Strings.value(of: $0.id) }.flatMap(resourceValue(forKey:))
+        value?.pointee = key.flatMap { Strings.value(of: $0.id) }.flatMap(resourceOrTemporaryValue(forKey:))
         return true
     }
 
@@ -269,11 +365,47 @@ public final class NSURL: NSObject {
     @ObjCMethod("resourceValuesForKeys:error:")
     func resourceValues(forKeys keys: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
         let entries = Arrays.elements(keys?.id).compactMap { key -> (key: id, value: id)? in
-            guard let name = Strings.value(of: key), let value = resourceValue(forKey: name) else { return nil }
+            guard let name = Strings.value(of: key), let value = resourceOrTemporaryValue(forKey: name) else { return nil }
             return (key, value)
         }
         return Dictionaries.autoreleased(entries)
     }
+
+    // A promised item is one iCloud hasn't downloaded yet; with no iCloud,
+    // every item is the file itself, so these are the plain forms.
+
+    @ObjCMethod("getPromisedItemResourceValue:forKey:error:")
+    func getPromisedItemResourceValue(_ value: UnsafeMutablePointer<id?>?, forKey key: ObjCObject?,
+                                      error: UnsafeMutablePointer<id?>?) -> Bool {
+        getResourceValue(value, forKey: key, error: error)
+    }
+
+    @ObjCMethod("promisedItemResourceValuesForKeys:error:")
+    func promisedItemResourceValues(forKeys keys: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        resourceValues(forKeys: keys, error: error)
+    }
+
+    @ObjCMethod("checkPromisedItemIsReachableAndReturnError:")
+    func checkPromisedItemIsReachable(error: UnsafeMutablePointer<id?>?) -> Bool { checkResourceIsReachable(error: error) }
+
+    /// A value kept with the URL until its cache is cleared, which the
+    /// file's own value for the key comes before. Every NSURL (and CFURL)
+    /// of the same URL shares them.
+    @ObjCMethod("setTemporaryResourceValue:forKey:")
+    func setTemporaryResourceValue(_ value: ObjCObject?, forKey key: ObjCObject?) {
+        guard let name = key.flatMap({ Strings.value(of: $0.id) }) else { return }
+        URLResourceProperties.setTemporary(url, name, value?.id)
+    }
+
+    /// Only temporary values are cached here: the file's are read afresh.
+    @ObjCMethod("removeCachedResourceValueForKey:")
+    func removeCachedResourceValue(forKey key: ObjCObject?) {
+        guard let name = key.flatMap({ Strings.value(of: $0.id) }) else { return }
+        URLResourceProperties.clear(url, name)
+    }
+
+    @ObjCMethod("removeAllCachedResourceValues")
+    func removeAllCachedResourceValues() { URLResourceProperties.clear(url, nil) }
 
     @ObjCMethod("path")
     func path() -> String {
@@ -362,7 +494,82 @@ public final class NSURL: NSObject {
     @ObjCMethod("startAccessingSecurityScopedResource") func startAccessingSecurityScopedResource() -> Bool { true }
     @ObjCMethod("stopAccessingSecurityScopedResource") func stopAccessingSecurityScopedResource() {}
 
+    @ObjCMethod("initByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:")
+    func initialize(resolvingBookmarkData data: ObjCObject?, options: UInt, relativeTo base: NSURL?,
+                    bookmarkDataIsStale stale: UnsafeMutablePointer<Bool>?, error: UnsafeMutablePointer<id?>?) -> Self? {
+        stale?.pointee = false
+        guard let url = NSURL.bookmarkURL(DataObjects.data(data?.id)) else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 259,
+                                                 description: "The file couldn’t be opened because it isn’t in the correct format.")
+            return setURL(nil)
+        }
+        return setURL(url)
+    }
+
+    /// Finder's alias files are symbolic links here, as Darwin counts them
+    /// too: a link resolves to what it points at (through each link in
+    /// turn); anything else, and an item that isn't there, is the URL itself.
+    @ObjCClassMethod("URLByResolvingAliasFileAtURL:options:error:")
+    static func resolvingAliasFile(_ cls: ObjCClass, at url: NSURL?, options: UInt, error: UnsafeMutablePointer<id?>?) -> NSURL? {
+        guard let url else { return nil }
+        guard url.url.isFileURL else { return URLs.wrapped(url.url, cls: cls) }
+        var path = url.path()
+        for _ in 0..<32 {
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK else { break }
+            var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
+            let length = readlink(path, &buffer, Int(PATH_MAX))
+            guard length > 0 else { break }
+            let target = String(decoding: buffer.prefix(length).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            path = target.hasPrefix("/") ? target : Paths.appending(Paths.deletingLastComponent(path), target)
+        }
+        guard path != url.path() else { return URLs.wrapped(url.url, cls: cls) }
+        return URLs.wrapped(URL(filePath: Paths.normalized(path), directoryHint: .checkFileSystem), cls: cls)
+    }
+
     @ObjCMethod("hasDirectoryPath") func hasDirectoryPath() -> Bool { url.hasDirectoryPath }
+
+    /// The path's bytes, with their terminating NUL, when they fit; any
+    /// URL's path, as Darwin gives a web URL's too.
+    @ObjCMethod("getFileSystemRepresentation:maxLength:")
+    func getFileSystemRepresentation(_ buffer: UnsafeMutablePointer<CChar>?, maxLength: UInt) -> Bool {
+        let bytes = Array(path().utf8CString)
+        guard let buffer, bytes.count <= Int(maxLength) else { return false }
+        buffer.update(from: bytes, count: bytes.count)
+        return true
+    }
+
+    // MARK: Loading (NSURLHandle's, deprecated)
+
+    /// The URL's contents, read as +[NSData dataWithContentsOfURL:] reads them.
+    @ObjCMethod("resourceDataUsingCache:")
+    func resourceData(usingCache: Bool) -> NSData? { NSData.contents(of: self).map { DataObjects.owned(DataStorage($0)) } }
+
+    /// Writes a file URL's contents; other URLs can't be written.
+    @ObjCMethod("setResourceData:")
+    func setResourceData(_ data: ObjCObject?) -> Bool {
+        url.isFileURL && (try? DataObjects.data(data?.id).write(to: url)) != nil
+    }
+
+    /// Loads the contents and tells the client, as NSURLHandle did:
+    /// -URL:resourceDataDidBecomeAvailable: and -URLResourceDidFinishLoading:,
+    /// or -URL:resourceDidFailLoadingWithReason:.
+    @ObjCMethod("loadResourceDataNotifyingClient:usingCache:")
+    func loadResourceData(notifyingClient client: ObjCObject?, usingCache: Bool) {
+        guard let client else { return }
+        if let bytes = NSData.contents(of: self) {
+            _ = ObjC.send(client.id, ObjC.selector("URL:resourceDataDidBecomeAvailable:"), objcObject, DataObjects.autoreleased(bytes))
+            _ = ObjC.send(client.id, ObjC.selector("URLResourceDidFinishLoading:"), objcObject)
+        } else {
+            _ = ObjC.send(client.id, ObjC.selector("URL:resourceDidFailLoadingWithReason:"), objcObject,
+                          Strings.autoreleased("The resource could not be loaded."))
+        }
+    }
+
+    /// There are no URL handles.
+    @ObjCMethod("URLHandleUsingCache:") func urlHandle(usingCache: Bool) -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("propertyForKey:") func property(forKey key: ObjCObject?) -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("setProperty:forKey:") func setProperty(_ value: ObjCObject?, forKey key: ObjCObject?) -> Bool { false }
 
     @ObjCMethod("fileSystemRepresentation")
     func fileSystemRepresentation() -> UnsafePointer<CChar>? {
@@ -413,7 +620,6 @@ public final class NSURL: NSObject {
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSURL { self }
 }
 
-/// Resource keys, which name the values a URL's file has.
 /// Resource keys, which name the values a URL's file has; each one's value
 /// is its name.
 @ObjCConstants
@@ -450,7 +656,8 @@ enum URLResourceKeys {
     static let NSURLGenerationIdentifierKey = "NSURLGenerationIdentifierKey"
     static let NSURLHasHiddenExtensionKey = "NSURLHasHiddenExtensionKey"
     static let NSURLIsAliasFileKey = "NSURLIsAliasFileKey"
-    static let NSURLIsApplicationKey = "NSURLIsApplicationKey"
+    /// Darwin's value has a leading underscore, as kCFURLIsApplicationKey's.
+    static let NSURLIsApplicationKey = "_NSURLIsApplicationKey"
     static let NSURLIsMountTriggerKey = "NSURLIsMountTriggerKey"
     static let NSURLIsPackageKey = "NSURLIsPackageKey"
     static let NSURLIsSystemImmutableKey = "NSURLIsSystemImmutableKey"
@@ -516,4 +723,118 @@ enum URLResourceKeys {
     static let NSURLVolumeURLForRemountingKey = "NSURLVolumeURLForRemountingKey"
     static let NSURLVolumeURLKey = "NSURLVolumeURLKey"
     static let NSURLVolumeUUIDStringKey = "NSURLVolumeUUIDStringKey"
+}
+
+/// The resource values NSURL reads beyond the basic ones: the file's type,
+/// identity and flags, and what the volume it is on can do. Keys are
+/// matched by their values, so newer keys need no constant here. Values
+/// that need a service Linux lacks are what Darwin gives without it: no
+/// file protection class, and nothing for iCloud's keys.
+enum URLFileValues {
+    /// An exported constant's object (NSURLFileResourceTypeRegular and its
+    /// kin), the one programs compare against; else a string of its value.
+    static func constant(_ name: String) -> id? {
+        ObjCConstantExports.shared.slot(name)?.pointee ?? Strings.autoreleased(name)
+    }
+
+    private static func boolean(_ flag: Bool) -> id? { Numbers.make(nil, .bool(flag)) }
+
+    private static func number(_ value: Int64) -> id? { Numbers.make(nil, .signed(value)) }
+
+    private static func bytes<T>(_ values: T...) -> id? {
+        var data = Data()
+        for value in values { withUnsafeBytes(of: value) { data.append(contentsOf: $0) } }
+        return DataObjects.autoreleased(data)
+    }
+
+    /// llistxattr, looked up as the C library has it.
+    nonisolated(unsafe) private static let listAttributes = dlsym(UnsafeMutableRawPointer(bitPattern: 0), "llistxattr").map {
+        unsafeBitCast($0, to: (@convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int) -> Int).self)
+    }
+
+    static func value(forKey key: String, path: String, info: stat) -> id? {
+        let type = info.st_mode & S_IFMT
+        switch key {
+        case URLResourceKeys.NSURLFileResourceTypeKey:
+            switch type {
+            case S_IFDIR: return constant("NSURLFileResourceTypeDirectory")
+            case S_IFREG: return constant("NSURLFileResourceTypeRegular")
+            case S_IFLNK: return constant("NSURLFileResourceTypeSymbolicLink")
+            case S_IFIFO: return constant("NSURLFileResourceTypeNamedPipe")
+            case S_IFCHR: return constant("NSURLFileResourceTypeCharacterSpecial")
+            case S_IFBLK: return constant("NSURLFileResourceTypeBlockSpecial")
+            case S_IFSOCK: return constant("NSURLFileResourceTypeSocket")
+            default: return constant("NSURLFileResourceTypeUnknown")
+            }
+        // The inode: Darwin's content identifier is the file's too, until
+        // a clone shares its content.
+        case "NSURLFileIdentifierKey", "NSURLFileContentIdentifierKey": return Numbers.make(nil, .unsigned(UInt64(info.st_ino)))
+        // The inode and then the device, as Darwin lays the identifier out.
+        case URLResourceKeys.NSURLFileResourceIdentifierKey: return bytes(UInt64(info.st_ino), UInt64(info.st_dev))
+        case URLResourceKeys.NSURLVolumeIdentifierKey: return bytes(UInt64(info.st_dev))
+        case URLResourceKeys.NSURLPreferredIOBlockSizeKey: return number(Int64(info.st_blksize))
+        case "NSURLDirectoryEntryCountKey":
+            guard type == S_IFDIR else { return nil }
+            return number(Int64((try? FileManager.default.contentsOfDirectory(atPath: path))?.count ?? 0))
+        case "NSURLMayHaveExtendedAttributesKey":
+            return boolean(path.withCString { (listAttributes?($0, nil, 0) ?? 0) > 0 })
+        case "NSURLIsSparseKey": return boolean(type == S_IFREG && Int64(info.st_blocks) * 512 < Int64(info.st_size))
+        // A symbolic link is an alias file to Darwin.
+        case URLResourceKeys.NSURLIsAliasFileKey: return boolean(type == S_IFLNK)
+        case URLResourceKeys.NSURLIsPackageKey: return boolean(type == S_IFDIR && URLResourceProperties.isPackage(path))
+        case URLResourceKeys.NSURLIsApplicationKey: return boolean(type == S_IFDIR && Paths.pathExtension(path).lowercased() == "app")
+        case URLResourceKeys.NSURLIsVolumeKey:
+            return boolean(path == "/" || FileVolume.all().contains { $0.mountPoint == path })
+        case URLResourceKeys.NSURLHasHiddenExtensionKey, URLResourceKeys.NSURLIsUserImmutableKey, URLResourceKeys.NSURLIsSystemImmutableKey,
+             URLResourceKeys.NSURLIsMountTriggerKey, "NSURLIsPurgeableKey", "NSURLMayShareFileContentKey":
+            return boolean(false)
+        case URLResourceKeys.NSURLLabelNumberKey: return number(0)
+        case URLResourceKeys.NSURLParentDirectoryURLKey:
+            guard path != "/" else { return nil }
+            return URLs.autoreleased(URL(filePath: Paths.deletingLastComponent(path), directoryHint: .isDirectory))
+        case URLResourceKeys.NSURLCanonicalPathKey:
+            guard let real = realpath(path, nil) else { return Strings.autoreleased(path) }
+            defer { free(real) }
+            return Strings.autoreleased(String(cString: real))
+        case URLResourceKeys.NSURLTypeIdentifierKey: return Strings.autoreleased(URLResourceProperties.typeIdentifier(path, type))
+        case URLResourceKeys.NSURLFileSecurityKey:
+            return FileSecurities.autoreleased(owner: info.st_uid, group: info.st_gid, mode: UInt16(truncatingIfNeeded: info.st_mode))
+        default:
+            return key.hasPrefix("NSURLVolume") ? volumeValue(forKey: key, path: path) : nil
+        }
+    }
+
+    /// File systems that keep Linux's immutable flag (chattr +i).
+    private static let immutableFlagTypes: Set<String> = ["ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "jfs", "reiserfs", "bcachefs"]
+    /// File systems renameat2 can swap two names on (RENAME_EXCHANGE) and
+    /// rename without replacing on (RENAME_NOREPLACE).
+    private static let swapRenamingTypes: Set<String> = ["ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "tmpfs", "shmem", "bcachefs", "overlay"]
+    private static let exclusiveRenamingTypes = swapRenamingTypes.union(["vfat", "ubifs", "minix", "hfsplus", "jfs", "reiserfs", "nilfs2"])
+    /// File systems that share a copy's blocks (reflinks).
+    private static let cloningTypes: Set<String> = ["btrfs", "xfs", "bcachefs", "ocfs2"]
+
+    /// What the volume can do, by its file system's type in the mount
+    /// table. No volume here encrypts by protection class.
+    private static func volumeValue(forKey key: String, path: String) -> id? {
+        guard let volume = FileVolume.containing(path) else { return nil }
+        switch key {
+        case "NSURLVolumeTypeNameKey": return Strings.autoreleased(volume.type)
+        case "NSURLVolumeMountFromLocationKey": return Strings.autoreleased(volume.source)
+        case URLResourceKeys.NSURLVolumeURLKey: return URLs.autoreleased(volume.url)
+        case URLResourceKeys.NSURLVolumeIsRootFileSystemKey: return boolean(volume.mountPoint == "/")
+        case URLResourceKeys.NSURLVolumeIsReadOnlyKey: return boolean(volume.isReadOnly)
+        case URLResourceKeys.NSURLVolumeIsLocalKey: return boolean(volume.isLocal)
+        case "NSURLVolumeSupportsAccessPermissionsKey": return boolean(!volume.isWindowsFormat)
+        case "NSURLVolumeSupportsImmutableFilesKey": return boolean(immutableFlagTypes.contains(volume.type))
+        case "NSURLVolumeSupportsSwapRenamingKey": return boolean(swapRenamingTypes.contains(volume.type))
+        case "NSURLVolumeSupportsExclusiveRenamingKey": return boolean(exclusiveRenamingTypes.contains(volume.type))
+        case "NSURLVolumeSupportsFileCloningKey": return boolean(cloningTypes.contains(volume.type))
+        case "NSURLVolumeSupportsFileProtectionKey": return boolean(false)
+        case URLResourceKeys.NSURLVolumeSupportsSymbolicLinksKey, URLResourceKeys.NSURLVolumeSupportsHardLinksKey,
+             URLResourceKeys.NSURLVolumeSupportsCaseSensitiveNamesKey, URLResourceKeys.NSURLVolumeSupportsSparseFilesKey:
+            return boolean(!volume.isWindowsFormat)
+        case URLResourceKeys.NSURLVolumeSupportsCasePreservedNamesKey: return boolean(true)
+        default: return nil
+        }
+    }
 }

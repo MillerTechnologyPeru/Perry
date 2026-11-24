@@ -178,6 +178,23 @@ hash_callbacks ns_owned_object_identity_hash DARWIN_SYMBOL("_NSOwnedObjectIdenti
 hash_callbacks ns_owned_pointer_hash DARWIN_SYMBOL("_NSOwnedPointerHashCallBacks") =
     {pointer_hash, pointer_equal, NULL, owned_release, pointer_describe};
 
+// NSPointerToStructHashCallBacks: pointers to structs whose first field is
+// an int, which is what is hashed and compared.
+static uintptr_t struct_hash(void *table, const void *item) {
+    (void)table;
+    return item ? (uintptr_t)(unsigned int)*(const int *)item : 0;
+}
+
+static signed char struct_equal(void *table, const void *a, const void *b) {
+    (void)table;
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    return *(const int *)a == *(const int *)b;
+}
+
+hash_callbacks ns_pointer_to_struct_hash DARWIN_SYMBOL("_NSPointerToStructHashCallBacks") =
+    {struct_hash, struct_equal, NULL, NULL, pointer_describe};
+
 // MARK: - Tables
 
 enum { EMPTY, FULL, REMOVED };

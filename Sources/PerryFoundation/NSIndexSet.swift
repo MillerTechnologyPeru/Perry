@@ -301,6 +301,80 @@ public class NSIndexSet: NSObject {
     @ObjCMethod("indexPassingTest:")
     func index(passingTest block: ObjCObject) -> UInt { passing(block).first.map(UInt.init) ?? IndexSets.notFoundIndex }
 
+    /// The indexes within `range` (all when nil), tried from the last with
+    /// NSEnumerationReverse (2), that pass; only the first that does with
+    /// `first`. The result is ascending. Concurrent tries run in order.
+    private func passing(_ block: ObjCObject, in range: NSRange?, options: UInt, first: Bool) -> [Int] {
+        typealias Invoke = @convention(c) (id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        var indexes = storage.indexes
+        if let range {
+            let limit = IndexSets.range(range)
+            indexes = indexes.filter { limit.contains($0) }
+        }
+        if options & 2 != 0 { indexes.reverse() }
+        var passed: [Int] = []
+        for index in indexes {
+            var stop = false
+            if invoke(block.id, UInt(index), &stop) {
+                passed.append(index)
+                if first { break }
+            }
+            if stop { break }
+        }
+        return passed.sorted()
+    }
+
+    @ObjCMethod("indexWithOptions:passingTest:")
+    func index(options: UInt, passingTest block: ObjCObject) -> UInt {
+        passing(block, in: nil, options: options, first: true).first.map(UInt.init) ?? IndexSets.notFoundIndex
+    }
+
+    @ObjCMethod("indexInRange:options:passingTest:")
+    func index(in range: NSRange, options: UInt, passingTest block: ObjCObject) -> UInt {
+        passing(block, in: range, options: options, first: true).first.map(UInt.init) ?? IndexSets.notFoundIndex
+    }
+
+    @ObjCMethod("indexesWithOptions:passingTest:")
+    func indexes(options: UInt, passingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        IndexSets.make(UnsafeMutableRawPointer(IndexSets.setClass), passing(block, in: nil, options: options, first: false).map { $0..<$0 + 1 })
+    }
+
+    @ObjCMethod("indexesInRange:options:passingTest:")
+    func indexes(in range: NSRange, options: UInt, passingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        IndexSets.make(UnsafeMutableRawPointer(IndexSets.setClass), passing(block, in: range, options: options, first: false).map { $0..<$0 + 1 })
+    }
+
+    /// The indexes within the range, from the last with NSEnumerationReverse.
+    @ObjCMethod("enumerateIndexesInRange:options:usingBlock:")
+    func enumerateIndexes(in range: NSRange, options: UInt, using block: ObjCObject) {
+        typealias Invoke = @convention(c) (id, UInt, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let limit = IndexSets.range(range)
+        var indexes = storage.indexes.filter { limit.contains($0) }
+        if options & 2 != 0 { indexes.reverse() }
+        for index in indexes {
+            var stop = false
+            invoke(block.id, UInt(index), &stop)
+            if stop { return }
+        }
+    }
+
+    /// The ranges, each cut to the part within `range`.
+    @ObjCMethod("enumerateRangesInRange:options:usingBlock:")
+    func enumerateRanges(in range: NSRange, options: UInt, using block: ObjCObject) {
+        typealias Invoke = @convention(c) (id, NSRange, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let limit = IndexSets.range(range)
+        var ranges = storage.ranges.map { $0.clamped(to: limit) }.filter { !$0.isEmpty }
+        if options & 2 != 0 { ranges.reverse() }
+        for part in ranges {
+            var stop = false
+            invoke(block.id, IndexSets.nsRange(part), &stop)
+            if stop { return }
+        }
+    }
+
     @ObjCMethod("indexesPassingTest:")
     func indexes(passingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
         IndexSets.make(UnsafeMutableRawPointer(IndexSets.setClass), passing(block).map { $0..<$0 + 1 })
