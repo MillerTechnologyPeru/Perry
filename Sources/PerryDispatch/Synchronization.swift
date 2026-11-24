@@ -92,7 +92,7 @@ public func dispatch_semaphore_signal(_ semaphore: Object?) -> Int {
 
 // MARK: - Time
 
-@DarwinC("perry_native_dispatch_time")
+@DarwinC("_dispatch_time")
 public func dispatch_time(_ when: UInt64, _ delta: Int64) -> UInt64 {
     DarwinTime.darwin(linux_dispatch_time(DarwinTime.linux(when), delta))
 }
