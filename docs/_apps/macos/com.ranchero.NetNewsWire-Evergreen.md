@@ -124,6 +124,21 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/56670485-3a75-42f9-891a-4cf64dc4172b
         caption: Julia Evans' feed, with ICO icons in the sidebar
+  - pr: 388
+    date: 2026-11-24
+    perry: "5d226456"
+    platform: macos
+    cpu: x86_64
+    app_version: "7.3.1"
+    hardware: HP Notebook
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1"
+    level: 4
+    source: body
+    notes: The article pane's header shows the feed's icon, which the app serves to its page through its own URL scheme.
 ---
 
 The x86_64 runs use the release from GitHub, a universal binary, in the
