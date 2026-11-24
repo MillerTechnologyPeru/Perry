@@ -57,7 +57,7 @@ public final class NSJSONSerialization: NSObject {
         if getenv("PERRY_JSON_TRACE") != nil {
             let head = data.map { String(decoding: $0.prefix(120), as: UTF8.self) } ?? "nil"
             let line = "perry: json: \(data?.count ?? -1) bytes \(head.map { $0 == "\n" ? " " : $0 }.reduce(into: "") { $0.append($1) })\n"
-            line.withCString { _ = write(2, $0, strlen($0)) }
+            line.withCString { _ = Glibc.write(2, $0, strlen($0)) }
         }
         let decoder = JSONDecoder()
         // No data is an exception on Darwin, which the callers that pass
@@ -80,6 +80,34 @@ public final class NSJSONSerialization: NSObject {
 
     @ObjCClassMethod("dataWithJSONObject:options:error:")
     static func data(object: ObjCObject, options: UInt, error: UnsafeMutablePointer<id?>?) -> NSData? {
+        encoded(object: object, options: options, error: error).map { DataObjects.owned(DataStorage($0)) }
+    }
+
+    /// Writes the JSON to an open stream; the bytes written, or 0 with an
+    /// error when the stream takes none or not all of them.
+    @ObjCClassMethod("writeJSONObject:toStream:options:error:")
+    static func write(object: ObjCObject, toStream stream: UnsafeMutableRawPointer?, options: UInt,
+                      error: UnsafeMutablePointer<id?>?) -> Int {
+        guard let data = encoded(object: object, options: options, error: error) else { return 0 }
+        var written = 0
+        data.withUnsafeBytes { bytes in
+            guard let base = bytes.bindMemory(to: UInt8.self).baseAddress else { return }
+            while written < bytes.count {
+                let count = CFWriteStreamWrite(stream, base + written, bytes.count - written)
+                if count <= 0 { break }
+                written += count
+            }
+        }
+        guard written == data.count else {
+            JSON.report(error, code: 512, description: "The file couldn’t be saved.")
+            return 0
+        }
+        return written
+    }
+
+    /// The JSON for an object, or nil with an error; an object JSON can't
+    /// hold is an exception, as on Darwin.
+    private static func encoded(object: ObjCObject, options: UInt, error: UnsafeMutablePointer<id?>?) -> Data? {
         PropertyValue.rejected = nil
         guard let value = PropertyValue(object: object.id),
               JSON.isValid(value, topLevel: true, fragments: options & JSON.writingFragmentsAllowed != 0) else {
@@ -98,9 +126,9 @@ public final class NSJSONSerialization: NSObject {
         }
         if getenv("PERRY_JSON_TRACE") != nil {
             let line = "perry: JSON written: \(String(decoding: data.prefix(1500), as: UTF8.self))\n"
-            _ = line.withCString { write(2, $0, strlen($0)) }
+            _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
         }
-        return DataObjects.owned(DataStorage(data))
+        return data
     }
 
     @ObjCClassMethod("isValidJSONObject:")
