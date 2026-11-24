@@ -74,42 +74,24 @@ final class UserDefaultsStorage {
         }
     }
 
-    /// Whether values changed since they were last written, when that
-    /// was, and whether a write waits for the main run loop's next pass.
+    /// Whether values changed since they were last written.
     private var dirty = false
-    private var lastSaved = -Double.infinity
-    private var scheduled = false
 
-    /// Writes the values soon rather than at each change: an app that sets
-    /// many in a row, synchronizing after each as some do, would otherwise
-    /// rewrite the file each time. Changes made in one pass of the main
-    /// run loop are written together at the next, and at least once a
-    /// second while a long piece of work keeps the loop from turning.
+    /// Writes the values at each change, as macOS does: nothing waits for
+    /// -synchronize or for the run loop, so a program that sets a value
+    /// and exits has it kept.
     func changed() {
         lock.locked {
             dirty = true
-            if absoluteTimeNow() - lastSaved >= 1 {
-                save()
-            } else if !scheduled {
-                scheduled = true
-                RunLoops.mainLoop.perform(work: { [self] in
-                    lock.locked { scheduled = false }
-                    saveIfChanged()
-                })
-            }
+            save()
         }
     }
 
-    /// Writes the values if any changed, as -synchronize asks for.
+    /// Writes the values if any change is still unwritten (a write that
+    /// failed), as -synchronize asks for: otherwise there is nothing to do.
     @discardableResult
     func saveIfChanged() -> Bool {
-        lock.locked {
-            guard dirty, absoluteTimeNow() - lastSaved >= 1 else {
-                if dirty, !scheduled { changed() }
-                return true
-            }
-            return save()
-        }
+        lock.locked { dirty ? save() : true }
     }
 
     /// The values set, without the registered defaults: the domain as it
@@ -147,16 +129,15 @@ final class UserDefaultsStorage {
 
     @discardableResult
     func save() -> Bool {
-        let values: [String: PropertyValue] = lock.locked {
+        lock.locked {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            guard let data = try? encoder.encode(PropertyValue.dictionary(values)) else { return false }
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard (try? data.write(to: url, options: .atomic)) != nil else { return false }
             dirty = false
-            lastSaved = absoluteTimeNow()
-            return self.values
+            return true
         }
-        let encoder = PropertyListEncoder()
-        encoder.outputFormat = .binary
-        guard let data = try? encoder.encode(PropertyValue.dictionary(values)) else { return false }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return (try? data.write(to: url, options: .atomic)) != nil
     }
 }
 
