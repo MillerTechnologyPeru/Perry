@@ -90,6 +90,29 @@ enum Locales {
     static func object(_ value: String?) -> UnsafeMutableRawPointer? {
         value.map { Strings.autoreleased($0) }
     }
+
+    /// The locale's standard exemplar characters, with their other cases,
+    /// as CoreFoundation reads them from ICU: ranges of scalars.
+    static func exemplarRanges(_ identifier: String) -> [ClosedRange<UInt32>] {
+        var status = U_ZERO_ERROR
+        guard let data = identifier.withCString({ swift_ulocdata_open($0, &status) }), !ICU.failed(status) else { return [] }
+        defer { swift_ulocdata_close(data) }
+        // USET_ADD_CASE_MAPPINGS (4).
+        guard let set = swift_ulocdata_getExemplarSet(data, nil, 4, ULOCDATA_ES_STANDARD, &status), !ICU.failed(status) else {
+            return []
+        }
+        defer { swift_uset_close(set) }
+        var ranges: [ClosedRange<UInt32>] = []
+        for index in 0..<swift_uset_getItemCount(set) {
+            var start: UChar32 = 0, end: UChar32 = 0
+            var itemStatus = U_ZERO_ERROR
+            // A length of 0 is a range; longer items are strings, which a
+            // character set doesn't hold.
+            let length = swift_uset_getItem(set, index, &start, &end, nil, 0, &itemStatus)
+            if length == 0, start >= 0, end >= start { ranges.append(UInt32(start)...UInt32(end)) }
+        }
+        return ranges
+    }
 }
 
 /// NSLocale's keys, CoreFoundation's kCFLocale… values.
@@ -220,6 +243,29 @@ public final class NSLocale: NSObject {
     static func canonicalLanguageIdentifier(_ string: String) -> String { Locale.canonicalLanguageIdentifier(from: string) }
 
     /// NSLocaleLanguageDirection: left to right is 1, right to left 2.
+    /// NSLocaleLanguageDirection of the lines: top to bottom (3) for most
+    /// languages.
+    @ObjCClassMethod("lineDirectionForLanguage:")
+    static func lineDirection(_ language: String) -> UInt {
+        switch Locale.Language(identifier: language).lineLayoutDirection {
+        case .rightToLeft: return 2
+        case .leftToRight: return 1
+        case .topToBottom: return 3
+        case .bottomToTop: return 4
+        default: return 0
+        }
+    }
+
+    /// A Windows LCID's locale ("de_DE" for 1031); nil for an unknown one.
+    @ObjCClassMethod("localeIdentifierFromWindowsLocaleCode:")
+    static func identifier(fromWindowsLocaleCode code: UInt32) -> String? { Locale.identifier(fromWindowsLocaleCode: Int(code)) }
+
+    /// The locale's Windows LCID; 0 for one Windows has none for.
+    @ObjCClassMethod("windowsLocaleCodeFromLocaleIdentifier:")
+    static func windowsLocaleCode(fromIdentifier identifier: String) -> UInt32 {
+        Locale.windowsLocaleCode(fromIdentifier: identifier).map { UInt32(truncatingIfNeeded: $0) } ?? 0
+    }
+
     @ObjCClassMethod("characterDirectionForLanguage:")
     static func characterDirection(_ language: String) -> UInt {
         switch Locale.Language(identifier: language).characterDirection {
@@ -245,6 +291,17 @@ public final class NSLocale: NSObject {
     @ObjCMethod("scriptCode") func scriptCode() -> String? { locale.language.script?.identifier }
     @ObjCMethod("variantCode") func variantCode() -> String? { locale.variant?.identifier }
     @ObjCMethod("collationIdentifier") func collationIdentifier() -> String? { locale.collation.identifier }
+    /// The collator's identifier: the locale's, with its collation keyword.
+    @ObjCMethod("collatorIdentifier") func collatorIdentifier() -> String { locale.collatorIdentifier ?? locale.identifier }
+
+    /// The letters the locale's language is written with, in both cases.
+    @ObjCMethod("exemplarCharacterSet")
+    func exemplarCharacterSet() -> UnsafeMutableRawPointer? {
+        let ranges = Locales.exemplarRanges(locale.identifier)
+        return CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.setClass)) { scalar in
+            ranges.contains { $0.contains(scalar.value) }
+        }.flatMap { ObjC.autorelease($0) }
+    }
     @ObjCMethod("calendarIdentifier") func calendarIdentifier() -> String { CalendarIdentifiers.name(locale.calendar.identifier) }
     @ObjCMethod("decimalSeparator") func decimalSeparator() -> String { locale.decimalSeparator ?? "." }
     @ObjCMethod("groupingSeparator") func groupingSeparator() -> String { locale.groupingSeparator ?? "" }
@@ -325,6 +382,13 @@ public final class NSLocale: NSObject {
 
     @ObjCMethod("localizedStringForCurrencyCode:")
     func localizedString(forCurrencyCode value: String) -> String? { locale.localizedString(forCurrencyCode: value) }
+
+    @ObjCMethod("localizedStringForCollationIdentifier:")
+    func localizedString(forCollationIdentifier value: String) -> String? { locale.localizedString(forCollationIdentifier: value) }
+
+    /// Nil on Darwin, for every identifier, as here.
+    @ObjCMethod("localizedStringForCollatorIdentifier:")
+    func localizedString(forCollatorIdentifier value: String) -> String? { locale.localizedString(forCollatorIdentifier: value) }
 
     @ObjCMethod("localizedStringForCalendarIdentifier:")
     func localizedString(forCalendarIdentifier value: String) -> String? {
