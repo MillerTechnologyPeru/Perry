@@ -112,6 +112,7 @@ reports:
     cpu: x86_64
     app_version: "7.3.1"
     hardware: HP Notebook
+    resolution: "1230x515@1"
     os: Debian 13
     env:
       - "PERRY_UNIMPLEMENTED=continue"
@@ -120,6 +121,9 @@ reports:
     level: 4
     source: body
     notes: Feed icons served as ICO files show, such as Julia Evans' and Michael Tsai's; inessential shows none, since its site serves an empty favicon.ico.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/56670485-3a75-42f9-891a-4cf64dc4172b
+        caption: Julia Evans' feed, with ICO icons in the sidebar
 ---
 
 The x86_64 runs use the release from GitHub, a universal binary, in the
