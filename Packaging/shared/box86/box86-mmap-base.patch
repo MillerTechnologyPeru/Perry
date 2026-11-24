@@ -1,0 +1,47 @@
+diff --git a/src/custommem.c b/src/custommem.c
+index a8cdfd1..474e0b1 100644
+--- a/src/custommem.c
++++ b/src/custommem.c
+@@ -1087,9 +1087,13 @@ void* findBlockNearHint(void* hint, size_t size, uintptr_t mask)
+ {   void* ret = findBlockHinted(hint, size, mask);
+     return ret?ret:hint;
+ }
++// Where mappings with no address asked start from: MEDIAN, or what
++// BOX86_MMAP_BASE gives, for a program that maps a block of its own at a
++// fixed address that these would otherwise be in the way of.
++uintptr_t box86_mmap_base = 0;
+ void* find32bitBlock(size_t size)
+ {
+-    void* ret = findBlockHinted(MEDIAN, size, 0);
++    void* ret = findBlockHinted(box86_mmap_base?(void*)box86_mmap_base:MEDIAN, size, 0);
+     if(!ret) ret = findBlockHinted(LOWEST, size, 0);
+     return ret;
+ }
+diff --git a/src/main.c b/src/main.c
+index bc1aff9..e678dd4 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -599,6 +599,15 @@ void LoadLogEnv()
+         if(box86_load_addr)
+             printf_log(LOG_INFO, "Use a starting load address of %p\n", (void*)box86_load_addr);
+     }
++    p = getenv("BOX86_MMAP_BASE");
++    if(p) {
++        extern uintptr_t box86_mmap_base;
++        if(sscanf(p, "0x%zx", &box86_mmap_base)!=1)
++            box86_mmap_base = 0;
++        box86_mmap_base &= ~0xffff;
++        if(box86_mmap_base)
++            printf_log(LOG_INFO, "Mappings with no address asked start at %p\n", (void*)box86_mmap_base);
++    }
+     p = getenv("BOX86_DLSYM_ERROR");
+     if(p) {
+         if(strlen(p)==1) {
+@@ -903,6 +912,7 @@ void PrintFlags() {
+     printf(" BOX86_TRACE_FILE with FileName to redirect logs in a file (or stderr to use stderr instead of stdout)\n");
+     printf(" BOX86_DLSYM_ERROR with 1 to log dlsym errors\n");
+     printf(" BOX86_LOAD_ADDR=0xXXXXXX try to load at 0xXXXXXX main binary (if binary is a PIE)\n");
++    printf(" BOX86_MMAP_BASE=0xXXXXXX start mappings with no address asked at 0xXXXXXX (default is 0x40000000)\n");
+     printf(" BOX86_NOSIGSEGV=1 to disable handling of SigSEGV\n");
+     printf(" BOX86_NOSIGILL=1  to disable handling of SigILL\n");
+     printf(" BOX86_SHOWSEGV=1 to show Segfault signal even if a signal handler is present\n");
