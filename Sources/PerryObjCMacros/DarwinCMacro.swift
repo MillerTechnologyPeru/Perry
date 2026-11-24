@@ -94,8 +94,10 @@ public struct DarwinCMacro: PeerMacro {
         } else {
             // Past the registers: the ObjCType signature, which the loader
             // moves Darwin's arguments to by its encoding.
-            let encoding = ([result.map { converted.contains($0) ? "\($0).objCTypeEncoding" : "\"i\"" } ?? "\"v\""]
-                + parameters.map { converted.contains($0.type.trimmedDescription) ? "\($0.type.trimmedDescription).objCTypeEncoding" : "\"i\"" })
+            func encoding(_ type: String) -> String {
+                converted.contains(type) ? "\(type).objCTypeEncoding" : ppcEncodings[type].map { "\"\($0)\"" } ?? "\"i\""
+            }
+            let encoding = ([result.map(encoding) ?? "\"v\""] + parameters.map { encoding($0.type.trimmedDescription) })
                 .joined(separator: " + ")
             ppc = """
                 @c(perry_ppc_moved_\(bare)) \(access)\(objCTypeEntry)
@@ -122,7 +124,8 @@ public struct DarwinCMacro: PeerMacro {
 
     // MARK: - ppc
 
-    /// How 32-bit ppc Darwin passes a converted type: a double or float in a
+    /// How 32-bit ppc Darwin passes a converted type, or one passed the
+    /// same as Linux's elsewhere (CFRange): a double or float in a
     /// floating-point register, which also takes one or two words of the
     /// general registers; a 64-bit integer or a structure in its words. On
     /// ppc a CGFloat is a float.
@@ -137,7 +140,12 @@ public struct DarwinCMacro: PeerMacro {
         "UIEdgeInsets": .words(4), "CATransform3D": .words(16), "CAFrameRateRange": .words(3),
         "CLLocationCoordinate2D": .words(4), "MKCoordinateSpan": .words(4), "MKCoordinateRegion": .words(8),
         "MKMapPoint": .words(4), "MKMapSize": .words(4), "MKMapRect": .words(8),
+        "CFRange": .words(2), "PerryCFRange": .words(2),
     ]
+
+    /// The encodings of ppcKinds' structures that aren't converted types, for
+    /// the loader's moves past the registers.
+    static let ppcEncodings: [String: String] = ["CFRange": "{CFRange=ll}", "PerryCFRange": "{CFRange=ll}"]
 
     /// __darwin_<name> for ppc, with parameters where Darwin leaves its
     /// arguments, or nil when they go past r10 or f8.
