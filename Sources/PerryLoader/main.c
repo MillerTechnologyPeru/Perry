@@ -7,6 +7,7 @@
 #include "gdb_mi.h"
 #include "image.h"
 #include "log.h"
+#include "perry_settings.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -115,6 +116,20 @@ static void enter_container(const perry_bundle *bundle) {
     setenv("TMPDIR", tmp, 1);
 }
 
+// Every setting in perry_settings.def, a group at a time in the table's
+// order.
+static void list_settings(FILE *out) {
+    const char *group = NULL;
+    for (int i = 0; i < PERRY_SETTING_COUNT; i++) {
+        const perry_setting *setting = &perry_settings[i];
+        if (!group || strcmp(group, setting->group) != 0) {
+            group = setting->group;
+            fprintf(out, "%s%s:\n", i ? "\n" : "", group);
+        }
+        fprintf(out, "  %-32s %s\n", setting->name, setting->summary);
+    }
+}
+
 static void usage(FILE *out) {
     fputs("usage: perry [options] <executable | App.app> [arguments...]\n"
           "\n"
@@ -122,6 +137,7 @@ static void usage(FILE *out) {
           "  --report    load and bind without running; print imports, missing\n"
           "              symbols and Objective-C references\n"
           "  --strict    fail when a non-weak import cannot be resolved\n"
+          "  --settings  list every PERRY_* environment variable, by group\n"
           "  -h, --help  show this help\n"
           "\n"
           "environment:\n"
@@ -255,7 +271,10 @@ int main(int argc, char **argv) {
             report = true;
         else if (strcmp(argv[i], "--strict") == 0)
             strict = true;
-        else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+        else if (strcmp(argv[i], "--settings") == 0) {
+            list_settings(stdout);
+            return 0;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(stdout);
             return 0;
         } else if (strcmp(argv[i], "--") == 0) {
