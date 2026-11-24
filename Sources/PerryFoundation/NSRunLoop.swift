@@ -212,8 +212,10 @@ final class RunLoopState {
             guard let timer = next.timer else {
                 // With no timers, a loop with an input source (and the
                 // main one) waits for it, as Darwin's does; one with
-                // nothing to wait for is finished.
-                guard waitWhenEmpty ?? (isMain || locked { ports > 0 }), now < limit else { return .finished }
+                // nothing to wait for is finished. One that waited its
+                // time out has timed out, as on Darwin.
+                guard waitWhenEmpty ?? (isMain || locked { ports > 0 }) else { return .finished }
+                if now >= limit { return .timedOut }
                 wait(until: limit)
                 continue
             }
