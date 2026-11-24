@@ -99,4 +99,7 @@ reports:
     level: 3
     source: body
     notes: "Dragging the Locations map by hand, each pin's distance and title now stay with its marker; before, the text kept its place until the finger lifted. A drag still manages only about nine updates a second."
+    screenshots:
+      - url: https://github.com/user-attachments/assets/37aa78af-4038-4545-b616-039e1a56322b
+        caption: Locations, with each pin's text at its marker
 ---
