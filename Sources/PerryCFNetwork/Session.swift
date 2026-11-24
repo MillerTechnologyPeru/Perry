@@ -83,6 +83,12 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCClassMethod("backgroundSessionConfigurationWithIdentifier:")
     static func makeBackground(identifier: String) -> NSObject { Configurations.object(.makeBackground(identifier: identifier)) }
 
+    /// The deprecated name of +backgroundSessionConfigurationWithIdentifier:.
+    @ObjCClassMethod("backgroundSessionConfiguration:")
+    static func makeBackground(deprecatedIdentifier identifier: String) -> NSObject {
+        Configurations.object(.makeBackground(identifier: identifier))
+    }
+
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
         ObjCRuntime.retain(Configurations.object(configuration.copy()).objcObject)!
@@ -181,6 +187,24 @@ open class NSURLSessionConfiguration: NSObject {
 
     @ObjCMethod("HTTPShouldUsePipelining") func usesPipelining() -> Bool { configuration.usesPipelining }
     @ObjCMethod("setHTTPShouldUsePipelining:") func setUsesPipelining(_ value: Bool) { configuration.usesPipelining = value }
+
+    // Kept and read back like the network hints above: there is no
+    // ultra-constrained network, TLS early data or DNSSEC here, and loading
+    // is always "classic" (HTTP/1.1 over corelibs).
+    @ObjCMethod("allowsUltraConstrainedNetworkAccess")
+    func allowsUltraConstrainedNetworkAccess() -> Bool { configuration.settings["allowsUltraConstrainedNetworkAccess"] ?? 0 != 0 }
+    @ObjCMethod("setAllowsUltraConstrainedNetworkAccess:")
+    func setAllowsUltraConstrainedNetworkAccess(_ value: Bool) { configuration.settings["allowsUltraConstrainedNetworkAccess"] = value ? 1 : 0 }
+    @ObjCMethod("enablesEarlyData") func enablesEarlyData() -> Bool { configuration.settings["enablesEarlyData"] ?? 0 != 0 }
+    @ObjCMethod("setEnablesEarlyData:") func setEnablesEarlyData(_ value: Bool) { configuration.settings["enablesEarlyData"] = value ? 1 : 0 }
+    @ObjCMethod("requiresDNSSECValidation")
+    func requiresDNSSECValidation() -> Bool { configuration.settings["requiresDNSSECValidation"] ?? 0 != 0 }
+    @ObjCMethod("setRequiresDNSSECValidation:")
+    func setRequiresDNSSECValidation(_ value: Bool) { configuration.settings["requiresDNSSECValidation"] = value ? 1 : 0 }
+    @ObjCMethod("usesClassicLoadingMode")
+    func usesClassicLoadingMode() -> Bool { configuration.settings["usesClassicLoadingMode", default: 1] != 0 }
+    @ObjCMethod("setUsesClassicLoadingMode:")
+    func setUsesClassicLoadingMode(_ value: Bool) { configuration.settings["usesClassicLoadingMode"] = value ? 1 : 0 }
 }
 
 /// NSCachedURLResponse: a response and its data, as a cache is given them
@@ -276,6 +300,11 @@ final class TaskState {
     /// lives as long as its tasks run, whoever else lets go of it, and its
     /// delegate is handed it with each event.
     var session: UnsafeMutableRawPointer?
+    /// What resuming does instead of starting the load: a task made from
+    /// resume data that names nothing to load fails at once.
+    var failsOnResume: (() -> Void)?
+    /// The error the task failed with when corelibs never ran it.
+    var failure: NSError?
 
     init(_ task: Task) {
         self.task = task
@@ -317,34 +346,158 @@ enum Tasks {
     }
 }
 
-/// NSURLSessionTask.
+/// NSProgress, for a task's progress.
+@ObjCWrapper("NSProgress")
+class NSProgress: NSObject {
+    @ObjCClassMethod("discreteProgressWithTotalUnitCount:") static func discrete(total: Int64) -> NSProgress
+    @ObjCMethod("setTotalUnitCount:") func setTotalUnitCount(_ count: Int64)
+    @ObjCMethod("setCompletedUnitCount:") func setCompletedUnitCount(_ count: Int64)
+    @ObjCMethod("setCancellable:") func setCancellable(_ value: Bool)
+    @ObjCMethod("setPausable:") func setPausable(_ value: Bool)
+    @ObjCMethod("setCancellationHandler:") func setCancellationHandler(_ block: NSObject?)
+    @ObjCMethod("isCancelled") func isCancelled() -> Bool
+    @ObjCMethod("cancel") func cancel()
+}
+
+/// What every task keeps whatever loads it: the scheduling hints a program
+/// gives (kept and read back; tasks start when resumed) and its progress.
+final class TaskExtras {
+    var earliestBeginDate: NSObject?
+    /// NSURLSessionTransferSizeUnknown until the program says.
+    var expectsToSend: Int64 = -1
+    var expectsToReceive: Int64 = -1
+    var prefersIncrementalDelivery = true
+    var progress: NSProgress?
+    var cancelling = false
+}
+
+enum TaskExtrasTable {
+    static let states = StateTable<TaskExtras>()
+
+    static func extras(_ object: UnsafeMutableRawPointer) -> TaskExtras {
+        if let extras = states.get(object) { return extras }
+        let extras = TaskExtras()
+        states.set(object, extras)
+        return extras
+    }
+
+    /// The task is being cancelled: its progress is too.
+    static func cancelled(_ object: UnsafeMutableRawPointer) {
+        let found = extras(object)
+        guard !found.cancelling else { return }
+        found.cancelling = true
+        if let progress = found.progress, !progress.isCancelled() { progress.cancel() }
+    }
+
+    static func remove(_ object: UnsafeMutableRawPointer) {
+        if let progress = states.get(object)?.progress { progress.setCancellationHandler(nil) }
+        states.remove(object)
+    }
+}
+
+/// NSURLSessionTask. Data, upload and download tasks run in corelibs;
+/// WebSocket and stream tasks (SocketTasks) here.
 @ObjCClass("NSURLSessionTask")
 open class NSURLSessionTask: NSObject {
     var task: Task? { Tasks.task(objcObject) }
+    /// A WebSocket or stream task's state.
+    var own: SocketTaskState? { SocketTasks.states.get(objcObject) }
 
     @ObjCMethod("dealloc")
     func dealloc() {
         Tasks.states.remove(objcObject)
+        SocketTasks.states.remove(objcObject)
+        TaskExtrasTable.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: NSURLSessionTask.objCClass.pointer)
     }
 
-    @ObjCMethod("taskIdentifier") func taskIdentifier() -> UInt { UInt(task?.identifier ?? 0) }
-    @ObjCMethod("state") func state() -> Int { task?.state ?? 3 }
-    @ObjCMethod("originalRequest") func originalRequest() -> NSObject? { task?.originalRequest.map { Requests.object($0) } }
-    @ObjCMethod("currentRequest") func currentRequest() -> NSObject? { task?.currentRequest.map { Requests.object($0) } }
-    @ObjCMethod("response") func response() -> NSObject? { task?.response.map(Responses.object) }
-    @ObjCMethod("error") func error() -> NSError? { Errors.object(task?.error) }
-    @ObjCMethod("countOfBytesReceived") func countOfBytesReceived() -> Int64 { task?.bytesReceived ?? 0 }
-    @ObjCMethod("countOfBytesSent") func countOfBytesSent() -> Int64 { task?.bytesSent ?? 0 }
-    @ObjCMethod("countOfBytesExpectedToReceive") func countOfBytesExpectedToReceive() -> Int64 { task?.bytesExpectedToReceive ?? 0 }
-    @ObjCMethod("countOfBytesExpectedToSend") func countOfBytesExpectedToSend() -> Int64 { task?.bytesExpectedToSend ?? 0 }
-    @ObjCMethod("delegate") func delegate() -> NSObject? { Tasks.states.get(objcObject)?.delegate }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { Tasks.states.get(objcObject)?.delegate = delegate }
-    @ObjCMethod("taskDescription") func taskDescription() -> String? { task?.taskDescription }
-    @ObjCMethod("setTaskDescription:") func setTaskDescription(_ text: String?) { task?.taskDescription = text }
-    @ObjCMethod("priority") func priority() -> Float { task?.priority ?? 0.5 }
-    @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { task?.priority = priority }
+    @ObjCMethod("taskIdentifier") func taskIdentifier() -> UInt { UInt(own?.identifier ?? task?.identifier ?? 0) }
+
+    @ObjCMethod("state")
+    func state() -> Int {
+        if let own { return own.currentState }
+        if let state = Tasks.states.get(objcObject), state.failure != nil { return 3 }
+        let value = task?.state ?? 3
+        // corelibs leaves a cancelled task that never ran suspended (1);
+        // Darwin's is canceling (2) at once, until it completes.
+        if value == 1, TaskExtrasTable.states.get(objcObject)?.cancelling == true { return 2 }
+        return value
+    }
+
+    @ObjCMethod("originalRequest")
+    func originalRequest() -> NSObject? {
+        if let own { return Requests.object(own.originalRequest.copy()) }
+        return task?.originalRequest.map { Requests.object($0) }
+    }
+
+    @ObjCMethod("currentRequest")
+    func currentRequest() -> NSObject? {
+        if let own { return Requests.object(own.originalRequest.copy()) }
+        return task?.currentRequest.map { Requests.object($0) }
+    }
+
+    @ObjCMethod("response")
+    func response() -> NSObject? {
+        if let own { return own.response.map(Responses.object) }
+        return task?.response.map(Responses.object)
+    }
+
+    @ObjCMethod("error")
+    func error() -> NSError? {
+        if let own { return own.error }
+        if let failure = Tasks.states.get(objcObject)?.failure { return failure }
+        return Errors.object(task?.error)
+    }
+
+    @ObjCMethod("countOfBytesReceived") func countOfBytesReceived() -> Int64 { own?.bytesReceived ?? task?.bytesReceived ?? 0 }
+    @ObjCMethod("countOfBytesSent") func countOfBytesSent() -> Int64 { own?.bytesSent ?? task?.bytesSent ?? 0 }
+    @ObjCMethod("countOfBytesExpectedToReceive")
+    func countOfBytesExpectedToReceive() -> Int64 { own != nil ? 0 : task?.bytesExpectedToReceive ?? 0 }
+    @ObjCMethod("countOfBytesExpectedToSend") func countOfBytesExpectedToSend() -> Int64 { own != nil ? 0 : task?.bytesExpectedToSend ?? 0 }
+
+    @ObjCMethod("delegate")
+    func delegate() -> NSObject? {
+        if let own { return own.taskDelegate }
+        return Tasks.states.get(objcObject)?.delegate
+    }
+
+    @ObjCMethod("setDelegate:")
+    func setDelegate(_ delegate: NSObject?) {
+        if let own {
+            own.taskDelegate = delegate
+            return
+        }
+        Tasks.states.get(objcObject)?.delegate = delegate
+    }
+
+    @ObjCMethod("taskDescription") func taskDescription() -> String? { own?.taskDescription ?? task?.taskDescription }
+
+    @ObjCMethod("setTaskDescription:")
+    func setTaskDescription(_ text: String?) {
+        if let own {
+            own.taskDescription = text
+            return
+        }
+        task?.taskDescription = text
+    }
+
+    @ObjCMethod("priority") func priority() -> Float { own?.priority ?? task?.priority ?? 0.5 }
+
+    @ObjCMethod("setPriority:")
+    func setPriority(_ priority: Float) {
+        if let own {
+            own.priority = priority
+            return
+        }
+        task?.priority = priority
+    }
+
     @ObjCMethod("resume") func resume() {
+        if let own { return own.resume() }
+        if let state = Tasks.states.get(objcObject), let fail = state.failsOnResume {
+            state.failsOnResume = nil
+            return fail()
+        }
         // PERRY_URL_TRACE: each task as it starts, so ones that never finish show.
         if getenv("PERRY_URL_TRACE") != nil {
             let line = "perry: URL[\(time(nil) % 1000)]: start \(task?.originalRequest?.method ?? "GET") \(task?.originalRequest?.url?.absoluteString ?? "?") (timeout \(task?.originalRequest?.timeout ?? -1))\n"
@@ -352,19 +505,129 @@ open class NSURLSessionTask: NSObject {
         }
         task?.resume()
     }
-    @ObjCMethod("suspend") func suspend() { task?.suspend() }
+
+    @ObjCMethod("suspend")
+    func suspend() {
+        if let own { return own.suspend() }
+        task?.suspend()
+    }
+
     @ObjCMethod("cancel") func cancel() {
+        TaskExtrasTable.cancelled(objcObject)
+        if let own { return own.cancel() }
         // PERRY_URL_TRACE: who cancels a task, and which.
         if getenv("PERRY_URL_TRACE") != nil {
             perry_print_frames("perry: URL: cancel \(task?.originalRequest?.url?.absoluteString ?? "?")")
         }
         task?.cancel()
     }
+
+    // MARK: Scheduling hints and progress
+
+    /// When the program would have the task start: kept, as there is no
+    /// background scheduler to wait for it.
+    @ObjCMethod("earliestBeginDate") func earliestBeginDate() -> NSObject? { TaskExtrasTable.extras(objcObject).earliestBeginDate }
+    @ObjCMethod("setEarliestBeginDate:") func setEarliestBeginDate(_ date: NSObject?) { TaskExtrasTable.extras(objcObject).earliestBeginDate = date }
+    @ObjCMethod("countOfBytesClientExpectsToSend")
+    func countOfBytesClientExpectsToSend() -> Int64 { TaskExtrasTable.extras(objcObject).expectsToSend }
+    @ObjCMethod("setCountOfBytesClientExpectsToSend:")
+    func setCountOfBytesClientExpectsToSend(_ count: Int64) { TaskExtrasTable.extras(objcObject).expectsToSend = count }
+    @ObjCMethod("countOfBytesClientExpectsToReceive")
+    func countOfBytesClientExpectsToReceive() -> Int64 { TaskExtrasTable.extras(objcObject).expectsToReceive }
+    @ObjCMethod("setCountOfBytesClientExpectsToReceive:")
+    func setCountOfBytesClientExpectsToReceive(_ count: Int64) { TaskExtrasTable.extras(objcObject).expectsToReceive = count }
+    @ObjCMethod("prefersIncrementalDelivery")
+    func prefersIncrementalDelivery() -> Bool { TaskExtrasTable.extras(objcObject).prefersIncrementalDelivery }
+    @ObjCMethod("setPrefersIncrementalDelivery:")
+    func setPrefersIncrementalDelivery(_ value: Bool) { TaskExtrasTable.extras(objcObject).prefersIncrementalDelivery = value }
+
+    /// The task's progress: its bytes, cancellable (which cancels the
+    /// task) but not pausable, as Darwin's.
+    @ObjCMethod("progress")
+    func progress() -> NSProgress {
+        let extras = TaskExtrasTable.extras(objcObject)
+        let progress: NSProgress
+        if let existing = extras.progress {
+            progress = existing
+        } else {
+            progress = NSProgress.discrete(total: 100)
+            progress.setCancellable(true)
+            progress.setPausable(false)
+            // Unretained: the task holds the progress, not the other way.
+            nonisolated(unsafe) let task = objcObject
+            progress.setCancellationHandler(Closures.block {
+                guard let extras = TaskExtrasTable.states.get(task), !extras.cancelling else { return }
+                typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void
+                unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(task, ObjCRuntime.selector("cancel"))
+            })
+            extras.progress = progress
+            if extras.cancelling { progress.cancel() }
+        }
+        let expected = countOfBytesExpectedToReceive(), received = countOfBytesReceived()
+        if expected > 0 {
+            progress.setTotalUnitCount(expected)
+            progress.setCompletedUnitCount(received)
+        } else if state() == 3, error() == nil {
+            progress.setCompletedUnitCount(100)
+        }
+        return progress
+    }
 }
 
 @ObjCClass("NSURLSessionDataTask") open class NSURLSessionDataTask: NSURLSessionTask {}
-@ObjCClass("NSURLSessionUploadTask") open class NSURLSessionUploadTask: NSURLSessionDataTask {}
-@ObjCClass("NSURLSessionDownloadTask") open class NSURLSessionDownloadTask: NSURLSessionTask {}
+@ObjCClass("NSURLSessionUploadTask") open class NSURLSessionUploadTask: NSURLSessionDataTask {
+    /// Uploads can't be resumed here: nil, as Darwin gives when the server
+    /// doesn't support resumable uploads.
+    @ObjCMethod("cancelByProducingResumeData:")
+    func cancelByProducingResumeData(_ completionHandler: ObjCBlock?) { ResumeData.cancel(self, completionHandler) }
+}
+
+@ObjCClass("NSURLSessionDownloadTask") open class NSURLSessionDownloadTask: NSURLSessionTask {
+    /// corelibs keeps no partial file to resume from: the handler is given
+    /// nil, as Darwin gives for a download that can't be resumed.
+    @ObjCMethod("cancelByProducingResumeData:")
+    func cancelByProducingResumeData(_ completionHandler: ObjCBlock?) { ResumeData.cancel(self, completionHandler) }
+}
+
+/// Resume data: what cancelling gives, and tasks made from it.
+enum ResumeData {
+    /// Cancels the task and gives the handler nil on the session's queue.
+    static func cancel(_ task: NSURLSessionTask, _ handler: ObjCBlock?) {
+        let session = Tasks.states.get(task.objcObject)?.session
+        let queue = session.flatMap { Sessions.state($0)?.queue }
+        task.cancel()
+        guard let handler else { return }
+        nonisolated(unsafe) let block = handler
+        let call = {
+            ObjCRuntime.autoreleasepool {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(block.object, nil)
+            }
+        }
+        if let queue { queue.addOperation(block: Closures.block(call)) } else { call() }
+    }
+
+    /// The URL a download's resume data names (NSURLSessionDownloadURL).
+    static func url(_ data: NSData?) -> URL? {
+        guard let data, data.length() > 0,
+              let list = NSPropertyListSerialization.propertyList(data: data, options: 0, format: nil, error: nil),
+              list.isKind(of: ObjCClass(named: "NSDictionary")),
+              let value = list.unsafeCast(to: NSDictionary.self).object(forKey: NSObject.string("NSURLSessionDownloadURL")),
+              value.isString else { return nil }
+        return URL(string: value.stringValue)
+    }
+
+    /// NSURLErrorUnsupportedURL, for resume data naming nothing to load.
+    static func unsupported() -> NSError {
+        NSError.make(domain: ErrorKeys.NSURLErrorDomain, code: -1002,
+                     userInfo: NSMutableDictionary.of([("NSLocalizedDescription", NSObject.string("unsupported URL"))]))
+    }
+}
+
+@ObjCWrapper("NSPropertyListSerialization")
+class NSPropertyListSerialization: NSObject {
+    @ObjCClassMethod("propertyListWithData:options:format:error:")
+    static func propertyList(data: NSData, options: UInt, format: UnsafeMutableRawPointer?, error: UnsafeMutableRawPointer?) -> NSObject?
+}
 
 // MARK: - Delegates
 
@@ -501,6 +764,13 @@ final class SessionState {
     let configuration: NSObject
     /// Held until the session is invalidated, as Darwin holds it.
     var delegate: NSObject?
+    /// The WebSocket and stream tasks it runs, until they complete.
+    private let lock = Lock()
+    private var running: [SocketTaskState] = []
+
+    func add(_ task: SocketTaskState) { lock.withLock { running.append(task) } }
+    func remove(_ task: SocketTaskState) { lock.withLock { running.removeAll { $0 === task } } }
+    var socketTasks: [SocketTaskState] { lock.withLock { running } }
 
     init(session: Session, queue: NSOperationQueue, configuration: NSObject, delegate: NSObject?) {
         self.session = session
@@ -534,6 +804,16 @@ enum Sessions {
         return object
     }
 
+    /// State for a session made with +new or -init rather than a
+    /// configuration: the default configuration's, with no delegate.
+    static func adopt(_ object: UnsafeMutableRawPointer) -> SessionState {
+        let copy = Configuration.makeDefault()
+        let state = SessionState(session: Session(configuration: copy, events: nil), queue: serialQueue(),
+                                 configuration: Configurations.object(copy), delegate: nil)
+        states.set(object, state)
+        return state
+    }
+
     static func invalidated(_ session: UnsafeMutableRawPointer) {
         state(session)?.delegate = nil
     }
@@ -542,7 +822,7 @@ enum Sessions {
 /// NSURLSession.
 @ObjCClass("NSURLSession")
 open class NSURLSession: NSObject {
-    var state: SessionState? { Sessions.state(objcObject) }
+    var state: SessionState? { Sessions.state(objcObject) ?? Sessions.adopt(objcObject) }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -584,8 +864,32 @@ open class NSURLSession: NSObject {
     @ObjCMethod("invalidateAndCancel")
     func invalidateAndCancel() {
         guard objcObject != Sessions.shared?.objcObject else { return }
+        state?.socketTasks.forEach { $0.cancel() }
         state?.session.invalidateAndCancel()
     }
+
+    /// Runs a void block on the delegate queue.
+    private func later(_ handler: ObjCBlock?) {
+        guard let handler, let state else { return }
+        nonisolated(unsafe) let block = handler
+        state.queue.addOperation(block: Closures.block {
+            ObjCRuntime.autoreleasepool {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)(block.object)
+            }
+        })
+    }
+
+    /// Nothing is kept to write out: cookies and credentials are stored as
+    /// they are set. The handler runs on the delegate queue.
+    @ObjCMethod("flushWithCompletionHandler:")
+    func flush(completionHandler: ObjCBlock?) { later(completionHandler) }
+
+    /// Darwin empties the session's cookie, cache and credential stores.
+    /// Here those are the process's shared stores, which other sessions
+    /// use too, so they are left as they are; the cache keeps nothing
+    /// anyway. The handler runs on the delegate queue.
+    @ObjCMethod("resetWithCompletionHandler:")
+    func reset(completionHandler: ObjCBlock?) { later(completionHandler) }
 
     // MARK: Tasks
 
@@ -731,6 +1035,99 @@ open class NSURLSession: NSObject {
     func downloadTask(with request: NSObject, completionHandler: ObjCBlock?) -> NSObject {
         downloadTask(self.request(request), completionHandler)
     }
+
+    // MARK: Resume data
+
+    /// A task that, once resumed, fails with NSURLErrorUnsupportedURL, as
+    /// Darwin's made from resume data naming nothing does: its handler, or
+    /// else the delegate, is told.
+    private func failingTask(_ object: NSObject, _ handler: ObjCBlock?) -> NSObject {
+        guard let taskState = Tasks.states.get(object.objcObject), let state else { return object }
+        nonisolated(unsafe) let queue = state.queue
+        nonisolated(unsafe) let block = handler
+        nonisolated(unsafe) let session = objcObject
+        nonisolated(unsafe) let task = object.objcObject
+        taskState.failsOnResume = { [weak taskState] in
+            let error = ResumeData.unsupported()
+            taskState?.failure = error
+            queue.addOperation(block: Closures.block {
+                ObjCRuntime.autoreleasepool {
+                    if let block {
+                        Blocks.call(block, nil, nil, error.objcObject)
+                    } else if let delegate = Sessions.state(session)?.delegate, delegate.responds(to: "URLSession:task:didCompleteWithError:") {
+                        unsafeBitCast(ObjCRuntime.msgSend, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?,
+                                                                                UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                            delegate.objcObject, ObjCRuntime.selector("URLSession:task:didCompleteWithError:"), session, task, error.objcObject)
+                    }
+                    // The session lets go of the task once it has been told.
+                    if let finished = Tasks.task(task) { Tasks.finish(finished) }
+                }
+            })
+        }
+        return object
+    }
+
+    /// A download resuming from Darwin's resume data starts again from the
+    /// URL it names: corelibs can't append to a partial file.
+    private func downloadTask(resumeData: NSData?, _ handler: ObjCBlock?) -> NSObject {
+        if let url = ResumeData.url(resumeData) { return downloadTask(Request(url: url), handler) }
+        return failingTask(downloadTask(Request(url: nil), nil), handler)
+    }
+
+    @ObjCMethod("downloadTaskWithResumeData:")
+    func downloadTask(withResumeData data: NSData?) -> NSObject { downloadTask(resumeData: data, nil) }
+
+    @ObjCMethod("downloadTaskWithResumeData:completionHandler:")
+    func downloadTask(withResumeData data: NSData?, completionHandler: ObjCBlock?) -> NSObject {
+        downloadTask(resumeData: data, completionHandler)
+    }
+
+    /// Resumable uploads need a server that offers them and the partial
+    /// upload's state, which this never produces: the task fails once
+    /// resumed.
+    @ObjCMethod("uploadTaskWithResumeData:")
+    func uploadTask(withResumeData data: NSData?) -> NSObject {
+        failingTask(dataTask({ state!.session.uploadTask(Request(url: nil), data: Data(), completion: $0) }, nil), nil)
+    }
+
+    @ObjCMethod("uploadTaskWithResumeData:completionHandler:")
+    func uploadTask(withResumeData data: NSData?, completionHandler: ObjCBlock?) -> NSObject {
+        failingTask(dataTask({ state!.session.uploadTask(Request(url: nil), data: Data(), completion: $0) }, nil), completionHandler)
+    }
+
+    // MARK: WebSocket and stream tasks
+
+    /// A ws or wss URL's task; another scheme raises, as on Darwin.
+    @ObjCMethod("webSocketTaskWithURL:")
+    func webSocketTask(with url: NSURL?) -> NSObject { WebSocketTasks.make(session: objcObject, request: Request(url: url?.url), protocols: []) }
+
+    @ObjCMethod("webSocketTaskWithURL:protocols:")
+    func webSocketTask(with url: NSURL?, protocols: NSArray?) -> NSObject {
+        WebSocketTasks.make(session: objcObject, request: Request(url: url?.url),
+                            protocols: (protocols?.elements ?? []).filter(\.isString).map(\.stringValue))
+    }
+
+    @ObjCMethod("webSocketTaskWithRequest:")
+    func webSocketTask(with request: NSObject) -> NSObject {
+        WebSocketTasks.make(session: objcObject, request: self.request(request), protocols: [])
+    }
+
+    @ObjCMethod("streamTaskWithHostName:port:")
+    func streamTask(withHostName host: String, port: Int) -> NSObject { StreamTasks.make(session: objcObject, host: host, port: port) }
+
+    /// The service's resolved host and port. One not yet resolved has no
+    /// host: its task fails to connect once resumed.
+    @ObjCMethod("streamTaskWithNetService:")
+    func streamTask(with service: NSObject?) -> NSObject {
+        let host = service.flatMap { $0.responds(to: "hostName") ? $0.sendHostName() : nil } ?? ""
+        let port = service.map { $0.responds(to: "port") ? $0.sendPort() : 0 } ?? 0
+        return StreamTasks.make(session: objcObject, host: host, port: port)
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("hostName") func sendHostName() -> String?
+    @ObjCMethod("port") func sendPort() -> Int
 }
 
 /// The task a completion handler belongs to, known once the task is made.
