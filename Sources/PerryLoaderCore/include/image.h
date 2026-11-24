@@ -192,6 +192,10 @@ void perry_ppc_set_method_lookup(perry_ppc_method_lookup lookup);
 void perry_ppc_darwin_code(void *address);
 // Whether a type encoding has arguments or a result that need moving.
 bool perry_ppc_types_need_moves(const char *types);
+// What the loader calls for a Darwin function: on ppc its Linux-callable
+// stub, since a Darwin function saves its lr at 8(r1) of its caller's frame,
+// where the loader's code keeps its own registers; elsewhere the function.
+#define PERRY_DARWIN_FUNCTION(function) ((__typeof__(function))perry_ppc_linux_callable((void *)(function)))
 // Calls Darwin code from Linux code, which needs r2 as it was afterwards.
 #define PERRY_DARWIN_CALL(call) do { \
         unsigned long perry_r2; \
@@ -200,6 +204,7 @@ bool perry_ppc_types_need_moves(const char *types);
         __asm__ volatile("mr 2, %0" : : "r"(perry_r2) : "memory"); \
     } while (0)
 #else
+#define PERRY_DARWIN_FUNCTION(function) (function)
 #define PERRY_DARWIN_CALL(call) do { call; } while (0)
 #endif
 
