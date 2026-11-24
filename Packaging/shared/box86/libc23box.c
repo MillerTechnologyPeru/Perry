@@ -136,3 +136,15 @@ int openpty(int *controller, int *terminal, char *name, const struct termios *se
     if (name) strcpy(name, path);
     return 0;
 }
+
+// Two X functions the i386 cairo names and box86's X11 and XCB bridges
+// lack. They belong to cairo's Xlib and XCB surfaces, which Perry, drawing
+// into images, never makes: nothing is read, and no reply is waiting.
+int xcb_poll_for_reply(void *connection, unsigned int request, void **reply, void **error) {
+    (void)connection, (void)request;
+    if (reply) *reply = 0;
+    if (error) *error = 0;
+    return 0;
+}
+
+void _XReadEvents(void *display) { (void)display; }
