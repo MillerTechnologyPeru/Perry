@@ -1499,6 +1499,24 @@ open class NSLayoutConstraint: NSObject {
         return self
     }
 
+    /// Archived under the keys a nib's constraints have, which
+    /// initWithCoder: reads back; values that are the default are left out.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject) {
+        let state = state
+        if let first = state.firstItem { coder.sendEncode(object: NSObject(first), forKey: "NSFirstItem") }
+        coder.sendEncode(integer: state.firstAttribute, forKey: "NSFirstAttribute")
+        if state.relation != 0 { coder.sendEncode(integer: state.relation, forKey: "NSRelation") }
+        if let second = state.secondItem { coder.sendEncode(object: NSObject(second), forKey: "NSSecondItem") }
+        coder.sendEncode(integer: state.secondAttribute, forKey: "NSSecondAttribute")
+        if state.multiplier != 1 { coder.sendEncode(double: Double(state.multiplier), forKey: "NSMultiplier") }
+        if state.constant != 0 { coder.sendEncode(double: Double(state.constant), forKey: "NSConstant") }
+        if state.priority != 1000 { coder.sendEncode(double: Double(state.priority), forKey: "NSPriority") }
+        if let identifier = state.identifier {
+            coder.sendEncode(object: NSObject.nibString(identifier, mutable: false), forKey: "NSLayoutIdentifier")
+        }
+    }
+
     @ObjCClassMethod("constraintWithItem:attribute:relatedBy:toItem:attribute:multiplier:constant:")
     static func constraint(_ cls: ObjCClass, item: NSObject, attribute: Int, relatedBy relation: Int, toItem other: NSObject?,
                            attribute otherAttribute: Int, multiplier: CGFloat, constant: CGFloat) -> NSObject {
@@ -1509,8 +1527,19 @@ open class NSLayoutConstraint: NSObject {
         return constraint
     }
 
+    /// The constraints a visual format describes; a format UIKit can't read
+    /// raises NSInvalidArgumentException there, and gives none here.
     @ObjCClassMethod("constraintsWithVisualFormat:options:metrics:views:")
-    static func constraints(visualFormat: String, options: UInt, metrics: NSObject?, views: NSObject?) -> NSObject { NSMutableArray.of([]) }
+    static func constraints(visualFormat: String, options: UInt, metrics: NSObject?, views: NSObject?) -> NSObject {
+        do {
+            let constraints = try VisualFormat.constraints(format: visualFormat, options: options,
+                                                           metrics: metrics?.as(NSDictionary.self), views: views?.as(NSDictionary.self))
+            return NSMutableArray.of(constraints)
+        } catch {
+            uikitWarning("constraintsWithVisualFormat: \(error)")
+            return NSMutableArray.of([])
+        }
+    }
 
     /// Activating a constraint adds it to the views' closest common
     /// ancestor, as UIKit does; deactivating removes it.
@@ -2154,4 +2183,10 @@ enum PowerSupply {
         while value.last?.isWhitespace == true { value.removeLast() }
         return value.isEmpty ? nil : String(value)
     }
+}
+
+extension NSObject {
+    @ObjCMethod("encodeObject:forKey:") func sendEncode(object: NSObject?, forKey key: String)
+    @ObjCMethod("encodeInteger:forKey:") func sendEncode(integer: Int, forKey key: String)
+    @ObjCMethod("encodeDouble:forKey:") func sendEncode(double: Double, forKey key: String)
 }
