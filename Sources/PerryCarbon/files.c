@@ -746,6 +746,23 @@ static bool child_path(const FSRef *parent, size_t length, const uint16_t *name,
     return (size_t)snprintf(path, size, "%s/%s", strcmp(folder, "/") == 0 ? "" : folder, leaf) < size;
 }
 
+/// Whether the folder a path is in has an item of its name in any case: a
+/// Mac's file system tells no case apart, so a new item of that name is a
+/// duplicate there.
+static bool named_in_any_case(const char *path) {
+    char folder[PATH_MAX];
+    const char *slash = strrchr(path, '/');
+    if (!slash || (size_t)(slash - path) >= sizeof folder) return false;
+    memcpy(folder, path, (size_t)(slash - path));
+    folder[slash - path] = 0;
+    DIR *items = opendir(folder[0] ? folder : "/");
+    bool found = false;
+    for (struct dirent *entry; items && !found && (entry = readdir(items));)
+        found = strcasecmp(entry->d_name, slash + 1) == 0;
+    if (items) closedir(items);
+    return found;
+}
+
 OSErr carbon_FSCreateFileUnicode(const FSRef *parent, size_t length, const uint16_t *name, uint32_t which, const void *info,
                                  FSRef *ref, FSSpec *spec) CARBON_SYMBOL(FSCreateFileUnicode);
 OSErr carbon_FSCreateFileUnicode(const FSRef *parent, size_t length, const uint16_t *name, uint32_t which, const void *info,
@@ -753,6 +770,7 @@ OSErr carbon_FSCreateFileUnicode(const FSRef *parent, size_t length, const uint1
     (void)which; (void)info;
     char path[PATH_MAX];
     if (!child_path(parent, length, name, path, sizeof path)) return paramErr;
+    if (named_in_any_case(path)) return dupFNErr;
     int descriptor = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (descriptor < 0) return error_for(errno);
     close(descriptor);
@@ -768,6 +786,7 @@ OSErr carbon_FSCreateDirectoryUnicode(const FSRef *parent, size_t length, const 
     (void)which; (void)info;
     char path[PATH_MAX];
     if (!child_path(parent, length, name, path, sizeof path)) return paramErr;
+    if (named_in_any_case(path)) return dupFNErr;
     if (mkdir(path, 0755) != 0) return error_for(errno);
     store_ref(path, ref);
     if (spec) spec_for(path, spec);

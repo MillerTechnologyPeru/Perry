@@ -58,6 +58,38 @@ enum FileRefs {
         return stat(path, &info) == 0
     }
 
+    /// The path of the item `path` names on a Mac's file system, which
+    /// tells no case apart: `path` itself if it is there, else the path
+    /// whose components match its in any case, if there is one. A program
+    /// written for HFS+ asks for "shaders/fx" where its folder is "Shaders".
+    static func inAnyCase(_ path: String) -> String? {
+        if exists(path) { return path }
+        var found = ""
+        for part in standardized(path).split(separator: "/") {
+            let exact = found + "/" + part
+            if exists(exact) {
+                found = exact
+                continue
+            }
+            guard let directory = opendir(found.isEmpty ? "/" : found) else { return nil }
+            defer { closedir(directory) }
+            let wanted = part.lowercased()
+            var match: String?
+            while let entry = readdir(directory) {
+                let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
+                }
+                if name.lowercased() == wanted {
+                    match = name
+                    break
+                }
+            }
+            guard let match else { return nil }
+            found += "/" + match
+        }
+        return found.isEmpty ? "/" : found
+    }
+
     static func isDirectory(_ path: String) -> Bool {
         var info = stat()
         return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
@@ -96,8 +128,8 @@ enum FileRefs {
 @c(_FSPathMakeRef)
 public func FSPathMakeRef(_ path: UnsafePointer<CChar>?, _ ref: UnsafeMutableRawPointer?, _ isDirectory: UnsafeMutablePointer<UInt8>?) -> Int32 {
     guard let path, let ref else { return Int32(paramErr) }
-    let string = String(cString: path)
-    guard string.hasPrefix("/"), FileRefs.exists(string) else { return Int32(fnfErr) }
+    let given = String(cString: path)
+    guard given.hasPrefix("/"), let string = FileRefs.inAnyCase(given) else { return Int32(fnfErr) }
     FileRefs.store(string, in: ref)
     isDirectory?.pointee = FileRefs.isDirectory(string) ? 1 : 0
     return Int32(noErr)
@@ -157,8 +189,7 @@ public func FSMakeFSRefUnicode(_ parent: UnsafeRawPointer?, _ length: Int, _ nam
                                _ ref: UnsafeMutableRawPointer?) -> Int16 {
     guard let folder = FileRefs.path(of: parent), let ref else { return paramErr }
     let leaf = name.map { String(decoding: UnsafeBufferPointer(start: $0, count: length), as: UTF16.self) } ?? ""
-    let path = folder == "/" ? "/" + leaf : folder + "/" + leaf
-    guard FileRefs.exists(path) else { return fnfErr }
+    guard let path = FileRefs.inAnyCase(folder == "/" ? "/" + leaf : folder + "/" + leaf) else { return fnfErr }
     FileRefs.store(path, in: ref)
     return noErr
 }
