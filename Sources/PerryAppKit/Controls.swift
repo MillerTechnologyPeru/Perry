@@ -600,7 +600,14 @@ open class NSTextField: NSControl {
             _ = sendAction(action, to: target.map(NSObject.init))
             return
         case "\t", "\u{19}":
-            if let next = nextKeyView { _ = window?.makeFirstResponder(next) } else { _ = window?.makeFirstResponder(nil) }
+            // Tab ends editing for the next key view, Shift-Tab the one
+            // before, as the field editor makes the window do.
+            let forward = typed == "\t" && event.modifierFlags & ModifierFlags.shift == 0
+            if forward, let next = nextKeyView {
+                _ = window?.makeFirstResponder(next)
+            } else if let window {
+                window.selectKeyView(forward: forward, from: self)
+            }
             return
         case "\u{1b}":
             return
