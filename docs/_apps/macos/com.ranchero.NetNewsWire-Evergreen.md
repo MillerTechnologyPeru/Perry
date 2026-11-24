@@ -71,6 +71,40 @@ reports:
     level: 3
     source: body
     notes: The x86_64 build reaches its main window with its menus, toolbar, sidebar, timeline and article pane; its default feeds don't appear yet.
+  - pr: 364
+    date: 2026-11-24
+    perry: "bf61cc47"
+    platform: macos
+    cpu: x86_64
+    app_version: "7.3.1"
+    hardware: HP Notebook
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1"
+    level: 3
+    source: body
+    notes: The arrow keys move through the article list and between it and the article, and Tab moves between panes; only the list with the keyboard shows its selection in blue.
+  - pr: 365
+    date: 2026-11-24
+    perry: "d4a5bce1"
+    platform: macos
+    cpu: x86_64
+    app_version: "7.3.1"
+    hardware: HP Notebook
+    resolution: "1230x515@1"
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1"
+    level: 4
+    source: body
+    notes: Its default feeds load with their icons, articles and unread counts, and the selected article shows in the article pane; a few feed icons in ICO format don't show.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/ba9450c7-a0a1-4be1-b488-51ea55bb0005
+        caption: A Daring Fireball article, with the article list focused
 ---
 
 The x86_64 runs use the release from GitHub, a universal binary, in the
