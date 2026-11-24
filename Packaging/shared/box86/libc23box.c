@@ -24,3 +24,115 @@ int __isoc23_vswscanf(const wchar_t *s, const wchar_t *t, va_list a) { return __
 long syscall(long, ...);
 int capget(void *header, void *data) { return (int)syscall(184, header, data); }
 int capset(void *header, const void *data) { return (int)syscall(185, header, data); }
+
+// <search.h>'s binary trees, which box86 doesn't wrap and libPerrySystem
+// passes on to programs: an unbalanced tree. A node begins with its key, as
+// twalk's and tfind's callers read it.
+#include <stdlib.h>
+
+typedef struct tree_node { const void *key; struct tree_node *left, *right; } tree_node;
+typedef enum { preorder, postorder, endorder, leaf } VISIT;
+
+void *tsearch(const void *key, void **root, int (*compare)(const void *, const void *)) {
+    if (!root) return NULL;
+    tree_node **slot = (tree_node **)root;
+    while (*slot) {
+        int order = compare(key, (*slot)->key);
+        if (order == 0) return *slot;
+        slot = order < 0 ? &(*slot)->left : &(*slot)->right;
+    }
+    tree_node *made = calloc(1, sizeof *made);
+    if (!made) return NULL;
+    made->key = key;
+    *slot = made;
+    return made;
+}
+
+void *tfind(const void *key, void *const *root, int (*compare)(const void *, const void *)) {
+    for (tree_node *node = root ? *(tree_node *const *)root : NULL; node;) {
+        int order = compare(key, node->key);
+        if (order == 0) return node;
+        node = order < 0 ? node->left : node->right;
+    }
+    return NULL;
+}
+
+// The removed node's parent, or the root's address's contents for the root.
+void *tdelete(const void *key, void **root, int (*compare)(const void *, const void *)) {
+    if (!root || !*root) return NULL;
+    tree_node **slot = (tree_node **)root, *parent = *slot;
+    while (*slot) {
+        int order = compare(key, (*slot)->key);
+        if (order == 0) break;
+        parent = *slot;
+        slot = order < 0 ? &(*slot)->left : &(*slot)->right;
+    }
+    tree_node *found = *slot;
+    if (!found) return NULL;
+    if (!found->left) {
+        *slot = found->right;
+    } else if (!found->right) {
+        *slot = found->left;
+    } else {
+        // The next key in order takes its place.
+        tree_node **next = &found->right;
+        while ((*next)->left) next = &(*next)->left;
+        tree_node *moved = *next;
+        *next = moved->right;
+        moved->left = found->left;
+        moved->right = found->right;
+        *slot = moved;
+    }
+    free(found);
+    return parent;
+}
+
+static void walk(const tree_node *node, void (*action)(const void *, VISIT, int), int depth) {
+    if (!node->left && !node->right) {
+        action(node, leaf, depth);
+        return;
+    }
+    action(node, preorder, depth);
+    if (node->left) walk(node->left, action, depth + 1);
+    action(node, postorder, depth);
+    if (node->right) walk(node->right, action, depth + 1);
+    action(node, endorder, depth);
+}
+
+void twalk(const void *root, void (*action)(const void *, VISIT, int)) {
+    if (root && action) walk(root, action, 0);
+}
+
+// openpty, which glibc 2.34 moved into libc from libutil, where box86 knows
+// it: a pseudoterminal's two ends, by the calls it is made of.
+#include <fcntl.h>
+#include <termios.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+int posix_openpt(int);
+int grantpt(int);
+int unlockpt(int);
+int ptsname_r(int, char *, size_t);
+
+int openpty(int *controller, int *terminal, char *name, const struct termios *settings, const struct winsize *size) {
+    int first = posix_openpt(O_RDWR | O_NOCTTY);
+    if (first < 0) return -1;
+    char path[128];
+    if (grantpt(first) != 0 || unlockpt(first) != 0 || ptsname_r(first, path, sizeof path) != 0) {
+        close(first);
+        return -1;
+    }
+    int second = open(path, O_RDWR | O_NOCTTY);
+    if (second < 0) {
+        close(first);
+        return -1;
+    }
+    if (settings) tcsetattr(second, TCSAFLUSH, settings);
+    if (size) ioctl(second, TIOCSWINSZ, size);
+    if (controller) *controller = first;
+    if (terminal) *terminal = second;
+    if (name) strcpy(name, path);
+    return 0;
+}
