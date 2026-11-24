@@ -82,20 +82,37 @@ static OSErr error_for(int error) {
 
 // MARK: - Folder IDs
 
-typedef struct { uint32_t id; char *path; } known_directory;
+// A folder's ID is its inode's number, which programs get from
+// CoreServices' catalog information too, except where that can't be told
+// from another's. The root's is 2 (fsRtDirID) whatever its inode is: a
+// program walks from its folder up through each parent until it comes to
+// 2, and the root of an overlay or a squashed image isn't inode 2. A folder
+// that isn't the root but whose inode is 1 or 2 (an ext4 file system
+// mounted below the root), or the same as one's on another file system (a
+// btrfs subvolume's root is always 256), gets an ID of its own.
+typedef struct { uint32_t id; char *path; dev_t device; ino_t inode; } known_directory;
 static known_directory *directories;
 static size_t directory_count;
+static uint32_t next_made_id = 0x7f000000;
 
 static uint32_t directory_id(const char *path) {
     struct stat info;
     if (stat(path, &info) != 0) return 0;
+    static struct stat root;
+    static bool have_root;
+    if (!have_root) have_root = stat("/", &root) == 0;
+    if (have_root && info.st_dev == root.st_dev && info.st_ino == root.st_ino) return ROOT_DIRECTORY;
     uint32_t id = (uint32_t)info.st_ino;
-    for (size_t index = 0; index < directory_count; index++)
-        if (directories[index].id == id) return id;
+    bool taken = id <= ROOT_DIRECTORY;
+    for (size_t index = 0; index < directory_count; index++) {
+        if (directories[index].device == info.st_dev && directories[index].inode == info.st_ino) return directories[index].id;
+        if (directories[index].id == id) taken = true;
+    }
+    if (taken) id = next_made_id++;
     known_directory *grown = realloc(directories, (directory_count + 1) * sizeof *grown);
     if (!grown) return id;
     directories = grown;
-    directories[directory_count++] = (known_directory){id, strdup(path)};
+    directories[directory_count++] = (known_directory){id, strdup(path), info.st_dev, info.st_ino};
     return id;
 }
 
@@ -1135,9 +1152,15 @@ OSErr carbon_PBGetCatInfoAsync(CInfoPB *block) { return carbon_PBGetCatInfoSync(
 
 static int disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size) {
     static int (*volume)(int, char *, size_t, char *, size_t);
-    static bool looked;
+    static bool looked, looked_in_maps;
     if (!looked) {
         looked = true;
+        // Through the loader, which has the library open; opening it again
+        // by its path finds nothing under box86, and a program saw no disc.
+        volume = (int (*)(int, char *, size_t, char *, size_t))carbon_function("/usr/lib/libSystem.B.dylib", "perry_disc_volume");
+    }
+    if (!looked_in_maps && !volume) {
+        looked_in_maps = true;
         FILE *maps = fopen("/proc/self/maps", "r");
         char line[4096];
         while (maps && fgets(line, sizeof line, maps)) {
@@ -1167,6 +1190,23 @@ static int disc_for(int16_t volume, int index, char *name, size_t name_size, cha
     return disc < disc_volume(disc, name, name_size, mount, mount_size) ? disc : -2;
 }
 
+/// Where the startup volume's space is counted: the file system the
+/// program's home folder is on, which is where it writes. The root may be
+/// another, with no room at all (a read-only system image, as ROCKNIX's
+/// is), and a program that checks for room before it starts would stop.
+static const char *startup_volume_path(void) {
+    static char home[PATH_MAX];
+    if (!home[0]) {
+        id (*home_directory)(void) = (id (*)(void))carbon_function(
+            "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation", "_NSHomeDirectory");
+        id folder = home_directory ? home_directory() : NULL;
+        const char *path = folder ? ((const char *(*)(id, SEL))objc_send)(folder, SELECTOR("UTF8String")) : NULL;
+        struct stat info;
+        snprintf(home, sizeof home, "%s", path && stat(path, &info) == 0 ? path : "/");
+    }
+    return home;
+}
+
 /// A volume, by its number, its name or its index (from 1): the first, and
 /// the discs mounted after it.
 OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) CARBON_SYMBOL(PBHGetVInfoSync);
@@ -1177,7 +1217,7 @@ OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     if (disc == -2) return block->header.ioResult = nsvErr;
     struct statvfs stats;
     uint64_t total = 0, available = 0;
-    if (statvfs(disc >= 0 ? disc_mount : "/", &stats) == 0) {
+    if (statvfs(disc >= 0 ? disc_mount : startup_volume_path(), &stats) == 0) {
         total = (uint64_t)stats.f_blocks * stats.f_frsize;
         available = (uint64_t)stats.f_bavail * stats.f_frsize;
     }
