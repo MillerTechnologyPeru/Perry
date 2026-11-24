@@ -19,6 +19,9 @@ final class ThreadStorage {
     var stackSize: UInt = 512 * 1024
     /// NSQualityOfServiceDefault; threads here are all scheduled alike.
     var qualityOfService = -1
+    /// The deprecated priority, 0 to 1, kept for the asking: it schedules
+    /// nothing here.
+    var priority = 0.5
     /// The thread's run loop, once it or a perform onto the thread made one.
     var runLoop: RunLoopState?
 
@@ -106,6 +109,7 @@ enum Threads {
                 // -main is sent, so a subclass's runs: NSThread's own runs
                 // the block or the target's selector.
                 perry_foundation_thread_run({ thread in _ = ObjC.send(thread, ObjC.selector("main")) }, thread)
+                Threads.postWillExit(thread)
                 ObjC.poolPop(pool)
             }
             if let storage = Threads.storage(thread) {
@@ -121,6 +125,15 @@ enum Threads {
         }
     }
 
+
+    /// NSThreadWillExitNotification (named by value: another file exports
+    /// the constant), posted on the thread as it ends, the thread its object.
+    static func postWillExit(_ thread: id) {
+        guard let notification = Notifications.make(name: Strings.autoreleased("NSThreadWillExitNotification"), object: thread,
+                                                    userInfo: nil) else { return }
+        Notifications.post(notification, from: Notifications.defaultCenter)
+        ObjC.release(notification)
+    }
 
     /// Runs `selector` on the main thread from its run loop, or at once when
     /// already there and waiting; with `wait`, blocks until it has run.
@@ -215,6 +228,17 @@ public final class NSThread: NSObject {
         if !perry_foundation_thread_exit() { pthread_exit(nil) }
     }
 
+    /// The calling thread's priority, 0 to 1: 0.5 unless it was set.
+    @ObjCClassMethod("threadPriority")
+    static func currentThreadPriority() -> Double { Threads.storage(Threads.current)?.priority ?? 0.5 }
+
+    /// Kept for the asking; YES, as on Darwin.
+    @ObjCClassMethod("setThreadPriority:")
+    static func setCurrentThreadPriority(_ priority: Double) -> Bool {
+        Threads.storage(Threads.current)?.priority = min(max(priority, 0), 1)
+        return true
+    }
+
     @ObjCClassMethod("sleepForTimeInterval:")
     static func sleep(forTimeInterval seconds: Double) {
         guard seconds > 0 else { return }
@@ -284,8 +308,8 @@ public final class NSThread: NSObject {
     @ObjCMethod("setName:") func setName(_ name: String?) { storage?.name = name }
     @ObjCMethod("stackSize") func stackSize() -> UInt { storage?.stackSize ?? 0 }
     @ObjCMethod("setStackSize:") func setStackSize(_ size: UInt) { storage?.stackSize = size }
-    @ObjCMethod("threadPriority") func threadPriority() -> Double { 0.5 }
-    @ObjCMethod("setThreadPriority:") func setThreadPriority(_ priority: Double) {}
+    @ObjCMethod("threadPriority") func threadPriority() -> Double { storage?.priority ?? 0.5 }
+    @ObjCMethod("setThreadPriority:") func setThreadPriority(_ priority: Double) { storage?.priority = min(max(priority, 0), 1) }
     @ObjCMethod("qualityOfService") func qualityOfService() -> Int { storage?.qualityOfService ?? -1 }
     @ObjCMethod("setQualityOfService:") func setQualityOfService(_ quality: Int) { storage?.qualityOfService = quality }
 
