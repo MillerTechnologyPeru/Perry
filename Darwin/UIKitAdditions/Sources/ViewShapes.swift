@@ -241,3 +241,36 @@ public enum UIPointerShape {
   case horizontalBeam(length: CoreFoundation.CGFloat)
   public static let defaultCornerRadius: CoreFoundation.CGFloat = 8
 }
+
+/// The effect a pointer has on the view it is over, given with the view's
+/// targeted preview. Perry draws no pointer, so none is shown.
+@available(iOS 13.4, *)
+@available(tvOS, unavailable)
+@available(watchOS, unavailable)
+public enum UIPointerEffect : Swift.Sendable, Swift.Equatable {
+  public enum TintMode : Swift.Sendable, Swift.Equatable, Swift.Hashable {
+    case none, overlay, underlay
+  }
+  case automatic(_: UITargetedPreview)
+  case highlight(_: UITargetedPreview)
+  case lift(_: UITargetedPreview)
+  case hover(_: UITargetedPreview, preferredTintMode: UIKit.UIPointerEffect.TintMode = .overlay, prefersShadow: Swift.Bool = false, prefersScaledContent: Swift.Bool = true)
+
+  public var preview: UITargetedPreview {
+    switch self {
+    case .automatic(let preview), .highlight(let preview), .lift(let preview): return preview
+    case .hover(let preview, _, _, _): return preview
+    }
+  }
+
+  public static func == (a: UIKit.UIPointerEffect, b: UIKit.UIPointerEffect) -> Swift.Bool {
+    switch (a, b) {
+    case (.automatic(let x), .automatic(let y)), (.highlight(let x), .highlight(let y)), (.lift(let x), .lift(let y)):
+      return x === y
+    case let (.hover(x, xTint, xShadow, xScaled), .hover(y, yTint, yShadow, yScaled)):
+      return x === y && xTint == yTint && xShadow == yShadow && xScaled == yScaled
+    default:
+      return false
+    }
+  }
+}
