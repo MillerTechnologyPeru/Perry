@@ -400,6 +400,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         for constraint in constraints.elements where !state.constraints.contains(where: { $0.objcObject == constraint.objcObject }) {
             state.constraints.append(constraint)
             constraint.as(NSLayoutConstraint.self)?.state.active = true
+            if let traced = constraint.as(NSLayoutConstraint.self) { ConstraintTrace.note(traced, "added") }
         }
         constraintsNeedSolving()
     }
@@ -408,6 +409,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         let removed = Set(constraints.elements.map(\.objcObject))
         for constraint in state.constraints where removed.contains(constraint.objcObject) {
             constraint.as(NSLayoutConstraint.self)?.state.active = false
+            if let traced = constraint.as(NSLayoutConstraint.self) { ConstraintTrace.note(traced, "removed") }
         }
         state.constraints.removeAll { removed.contains($0.objcObject) }
         constraintsNeedSolving()
@@ -911,6 +913,7 @@ open class UIView: UIResponder, UICoordinateSpace {
                 guard let constraintState = constraint.as(NSLayoutConstraint.self)?.state,
                       refers(constraintState.firstItem) || refers(constraintState.secondItem) else { return false }
                 constraintState.active = false
+                if let traced = constraint.as(NSLayoutConstraint.self) { ConstraintTrace.note(traced, "dropped, \(ConstraintTrace.name(self.objcObject)) left \(ConstraintTrace.name(self.state.superview))") }
                 return true
             }
             ancestor = view.state.superview.map(UIView.wrap)
