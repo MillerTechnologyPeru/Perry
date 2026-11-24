@@ -33,6 +33,12 @@ final class RunLoopState {
     /// Modes CFRunLoopAddCommonMode added, beyond the default mode: names
     /// only, as every mode is the same run loop here.
     private var addedModes: [String] = []
+    /// Foundation's own work at points of each pass, NSNotificationQueue's:
+    /// called with beforeTimers at the start of each pass, exit, and
+    /// beforeWaiting where the loop goes to sleep or, with a timer already
+    /// due, would have on Darwin (whose loop sleeps, and wakes at once, to
+    /// fire it). After the observers; on the loop's thread.
+    private var passHook: ((UInt) -> Void)?
     private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     private let wakeFile = eventfd(0, Int32(EFD_CLOEXEC | EFD_NONBLOCK))
 
@@ -134,9 +140,22 @@ final class RunLoopState {
         wakeUp()
     }
 
+    /// Sets Foundation's pass hook, which lasts as long as the loop.
+    func setPassHook(_ hook: @escaping (UInt) -> Void) { locked { passHook = hook } }
+
+    private func runPassHook(_ activity: UInt) {
+        guard let hook = locked({ passHook }) else { return }
+        ObjC.autoreleasepool { hook(activity) }
+    }
+
     /// Calls the observers of `activity`, in their order; an observer that
     /// does not repeat is removed after its first call.
     private func notify(_ activity: UInt) {
+        notifyObservers(activity)
+        runPassHook(activity)
+    }
+
+    private func notifyObservers(_ activity: UInt) {
         let observing = locked { observers.filter { RunLoopObservers.activities($0) & activity != 0 } }
             .sorted { RunLoopObservers.order($0) < RunLoopObservers.order($1) }
         for observer in observing {
@@ -240,6 +259,7 @@ final class RunLoopState {
             }
 
             if next.fire <= now {
+                runPassHook(RunLoopActivity.beforeWaiting)
                 ObjC.autoreleasepool { Timers.fire(timer, from: self) }
                 ObjC.release(timer)
                 if returnAfterSourceHandled { return .handledSource }
@@ -249,6 +269,15 @@ final class RunLoopState {
             if now >= limit { return .timedOut }
             wait(until: min(next.fire, limit))
         }
+    }
+
+    /// When the next timer fires, after firing those due now: nil when the
+    /// loop has no timers and nothing to wait for, the distant future when
+    /// it has no timers but waits (the main loop, one with an input source).
+    func limitDate() -> Double? {
+        fireDueTimers()
+        if let next = snapshotTimers().filter({ Timers.isValid($0) }).map(Timers.fireDate).min() { return next }
+        return isMain || locked({ ports > 0 }) ? Dates.distantFuture : nil
     }
 
     /// Fires the timers due now, earliest first, each once.
@@ -461,6 +490,17 @@ public final class NSRunLoop: NSObject {
     /// the one mode run loops have here.
     @ObjCMethod("acceptInputForMode:beforeDate:")
     func acceptInput(forMode mode: ObjCObject?, before date: NSDate) { _ = run(mode: mode, before: date) }
+
+    /// Fires the timers due, then answers when the next one fires: nil for a
+    /// loop with nothing to run, the distant future for one with no timers
+    /// that waits all the same (the main loop, one with a port).
+    @ObjCMethod("limitDateForMode:")
+    func limitDate(forMode mode: ObjCObject?) -> UnsafeMutableRawPointer? {
+        state?.limitDate().flatMap { Dates.autoreleased($0) }
+    }
+
+    /// A Distributed Objects server's set-up, which has nothing to do here.
+    @ObjCMethod("configureAsServer") func configureAsServer() {}
 
     /// No messages arrive on ports, but one keeps the loop running.
     @ObjCMethod("addPort:forMode:") func add(port: ObjCObject?, forMode mode: ObjCObject?) { state?.ports += 1 }
