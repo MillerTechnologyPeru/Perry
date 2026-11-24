@@ -98,6 +98,8 @@ enum DNSSD {
     static let moreComing: UInt32 = 0x1
     static let add: UInt32 = 0x2
     static let browseDomains: UInt32 = 0x40
+    /// kDNSServiceFlagsRegistrationDomains.
+    static let registrationDomains: UInt32 = 0x80
     static let noAutoRename: UInt32 = 0x4000
 
     // Resource record types, and the Internet class.
@@ -491,6 +493,21 @@ public final class NSNetService: NSObject {
     @ObjCMethod("name") func name() -> String { storage.name }
     @ObjCMethod("port") func port() -> Int { storage.port }
     @ObjCMethod("hostName") func hostName() -> String? { storage.hostName }
+
+    /// Streams connected to the service's host and port, connecting when
+    /// one opens; NO, with no streams, until the service is resolved (Darwin
+    /// resolves it as the streams open).
+    @ObjCMethod("getInputStream:outputStream:")
+    func getStreams(input: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                    output: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        input?.pointee = nil
+        output?.pointee = nil
+        guard let host = storage.hostName, storage.port > 0,
+              let pair = StreamSocket.pair(StreamSocket(host: host, port: storage.port)) else { return false }
+        input?.pointee = ObjC.autorelease(pair.input)
+        output?.pointee = ObjC.autorelease(pair.output)
+        return true
+    }
 
     @ObjCMethod("addresses")
     func addresses() -> UnsafeMutableRawPointer? {
@@ -911,7 +928,14 @@ public final class NSNetServiceBrowser: NSObject {
     /// The browsable domains: "local.", which mDNSResponder always finds,
     /// then any others Avahi enumerates (it leaves out "local.").
     @ObjCMethod("searchForBrowsableDomains")
-    func searchForBrowsableDomains() {
+    func searchForBrowsableDomains() { searchDomains(DNSSD.browseDomains) }
+
+    /// The domains services can be published in, likewise: "local.", then
+    /// any others.
+    @ObjCMethod("searchForRegistrationDomains")
+    func searchForRegistrationDomains() { searchDomains(DNSSD.registrationDomains) }
+
+    private func searchDomains(_ kind: UInt32) {
         let storage = storage
         guard storage.operation == nil else { return fail(NetServices.activityInProgress) }
         guard DNSSD.available else { return fail(NetServices.unknownError) }
@@ -924,7 +948,7 @@ public final class NSNetServiceBrowser: NSObject {
         }
         let context = Unmanaged.passUnretained(operation).toOpaque()
         var ref: DNSSD.Ref?
-        guard let enumerate = DNSSD.enumerateDomains, enumerate(&ref, DNSSD.browseDomains, 0, domainReply, context) == 0, let made = ref else { return }
+        guard let enumerate = DNSSD.enumerateDomains, enumerate(&ref, kind, 0, domainReply, context) == 0, let made = ref else { return }
         operation.refs = [made]
         operation.step = { _, ref in DNSSD.process?(ref) == 0 }
         operation.start()
