@@ -19,6 +19,8 @@
     leaq 176(%rsp), %rcx
     .elseif \nfixed == 4
     leaq 176(%rsp), %r8
+    .elseif \nfixed == 5
+    leaq 176(%rsp), %r9
     .else
     .error "unexpected number of fixed arguments"
     .endif
@@ -117,17 +119,27 @@ perry_i386_foundation_pc_ebx:
 
 // void NSLog(NSString *format, ...)
 VARIADIC _NSLog, perry_foundation_log, 1
+// void CFLog(CFLogLevel level, CFStringRef format, ...)
+VARIADIC _CFLog, perry_foundation_cf_log, 2
 
 // CFStringRef CFStringCreateWithFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef, ...)
 VARIADIC _CFStringCreateWithFormat, perry_foundation_cf_create_with_format, 3
 // void CFStringAppendFormat(CFMutableStringRef, CFDictionaryRef, CFStringRef, ...)
 VARIADIC _CFStringAppendFormat, perry_foundation_cf_append_format, 3
+// CFStringRef CFStringCreateStringWithValidatedFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef validFormatSpecifiers,
+// CFStringRef format, CFErrorRef *, ...)
+VARIADIC _CFStringCreateStringWithValidatedFormat, perry_foundation_cf_create_with_validated_format, 5
 
 // Boolean CFCalendarDecomposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime, const char *, ...):
 // the time is in d0, so two fixed arguments are in x registers.
 VARIADIC _CFCalendarDecomposeAbsoluteTime, perry_foundation_cf_calendar_decompose, 2, 1
 // Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime *, const char *, ...)
 VARIADIC _CFCalendarComposeAbsoluteTime, perry_foundation_cf_calendar_compose, 3
+// Boolean CFCalendarAddComponents(CFCalendarRef, CFAbsoluteTime *, CFOptionFlags, const char *, ...)
+VARIADIC _CFCalendarAddComponents, perry_foundation_cf_calendar_add, 4
+// Boolean CFCalendarGetComponentDifference(CFCalendarRef, CFAbsoluteTime, CFAbsoluteTime, CFOptionFlags,
+// const char *, ...): the two times are in d0 and d1, so three fixed arguments are in x registers.
+VARIADIC _CFCalendarGetComponentDifference, perry_foundation_cf_calendar_difference, 3, 2
 
 // NSDictionary *_NSDictionaryOfVariableBindings(NSString *keys, id first, ...),
 // which Auto Layout's NSDictionaryOfVariableBindings expands to.
