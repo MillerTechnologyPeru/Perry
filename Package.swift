@@ -151,7 +151,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ] + (mistKit ? [.package(url: "https://github.com/brightdigit/MistKit.git", from: "1.0.0-beta.5")] : []),
     targets: [
-        .target(name: "PerryInterface"),
+        // perry_settings.def is read by perry_settings.h, not compiled.
+        .target(name: "PerryInterface", exclude: ["perry_settings.def"]),
         // The Cassowary constraint solver UIKit's and AppKit's Auto Layout share.
         .target(name: "PerryLayoutSolver"),
         // Compiled asset catalogs (Assets.car), which UIKit's and AppKit's
