@@ -884,8 +884,27 @@ extension NSString {
 
     @ObjCMethod("componentsSeparatedByString:")
     func components(separatedBy separator: String) -> NSArray {
-        let parts = separator.isEmpty ? [value] : value.split(separator: separator, omittingEmptySubsequences: false).map(String.init)
-        return Arrays.owned(parts.map { Strings.autoreleased($0) })
+        Arrays.owned(Self.components(of: value, separatedBy: separator).map { Strings.autoreleased($0) })
+    }
+
+    /// The parts between each separator, matched by UTF-16 units as
+    /// NSString matches: Swift's own split matches whole characters, and
+    /// "\r\n" is one, so "\n" would not split CRLF lines.
+    static func components(of string: String, separatedBy separator: String) -> [String] {
+        let text = Array(string.utf16), mark = Array(separator.utf16)
+        guard !mark.isEmpty, text.count >= mark.count else { return [string] }
+        var parts: [String] = [], start = 0, index = 0
+        while index + mark.count <= text.count {
+            if text[index] == mark[0], text[index..<index + mark.count].elementsEqual(mark) {
+                parts.append(String(decoding: text[start..<index], as: UTF16.self))
+                index += mark.count
+                start = index
+            } else {
+                index += 1
+            }
+        }
+        parts.append(String(decoding: text[start...], as: UTF16.self))
+        return parts
     }
 
     @ObjCMethod("stringByReplacingOccurrencesOfString:withString:")
