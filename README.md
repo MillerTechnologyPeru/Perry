@@ -193,6 +193,12 @@ With `PERRY_REQUIRE_FIXTURES=1`, a missing tool or fixture fails the run
 instead of skipping its tests. `.github/workflows/test.yml` sets it on
 arm64, where a Mac job's fixtures are downloaded; x86_64 builds everything
 and runs the tests that need no arm64 program.
+
+`Scripts/perry-bench.sh` runs the Stopwatch fixture, which times message
+sends, retains, allocation, weak loads and string bridging, and startup. It
+writes each case's median nanoseconds as JSON, and with `-c` compares them
+with `Tests/Benchmarks/baseline.json`. CI reports the comparison in the
+arm64 job's summary and never fails on it.
  
 ## Limits
  
