@@ -29,8 +29,33 @@ final class UserDefaultsStorage {
     private let lock = Monitor()
 
     func value(_ key: String) -> PropertyValue? {
-        Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"]?[key] } ?? lock.locked { values[key] ?? registered[key] }
+        Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"]?[key] }
+            ?? lock.locked { values[key] ?? suites.lazy.compactMap { $0.ownValue(key) }.first ?? registered[key] }
             ?? Self.globalValue(key)
+    }
+
+    /// The domain's own value, set and kept, alone.
+    func ownValue(_ key: String) -> PropertyValue? { lock.locked { values[key] } }
+
+    /// Suites -addSuiteNamed: added to the search list, searched after the
+    /// domain's own values in the order added. Each is read when added.
+    private var suites: [UserDefaultsStorage] = []
+
+    func addSuite(_ name: String) {
+        lock.locked { () -> Void in
+            guard name != suite, !suites.contains(where: { $0.suite == name }) else { return }
+            suites.append(UserDefaultsStorage(suite: name))
+        }
+    }
+
+    func removeSuite(_ name: String) { lock.locked { suites.removeAll { $0.suite == name } } }
+
+    /// The names of the domains kept on disk: the property lists in
+    /// ~/Library/Preferences.
+    static var persistentDomainNames: [String] {
+        let home = getenv("HOME").map { String(cString: $0) } ?? "/tmp"
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: home + "/Library/Preferences")) ?? []
+        return names.filter { $0.hasSuffix(".plist") }.map { String($0.dropLast(6)) }.sorted()
     }
 
     /// The defaults given on the command line, each "-Key value": the
@@ -135,7 +160,11 @@ final class UserDefaultsStorage {
     var all: [String: PropertyValue] {
         let arguments = Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"] } ?? [:]
         let system = Self.volatileLock.locked { Self.system }
-        return lock.locked { Self.global.merging(system) { _, set in set }.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+        return lock.locked {
+            let added = suites.reversed().reduce(into: [String: PropertyValue]()) { $0.merge($1.persistent) { _, earlier in earlier } }
+            return Self.global.merging(system) { _, set in set }.merging(registered) { _, new in new }
+                .merging(added) { _, suite in suite }.merging(values) { _, set in set }
+        }
             .merging(arguments) { _, given in given }
     }
 
@@ -197,6 +226,13 @@ class NSUserDefaults: NSObject {
     func initialize() -> Self {
         Storage.set(objcObject, UserDefaultsStorage(suite: Bundles.storage(Bundles.main)?.identifier ?? Process.name))
         return self
+    }
+
+    /// Only the current user's defaults can be opened: nil for another user.
+    @ObjCMethod("initWithUser:")
+    func initialize(user: String?) -> Self? {
+        guard let user, user == Strings.value(of: NSUserName()) else { return nil }
+        return initialize()
     }
 
     @ObjCMethod("initWithSuiteName:")
@@ -405,6 +441,29 @@ class NSUserDefaults: NSObject {
         return PropertyValue.array(names.map { .string($0) }).object().map { ObjCObject($0) }
     }
 
+    /// Searches another suite's values after the domain's own; NSGlobalDomain
+    /// and the domain itself are searched already.
+    @ObjCMethod("addSuiteNamed:")
+    func addSuite(named name: String?) {
+        guard let name, name != "NSGlobalDomain" else { return }
+        storage.addSuite(name)
+    }
+
+    @ObjCMethod("removeSuiteNamed:")
+    func removeSuite(named name: String?) { if let name { storage.removeSuite(name) } }
+
+    /// No value is forced here: there are no managed preferences (a device
+    /// management profile's) to force one.
+    @ObjCMethod("objectIsForcedForKey:") func objectIsForced(forKey key: String?) -> Bool { false }
+    @ObjCMethod("objectIsForcedForKey:inDomain:")
+    func objectIsForced(forKey key: String?, inDomain domain: String?) -> Bool { false }
+
+    /// The domains kept on disk, by name.
+    @ObjCMethod("persistentDomainNames")
+    func persistentDomainNames() -> ObjCObject? {
+        PropertyValue.array(UserDefaultsStorage.persistentDomainNames.map { .string($0) }).object().map { ObjCObject($0) }
+    }
+
     @ObjCMethod("registerDefaults:")
     func register(_ defaults: ObjCObject?) {
         // Nil, as from a plist that isn't there, registers nothing.
@@ -418,30 +477,157 @@ class NSUserDefaults: NSObject {
     func synchronize() -> Bool { storage.saveIfChanged() }
 }
 
-/// iCloud's key-value store, with no iCloud: the values are kept on the
-/// device, in a defaults domain of their own beside the app's, and nothing
-/// ever changes from elsewhere. It takes NSUserDefaults' getters and
-/// setters, which answer as the store's do, and adds its own names.
+/// iCloud's key-value store, with no iCloud: an NSObject, as on Darwin,
+/// whose values are kept on the device, in a defaults domain of their own
+/// beside the app's (<bundle identifier>.ubiquitous), as Darwin keeps them
+/// while no account is signed in; nothing ever changes from elsewhere, so
+/// NSUbiquitousKeyValueStoreDidChangeExternallyNotification never comes.
+/// (Darwin keeps nothing at all for a program without the iCloud
+/// entitlement: its getters answer nil and 0, and -synchronize NO.)
 @ObjCClass("NSUbiquitousKeyValueStore")
-final class NSUbiquitousKeyValueStore: NSUserDefaults {
+final class NSUbiquitousKeyValueStore: NSObject {
     nonisolated(unsafe) private static var shared: UnsafeMutableRawPointer?
+    nonisolated(unsafe) private static var storeClass: Class!
+
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        storeClass = cls.storage
+    }
+
+    private static var suite: String { (Bundles.storage(Bundles.main)?.identifier ?? Process.name) + ".ubiquitous" }
+
+    private var storage: UserDefaultsStorage {
+        if let storage = UserDefaults.storage(objcObject) { return storage }
+        let storage = UserDefaultsStorage(suite: Self.suite)
+        Storage.set(objcObject, storage)
+        return storage
+    }
 
     @ObjCClassMethod("defaultStore")
     static func defaultStore(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
         if let shared { return shared }
-        let suite = (Bundles.storage(Bundles.main)?.identifier ?? Process.name) + ".ubiquitous"
         let object = Storage.allocate(cls.pointer)
         if let object { Storage.set(object, UserDefaultsStorage(suite: suite)) }
         shared = object
         return object
     }
 
-    @ObjCMethod("longLongForKey:") func longLong(forKey key: String) -> Int64 { Int64(integer(forKey: key)) }
-    @ObjCMethod("setLongLong:forKey:") func set(longLong: Int64, forKey key: String) { storage.set(.integer(longLong), for: key) }
-    @ObjCMethod("setString:forKey:") func set(string: ObjCObject?, forKey key: String) { set(string, forKey: key) }
-    @ObjCMethod("setData:forKey:") func set(data: ObjCObject?, forKey key: String) { set(data, forKey: key) }
-    @ObjCMethod("setArray:forKey:") func set(array: ObjCObject?, forKey key: String) { set(array, forKey: key) }
-    @ObjCMethod("setDictionary:forKey:") func set(dictionary: ObjCObject?, forKey key: String) { set(dictionary, forKey: key) }
+    /// Another store over the same values, as Darwin's instances share them.
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        _ = storage
+        return self
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Self.storeClass)
+    }
+
+    // MARK: Reading
+
+    @ObjCMethod("objectForKey:")
+    func object(forKey key: String?) -> ObjCObject? {
+        key.flatMap { storage.ownValue($0) }?.object().map { ObjCObject($0) }
+    }
+
+    /// Each typed getter answers only for a value of its type.
+    @ObjCMethod("stringForKey:")
+    func string(forKey key: String?) -> ObjCObject? {
+        guard let key, case .string? = storage.ownValue(key) else { return nil }
+        return object(forKey: key)
+    }
+
+    @ObjCMethod("arrayForKey:")
+    func array(forKey key: String?) -> ObjCObject? {
+        guard let key, case .array? = storage.ownValue(key) else { return nil }
+        return object(forKey: key)
+    }
+
+    @ObjCMethod("dictionaryForKey:")
+    func dictionary(forKey key: String?) -> ObjCObject? {
+        guard let key, case .dictionary? = storage.ownValue(key) else { return nil }
+        return object(forKey: key)
+    }
+
+    @ObjCMethod("dataForKey:")
+    func data(forKey key: String?) -> ObjCObject? {
+        guard let key, case .data? = storage.ownValue(key) else { return nil }
+        return object(forKey: key)
+    }
+
+    /// Numbers, as their values; 0 for anything else.
+    @ObjCMethod("longLongForKey:")
+    func longLong(forKey key: String?) -> Int64 {
+        switch key.flatMap({ storage.ownValue($0) }) {
+        case .integer(let value)?: return value
+        case .double(let value)?: return Int64(exactly: value.rounded(.towardZero)) ?? 0
+        case .bool(let value)?: return value ? 1 : 0
+        default: return 0
+        }
+    }
+
+    @ObjCMethod("doubleForKey:")
+    func double(forKey key: String?) -> Double {
+        switch key.flatMap({ storage.ownValue($0) }) {
+        case .integer(let value)?: return Double(value)
+        case .double(let value)?: return value
+        case .bool(let value)?: return value ? 1 : 0
+        default: return 0
+        }
+    }
+
+    @ObjCMethod("boolForKey:")
+    func bool(forKey key: String?) -> Bool {
+        switch key.flatMap({ storage.ownValue($0) }) {
+        case .integer(let value)?: return value != 0
+        case .double(let value)?: return value != 0
+        case .bool(let value)?: return value
+        default: return false
+        }
+    }
+
+    /// The values set, by key.
+    @ObjCMethod("dictionaryRepresentation")
+    func dictionaryRepresentation() -> ObjCObject? {
+        PropertyValue.dictionary(storage.persistent).object().map { ObjCObject($0) }
+    }
+
+    // MARK: Writing
+
+    /// Property list values only; nil removes the value.
+    @ObjCMethod("setObject:forKey:")
+    func set(_ value: ObjCObject?, forKey key: String?) {
+        guard let key else { return }
+        guard let value else { return storage.set(nil, for: key) }
+        guard let converted = PropertyValue(object: value.id) else {
+            return foundationWarning("NSUbiquitousKeyValueStore: \(Format.describe(value.id)) for key \(key) is not a property list value")
+        }
+        storage.set(converted, for: key)
+    }
+
+    @ObjCMethod("setString:forKey:") func set(string: ObjCObject?, forKey key: String?) { set(string, forKey: key) }
+    @ObjCMethod("setData:forKey:") func set(data: ObjCObject?, forKey key: String?) { set(data, forKey: key) }
+    @ObjCMethod("setArray:forKey:") func set(array: ObjCObject?, forKey key: String?) { set(array, forKey: key) }
+    @ObjCMethod("setDictionary:forKey:") func set(dictionary: ObjCObject?, forKey key: String?) { set(dictionary, forKey: key) }
+
+    @ObjCMethod("setLongLong:forKey:")
+    func set(longLong: Int64, forKey key: String?) { if let key { storage.set(.integer(longLong), for: key) } }
+
+    @ObjCMethod("setDouble:forKey:")
+    func set(double: Double, forKey key: String?) { if let key { storage.set(.double(double), for: key) } }
+
+    @ObjCMethod("setBool:forKey:")
+    func set(bool: Bool, forKey key: String?) { if let key { storage.set(.bool(bool), for: key) } }
+
+    @ObjCMethod("removeObjectForKey:")
+    func remove(forKey key: String?) { if let key { storage.set(nil, for: key) } }
+
+    /// Writes any value not yet written; YES, as with an account and the
+    /// entitlement, unless the write fails.
+    @ObjCMethod("synchronize")
+    func synchronize() -> Bool { storage.saveIfChanged() }
 }
 
 @ObjCConstants
