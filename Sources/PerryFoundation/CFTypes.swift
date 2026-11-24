@@ -206,7 +206,7 @@ public func CFDataGetBytePtr(_ data: id?) -> UnsafeRawPointer? { ObjC.send(data,
 @c(_CFDataGetMutableBytePtr)
 public func CFDataGetMutableBytePtr(_ data: id?) -> UnsafeMutableRawPointer? { ObjC.send(data, ObjC.selector("mutableBytes")) }
 
-@c(_CFDataGetBytes)
+@DarwinC("_CFDataGetBytes")
 public func CFDataGetBytes(_ data: id?, _ range: CFRange, _ buffer: UnsafeMutableRawPointer?) {
     guard let buffer, let bytes = CFDataGetBytePtr(data) else { return }
     buffer.copyMemory(from: bytes + range.location, byteCount: range.length)
@@ -221,14 +221,14 @@ public func CFDataAppendBytes(_ data: id?, _ bytes: UnsafeRawPointer?, _ length:
         data, ObjC.selector("appendBytes:length:"), bytes, UInt(length))
 }
 
-@c(_CFDataReplaceBytes)
+@DarwinC("_CFDataReplaceBytes")
 public func CFDataReplaceBytes(_ data: id?, _ range: CFRange, _ bytes: UnsafeRawPointer?, _ length: Int) {
     unsafeBitCast(ObjC.msgSend, to: ReplaceBytes.self)(
         data, ObjC.selector("replaceBytesInRange:withBytes:length:"),
         NSRange(location: UInt(range.location), length: UInt(range.length)), bytes, UInt(length))
 }
 
-@c(_CFDataDeleteBytes)
+@DarwinC("_CFDataDeleteBytes")
 public func CFDataDeleteBytes(_ data: id?, _ range: CFRange) { CFDataReplaceBytes(data, range, nil, 0) }
 
 @c(_CFDataSetLength)
