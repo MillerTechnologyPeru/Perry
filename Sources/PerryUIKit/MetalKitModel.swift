@@ -1,12 +1,12 @@
 import PerryObjCInterop
 
 // MetalKit's bridge to Model I/O: vertex descriptors converted between
-// Metal's and Model I/O's, and MTKMesh. Model I/O's classes are Model I/O's
-// provider's, which Perry doesn't have, so they are reached only by
-// messages and looked up by name: a Model I/O vertex descriptor an app hands
-// over converts to a Metal one, while making a Model I/O descriptor, or a
-// mesh from a Model I/O mesh or asset, fails as MetalKit does when it can't,
-// with an error in MTKModelErrorDomain.
+// Metal's and Model I/O's, the mesh buffer allocator that keeps Model I/O
+// meshes in Metal buffers, and MTKMesh. Model I/O's classes are Model I/O's
+// provider's (libPerryModelIO), so they are reached only by messages and
+// looked up by name; without that provider, making a Model I/O descriptor
+// fails as MetalKit does when it can't, with an error in
+// MTKModelErrorDomain.
 
 @ObjCConstants
 enum MetalKitModelConstants {
@@ -113,8 +113,8 @@ public func MTKMetalVertexDescriptorFromModelIO(_ modelIO: UnsafeMutableRawPoint
 
 /// The Model I/O descriptor of a Metal one: an unnamed attribute for each
 /// with a format, a layout for each buffer with a stride, autoreleased. Made
-/// from Model I/O's own classes, so nil with an error when no provider has
-/// registered them, as here.
+/// from Model I/O's own classes, so nil with an error when Model I/O's
+/// provider isn't loaded.
 @c(_MTKModelIOVertexDescriptorFromMetalWithError)
 public func MTKModelIOVertexDescriptorFromMetalWithError(_ metal: UnsafeMutableRawPointer?,
                                                          _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UnsafeMutableRawPointer? {
@@ -160,31 +160,263 @@ public func MTKModelIOVertexDescriptorFromMetal(_ metal: UnsafeMutableRawPointer
     MTKModelIOVertexDescriptorFromMetalWithError(metal, nil)
 }
 
-/// MetalKit's mesh of a Model I/O mesh, its buffers in Metal buffers. With
-/// no Model I/O there is no mesh to make one from: the initializer and the
-/// asset loader fail with an error, and a mesh never exists.
-@ObjCClass("MTKMesh")
-open class MTKMesh: NSObject {
-    @ObjCMethod("initWithMesh:device:error:")
-    func initialize(mesh: NSObject?, device: NSObject?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Self? {
-        MetalKitModel.fail(error, "Model I/O meshes are not available")
-        return nil
+/// MTKMeshBufferAllocator: Model I/O meshes it allocates for keep their
+/// vertices and indices in Metal buffers, which MTKMesh then uses as they are.
+@ObjCClass("MTKMeshBufferAllocator")
+open class MTKMeshBufferAllocator: NSObject {
+    var deviceObject: NSObject?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("initWithDevice:") public init(device: NSObject?) {
+        deviceObject = device
+        super.init()
     }
 
+    @ObjCMethod("device") func device() -> NSObject? { deviceObject }
+
+    @ObjCMethod("newZone:") func newZone(capacity: UInt) -> NSObject { MTKMeshBufferZone(capacity: capacity, allocator: self) }
+
+    @ObjCMethod("newZoneForBuffersWithSize:andType:") func newZone(sizes: NSObject?, types: NSObject?) -> NSObject {
+        let sizes = sizes.map { $0.unsafeCast(to: NSArray.self).elements } ?? []
+        return MTKMeshBufferZone(capacity: sizes.reduce(UInt(0)) { $0 + $1.mtkUnsignedIntegerValue() }, allocator: self)
+    }
+
+    @ObjCMethod("newBuffer:type:") func newBuffer(length: UInt, type: UInt) -> NSObject? {
+        MTKMeshBuffer.make(device: deviceObject, bytes: nil, length: length, type: type, allocator: self)
+    }
+
+    @ObjCMethod("newBufferWithData:type:") func newBuffer(data: NSObject?, type: UInt) -> NSObject? {
+        MTKMeshBuffer.make(device: deviceObject, bytes: data?.mtkBytes(), length: data?.mtkLength() ?? 0, type: type, allocator: self)
+    }
+
+    @ObjCMethod("newBufferFromZone:length:type:") func newBuffer(zone: NSObject?, length: UInt, type: UInt) -> NSObject? {
+        let buffer = MTKMeshBuffer.make(device: deviceObject, bytes: nil, length: length, type: type, allocator: self)
+        buffer?.zoneObject = zone
+        return buffer
+    }
+
+    @ObjCMethod("newBufferFromZone:data:type:") func newBuffer(zone: NSObject?, data: NSObject?, type: UInt) -> NSObject? {
+        let buffer = MTKMeshBuffer.make(device: deviceObject, bytes: data?.mtkBytes(), length: data?.mtkLength() ?? 0, type: type, allocator: self)
+        buffer?.zoneObject = zone
+        return buffer
+    }
+}
+
+/// A zone of an MTKMeshBufferAllocator: only its capacity is kept.
+@ObjCClass("MTKMeshBufferZone")
+open class MTKMeshBufferZone: NSObject {
+    var capacityValue: UInt = 0
+    weak var allocatorObject: MTKMeshBufferAllocator?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    init(capacity: UInt, allocator: MTKMeshBufferAllocator) {
+        capacityValue = capacity
+        allocatorObject = allocator
+        super.init()
+    }
+
+    @ObjCMethod("capacity") func capacity() -> UInt { capacityValue }
+    @ObjCMethod("allocator") func allocator() -> NSObject? { allocatorObject }
+}
+
+/// A Model I/O mesh buffer in a Metal buffer: the Metal buffer, and where
+/// in it the mesh buffer's bytes are.
+@ObjCClass("MTKMeshBuffer")
+open class MTKMeshBuffer: NSObject {
+    var bufferObject: NSObject?
+    var offsetValue: UInt = 0
+    var lengthValue: UInt = 0
+    var typeValue: UInt = 1
+    var allocatorObject: NSObject?
+    var zoneObject: NSObject?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    init(buffer: NSObject, length: UInt, type: UInt, allocator: NSObject?) {
+        bufferObject = buffer
+        lengthValue = length
+        typeValue = type
+        allocatorObject = allocator
+        super.init()
+    }
+
+    /// A shared Metal buffer of `length` bytes, a copy of `bytes` when given;
+    /// nil without a device.
+    static func make(device: NSObject?, bytes: UnsafeRawPointer?, length: UInt, type: UInt, allocator: NSObject?) -> MTKMeshBuffer? {
+        guard let device else { return nil }
+        // At least a byte: Metal makes no empty buffers.
+        let size = max(length, 1)
+        let made = bytes.flatMap { length > 0 ? device.mtkNewBuffer(bytes: $0, length: length, options: 0) : nil }
+            ?? device.mtkNewBuffer(length: size, options: 0)
+        guard let made else { return nil }
+        return MTKMeshBuffer(buffer: made, length: length, type: type, allocator: allocator)
+    }
+
+    var contents: UnsafeMutableRawPointer? { bufferObject?.mtkContents().map { $0 + Int(offsetValue) } }
+
+    @ObjCMethod("length") func length() -> UInt { lengthValue }
+    @ObjCMethod("offset") func offset() -> UInt { offsetValue }
+    @ObjCMethod("buffer") func buffer() -> NSObject? { bufferObject }
+    @ObjCMethod("type") func type() -> UInt { typeValue }
+    @ObjCMethod("allocator") func allocator() -> NSObject? { allocatorObject }
+    @ObjCMethod("zone") func zone() -> NSObject? { zoneObject }
+
+    /// Model I/O's map of the bytes, valid while this buffer is.
+    @ObjCMethod("map") func map() -> NSObject? {
+        guard let mapClass = MetalKitModel.registered("MDLMeshBufferMap") else { return nil }
+        return mapClass.mtkAlloc().mtkInitMap(bytes: contents, deallocator: nil)
+    }
+
+    @ObjCMethod("fillData:offset:") func fill(data: NSObject?, offset: UInt) {
+        guard let data, let bytes = data.mtkBytes(), let target = contents, offset < lengthValue else { return }
+        let count = min(Int(data.mtkLength()), Int(lengthValue - offset))
+        (target + Int(offset)).copyMemory(from: bytes, byteCount: count)
+    }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTKMeshBuffer? {
+        let device = (allocatorObject.flatMap { ObjCPeers.peer(of: $0.objcObject) as? MTKMeshBufferAllocator })?.deviceObject
+            ?? bufferObject?.mtkDevice()
+        return MTKMeshBuffer.make(device: device, bytes: contents, length: lengthValue, type: typeValue, allocator: allocatorObject)
+    }
+}
+
+/// A submesh's indices in a Metal buffer, and how to draw them.
+@ObjCClass("MTKSubmesh")
+open class MTKSubmesh: NSObject {
+    var primitive: UInt = 3
+    var indexTypeValue: UInt = 0
+    var indexBufferObject: MTKMeshBuffer?
+    var count: UInt = 0
+    weak var meshObject: MTKMesh?
+    var nameValue = ""
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("primitiveType") func primitiveType() -> UInt { primitive }
+    @ObjCMethod("indexType") func indexType() -> UInt { indexTypeValue }
+    @ObjCMethod("indexBuffer") func indexBuffer() -> NSObject? { indexBufferObject }
+    @ObjCMethod("indexCount") func indexCount() -> UInt { count }
+    @ObjCMethod("mesh") func mesh() -> NSObject? { meshObject }
+    @ObjCMethod("name") func name() -> String { nameValue }
+    @ObjCMethod("setName:") func setName(_ name: String?) { nameValue = name ?? "" }
+}
+
+/// MetalKit's mesh of a Model I/O mesh: its vertex buffers and submeshes'
+/// index buffers in Metal buffers (those an MTKMeshBufferAllocator made
+/// already are, the rest are copied), its vertex descriptor and count.
+@ObjCClass("MTKMesh")
+open class MTKMesh: NSObject {
+    var buffers: [MTKMeshBuffer] = []
+    var descriptor: NSObject?
+    var submeshList: [MTKSubmesh] = []
+    var count: UInt = 0
+    var nameValue = ""
+
+    /// The allocator, its buffers and zones adopt Model I/O's protocols,
+    /// declared here when Model I/O hasn't yet; MTKMesh is defined after them.
+    open override class func didDefineObjCClass(_ cls: ObjCClass) {
+        for (proto, className) in [("MDLMeshBufferAllocator", "MTKMeshBufferAllocator"), ("MDLMeshBuffer", "MTKMeshBuffer"),
+                                   ("MDLMeshBufferZone", "MTKMeshBufferZone")] {
+            if ObjCRuntime.protocolObject(proto) == nil { ObjCRuntime.defineProtocol(named: proto, adopting: [], methods: []) }
+            ObjCRuntime.registeredClassPair(className).map { ObjCRuntime.addProtocol(named: proto, to: ObjCClass($0.cls)) }
+        }
+    }
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("initWithMesh:device:error:")
+    public init?(mesh: NSObject?, device: NSObject?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        guard let mesh else {
+            MetalKitModel.fail(error, "No Model I/O mesh")
+            return nil
+        }
+        guard let device else {
+            MetalKitModel.fail(error, "No Metal device")
+            return nil
+        }
+        func metalBuffer(_ buffer: NSObject, type: UInt) -> MTKMeshBuffer? {
+            if let own = ObjCPeers.peer(of: buffer.objcObject) as? MTKMeshBuffer { return own }
+            let map = buffer.mtkMap()
+            return withExtendedLifetime(map) {
+                MTKMeshBuffer.make(device: device, bytes: map?.mtkBytes(), length: buffer.mtkLength(), type: type, allocator: nil)
+            }
+        }
+        var buffers: [MTKMeshBuffer] = []
+        for buffer in mesh.mtkVertexBuffers().map({ $0.unsafeCast(to: NSArray.self).elements }) ?? [] {
+            guard let made = metalBuffer(buffer, type: 1) else {
+                MetalKitModel.fail(error, "Could not make a Metal buffer for a vertex buffer")
+                return nil
+            }
+            buffers.append(made)
+        }
+        var submeshes: [MTKSubmesh] = []
+        for source in mesh.mtkSubmeshes().map({ $0.unsafeCast(to: NSArray.self).elements }) ?? [] {
+            let primitive: UInt
+            switch source.mtkGeometryType() {
+            case 0: primitive = 0      // points
+            case 1: primitive = 1      // lines
+            case 2: primitive = 3      // triangles
+            case 3: primitive = 4      // triangle strips
+            default:
+                MetalKitModel.fail(error, "Metal cannot draw a submesh of geometry type \(source.mtkGeometryType())")
+                return nil
+            }
+            // Metal has no 8-bit indices.
+            var bits = source.mtkIndexType()
+            var indexBuffer = source.mtkIndexBuffer()
+            if bits == 8 {
+                indexBuffer = source.mtkIndexBuffer(asIndexType: 16)
+                bits = 16
+            }
+            guard let indexBuffer, let made = metalBuffer(indexBuffer, type: 2) else {
+                MetalKitModel.fail(error, "Could not make a Metal buffer for an index buffer")
+                return nil
+            }
+            let submesh = MTKSubmesh()
+            submesh.primitive = primitive
+            submesh.indexTypeValue = bits == 32 ? 1 : 0
+            submesh.indexBufferObject = made
+            submesh.count = source.mtkIndexCount()
+            submesh.nameValue = source.mtkName() ?? ""
+            submeshes.append(submesh)
+        }
+        self.buffers = buffers
+        submeshList = submeshes
+        descriptor = mesh.mtkSendVertexDescriptor()?.mtkCopy()
+        count = mesh.mtkVertexCount()
+        nameValue = mesh.mtkName() ?? ""
+        super.init()
+        for submesh in submeshes { submesh.meshObject = self }
+    }
+
+    /// MetalKit meshes of every Model I/O mesh in an asset, and those meshes.
     @ObjCClassMethod("newMeshesFromAsset:device:sourceMeshes:error:")
     static func newMeshes(asset: NSObject?, device: NSObject?, sourceMeshes: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                           error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
         sourceMeshes?.pointee = nil
-        MetalKitModel.fail(error, "Model I/O assets are not available")
-        return nil
+        guard let asset, let meshClass = MetalKitModel.registered("MDLMesh") else {
+            MetalKitModel.fail(error, "No Model I/O asset")
+            return nil
+        }
+        let sources = asset.mtkChildObjects(ofClass: meshClass.objcObject).map { $0.unsafeCast(to: NSArray.self).elements } ?? []
+        var meshes: [NSObject] = []
+        for source in sources {
+            guard let mesh = MTKMesh(mesh: source, device: device, error: error) else { return nil }
+            meshes.append(mesh)
+        }
+        sourceMeshes?.pointee = NSMutableArray.of(sources).objCReturnValue()
+        // new… returns its array retained.
+        return NSMutableArray.of(meshes)
     }
 
-    @ObjCMethod("vertexBuffers") func vertexBuffers() -> NSObject { NSMutableArray.of([]) }
-    @ObjCMethod("vertexDescriptor") func vertexDescriptor() -> NSObject? { nil }
-    @ObjCMethod("submeshes") func submeshes() -> NSObject { NSMutableArray.of([]) }
-    @ObjCMethod("vertexCount") func vertexCount() -> UInt { 0 }
-    @ObjCMethod("name") func name() -> String { "" }
-    @ObjCMethod("setName:") func setName(_ name: String?) {}
+    @ObjCMethod("vertexBuffers") func vertexBuffers() -> NSObject { NSMutableArray.of(buffers) }
+    @ObjCMethod("vertexDescriptor") func vertexDescriptor() -> NSObject? { descriptor }
+    @ObjCMethod("submeshes") func submeshes() -> NSObject { NSMutableArray.of(submeshList) }
+    @ObjCMethod("vertexCount") func vertexCount() -> UInt { count }
+    @ObjCMethod("name") func name() -> String { nameValue }
+    @ObjCMethod("setName:") func setName(_ name: String?) { nameValue = name ?? "" }
 }
 
 // MARK: - Messages
@@ -211,4 +443,27 @@ extension NSObject {
     @ObjCMethod("setStride:") func mtkSetStride(_ stride: UInt)
     @ObjCMethod("setStepFunction:") func mtkSetStepFunction(_ function: UInt)
     @ObjCMethod("setStepRate:") func mtkSetStepRate(_ rate: UInt)
+    // Model I/O's meshes, submeshes, buffers and assets.
+    @ObjCMethod("vertexBuffers") func mtkVertexBuffers() -> NSObject?
+    @ObjCMethod("submeshes") func mtkSubmeshes() -> NSObject?
+    @ObjCMethod("vertexCount") func mtkVertexCount() -> UInt
+    @ObjCMethod("name") func mtkName() -> String?
+    @ObjCMethod("copy") func mtkCopy() -> NSObject?
+    @ObjCMethod("geometryType") func mtkGeometryType() -> Int
+    @ObjCMethod("indexType") func mtkIndexType() -> UInt
+    @ObjCMethod("indexCount") func mtkIndexCount() -> UInt
+    @ObjCMethod("indexBuffer") func mtkIndexBuffer() -> NSObject?
+    @ObjCMethod("indexBufferAsIndexType:") func mtkIndexBuffer(asIndexType type: UInt) -> NSObject?
+    @ObjCMethod("map") func mtkMap() -> NSObject?
+    @ObjCMethod("bytes") func mtkBytes() -> UnsafeMutableRawPointer?
+    @ObjCMethod("length") func mtkLength() -> UInt
+    @ObjCMethod("unsignedIntegerValue") func mtkUnsignedIntegerValue() -> UInt
+    @ObjCMethod("childObjectsOfClass:") func mtkChildObjects(ofClass cls: UnsafeMutableRawPointer?) -> NSObject?
+    @ObjCMethod("alloc") func mtkAlloc() -> NSObject
+    @ObjCMethod("initWithBytes:deallocator:") func mtkInitMap(bytes: UnsafeMutableRawPointer?, deallocator: UnsafeMutableRawPointer?) -> NSObject?
+    // Metal's devices and buffers.
+    @ObjCMethod("newBufferWithBytes:length:options:")
+    func mtkNewBuffer(bytes: UnsafeRawPointer, length: UInt, options: UInt) -> NSObject?
+    @ObjCMethod("newBufferWithLength:options:") func mtkNewBuffer(length: UInt, options: UInt) -> NSObject?
+    @ObjCMethod("contents") func mtkContents() -> UnsafeMutableRawPointer?
 }

@@ -225,3 +225,29 @@ INVERT(__invert_d3, simd_double3x3, double, d, 3)
 INVERT(__invert_d4, simd_double4x4, double, d, 4)
 
 #endif
+
+// MARK: - Identity matrices
+
+// matrix_identity_*: constants in libSystem's data that simd's headers
+// declare extern. Half-precision vectors have the layout of 16-bit
+// integer vectors (1.0 is 0x3C00).
+typedef unsigned short perry_half2 __attribute__((ext_vector_type(2)));
+typedef unsigned short perry_half3 __attribute__((ext_vector_type(3)));
+typedef unsigned short perry_half4 __attribute__((ext_vector_type(4)));
+typedef struct { perry_half2 columns[2]; } perry_half2x2;
+typedef struct { perry_half3 columns[3]; } perry_half3x3;
+typedef struct { perry_half4 columns[4]; } perry_half4x4;
+
+#define HALF_ONE 0x3C00
+const perry_half2x2 darwin_matrix_identity_half2x2 DARWIN_SYMBOL(matrix_identity_half2x2) = {{ {HALF_ONE, 0}, {0, HALF_ONE} }};
+const perry_half3x3 darwin_matrix_identity_half3x3 DARWIN_SYMBOL(matrix_identity_half3x3) = {{ {HALF_ONE, 0, 0}, {0, HALF_ONE, 0}, {0, 0, HALF_ONE} }};
+const perry_half4x4 darwin_matrix_identity_half4x4 DARWIN_SYMBOL(matrix_identity_half4x4) = {{
+    {HALF_ONE, 0, 0, 0}, {0, HALF_ONE, 0, 0}, {0, 0, HALF_ONE, 0}, {0, 0, 0, HALF_ONE} }};
+const simd_float2x2 darwin_matrix_identity_float2x2 DARWIN_SYMBOL(matrix_identity_float2x2) = {{ {1, 0}, {0, 1} }};
+const simd_float3x3 darwin_matrix_identity_float3x3 DARWIN_SYMBOL(matrix_identity_float3x3) = {{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} }};
+const simd_float4x4 darwin_matrix_identity_float4x4 DARWIN_SYMBOL(matrix_identity_float4x4) = {{
+    {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1} }};
+const simd_double2x2 darwin_matrix_identity_double2x2 DARWIN_SYMBOL(matrix_identity_double2x2) = {{ {1, 0}, {0, 1} }};
+const simd_double3x3 darwin_matrix_identity_double3x3 DARWIN_SYMBOL(matrix_identity_double3x3) = {{ {1, 0, 0}, {0, 1, 0}, {0, 0, 1} }};
+const simd_double4x4 darwin_matrix_identity_double4x4 DARWIN_SYMBOL(matrix_identity_double4x4) = {{
+    {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1} }};
