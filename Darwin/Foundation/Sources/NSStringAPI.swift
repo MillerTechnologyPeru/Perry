@@ -244,9 +244,33 @@ extension StringProtocol {
 // MARK: - NSString's Swift members
 
 extension NSString {
+    public convenience init(format: __shared NSString, _ args: any CVarArg...) {
+        let formatted = withVaList(args) { NSString(format: format as String, locale: nil, arguments: $0) }
+        self.init(string: formatted as String)
+    }
+
+    public convenience init(format: __shared NSString, locale: Locale?, _ args: any CVarArg...) {
+        let formatted = withVaList(args) {
+            NSString(format: format as String, locale: locale.map { $0._bridgeToObjectiveC() }, arguments: $0)
+        }
+        self.init(string: formatted as String)
+    }
+
+    /// A string made from a format and arguments, in the current locale.
+    public class func localizedStringWithFormat(_ format: NSString, _ args: any CVarArg...) -> Self {
+        withVaList(args) { self.init(format: format as String, locale: Locale.current._bridgeToObjectiveC(), arguments: $0) }
+    }
+
     /// The string with a formatted string appended, as -stringByAppendingFormat: makes it.
     public func appendingFormat(_ format: NSString, _ args: any CVarArg...) -> NSString {
         let formatted = withVaList(args) { NSString(format: format as String, locale: nil, arguments: $0) }
         return appending(formatted as String) as NSString
+    }
+}
+
+extension NSMutableString {
+    /// Appends a formatted string, as -appendFormat: does.
+    public func appendFormat(_ format: NSString, _ args: any CVarArg...) {
+        append(withVaList(args) { NSString(format: format as String, locale: nil, arguments: $0) } as String)
     }
 }
