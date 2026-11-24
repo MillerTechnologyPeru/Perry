@@ -1345,6 +1345,14 @@ open class UITableView: UIScrollView {
         if let cell = table.visibleCells[RowPath(chosen)], let template = cell.cell.selectionSegueTemplate {
             template.perform(cell)
         }
+        // The row's primary action (iOS 16), outside editing, if the
+        // delegate has one and allows it.
+        guard !isEditing(), let delegate, delegate.responds(to: "tableView:performPrimaryActionForRowAtIndexPath:") else { return }
+        if delegate.responds(to: "tableView:canPerformPrimaryActionForRowAtIndexPath:"),
+           !delegate.sendTableView(self, canPerformPrimaryActionForRowAt: chosen) {
+            return
+        }
+        delegate.sendTableView(self, performPrimaryActionForRowAt: chosen)
     }
 
     // MARK: Scrolling
@@ -1397,6 +1405,10 @@ extension NSObject {
     func sendTableView(_ table: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt path: NSObject)
     @ObjCMethod("tableView:willSelectRowAtIndexPath:") func sendTableView(_ table: UITableView, willSelectRowAt path: NSObject) -> NSObject?
     @ObjCMethod("tableView:didSelectRowAtIndexPath:") func sendTableView(_ table: UITableView, didSelectRowAt path: NSObject)
+    @ObjCMethod("tableView:canPerformPrimaryActionForRowAtIndexPath:")
+    func sendTableView(_ table: UITableView, canPerformPrimaryActionForRowAt path: NSObject) -> Bool
+    @ObjCMethod("tableView:performPrimaryActionForRowAtIndexPath:")
+    func sendTableView(_ table: UITableView, performPrimaryActionForRowAt path: NSObject)
 }
 
 // MARK: - UITableViewController
