@@ -294,9 +294,37 @@ public class NSSet: NSObject {
         }
     }
 
+    /// The options (concurrent, reverse) change nothing for a set, whose
+    /// members have no order: they run in turn.
+    @ObjCMethod("enumerateObjectsWithOptions:usingBlock:")
+    func enumerate(options: UInt, block: ObjCBlock) { enumerate(block: block) }
+
+    @ObjCMethod("sortedArrayUsingDescriptors:")
+    func sortedArray(usingDescriptors descriptors: ObjCObject?) -> NSArray {
+        Arrays.owned(SortDescriptors.sorted(members, by: descriptors?.objcObject))
+    }
+
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         Sets.storage(objcObject)?.enumeration.enumerate(members, state: state, buffer: objects, count: count) ?? 0
+    }
+
+    // MARK: Observing
+
+    /// A set can't be observed itself: these raise, as on Darwin.
+    @ObjCMethod("addObserver:forKeyPath:options:context:")
+    func rejectObserver(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, options: UInt, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "addObserver:forKeyPath:options:context:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:context:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:context:", keyPath)
     }
 
     @ObjCMethod("copyWithZone:")
@@ -374,6 +402,14 @@ public class NSMutableSet: NSSet {
     @ObjCMethod("intersectSet:")
     func intersect(_ other: NSSet?) {
         for member in storage.members where !(other?.contains(member) ?? false) {
+            storage.remove(member)
+        }
+    }
+
+    /// Keeps the members the predicate accepts.
+    @ObjCMethod("filterUsingPredicate:")
+    func filter(using predicate: NSPredicate) {
+        for member in storage.members where !predicate.evaluate(with: ObjCObject(member)) {
             storage.remove(member)
         }
     }
