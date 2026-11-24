@@ -104,8 +104,12 @@ enum Strings {
     /// The contents of an NSString, or nil if `object` is not one.
     static func value(of object: id?) -> String? {
         guard let object, ObjC.isKind(object, of: stringClass) else { return nil }
-        if ObjC.objectGetClass(object) == constantClass {
+        let cls = ObjC.objectGetClass(object)
+        if cls == constantClass {
             return constantValue(object)
+        }
+        if let legacy = LegacyConstantStrings.value(object, cls) {
+            return legacy
         }
         // Another library's subclass keeps its own characters, even when it
         // was made with NSString's -init.
@@ -156,6 +160,16 @@ enum Strings {
     }
 
     static func utf8(_ object: id) -> UnsafePointer<CChar>? {
+        if let legacy = LegacyConstantStrings.value(object, ObjC.objectGetClass(object)) {
+            // Its bytes needn't end at its length: a C string made once.
+            let key = UInt(bitPattern: object)
+            return literalUTF8.withLock { literals in
+                if let cached = literals[key] { return cached.utf8 }
+                let storage = StringStorage(legacy)
+                literals[key] = storage
+                return storage.utf8
+            }
+        }
         if ObjC.objectGetClass(object) == constantClass {
             let flags = object.load(fromByteOffset: DarwinLayout.stringFlags, as: UInt.self)
             if flags & 0x10 == 0 {
@@ -275,6 +289,23 @@ public class NSString: NSObject {
                       implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
         cls.addMethod("stringByAppendingFormat:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
+        cls.addMethod("initWithFormat:locale:", types: "@32@0:8@16@24",
+                      implementation: variadicEntry(perry_imp_initWithFormatLocale), isClassMethod: false)
+        // Five fixed arguments: armv7's entry points take four.
+        #if !arch(arm)
+        cls.addMethod("stringWithValidatedFormat:validFormatSpecifiers:error:", types: "@40@0:8@16@24^@32",
+                      implementation: variadicEntry(perry_imp_stringWithValidatedFormat), isClassMethod: true)
+        // Formatting isn't localized here, so it is stringWithValidatedFormat:….
+        cls.addMethod("localizedStringWithValidatedFormat:validFormatSpecifiers:error:", types: "@40@0:8@16@24^@32",
+                      implementation: variadicEntry(perry_imp_stringWithValidatedFormat), isClassMethod: true)
+        cls.addMethod("initWithValidatedFormat:validFormatSpecifiers:error:", types: "@40@0:8@16@24^@32",
+                      implementation: variadicEntry(perry_imp_initWithValidatedFormat), isClassMethod: false)
+        #endif
+        // Six: x86_64's take five.
+        #if !arch(arm) && !arch(x86_64)
+        cls.addMethod("initWithValidatedFormat:validFormatSpecifiers:locale:error:", types: "@48@0:8@16@24@32^@40",
+                      implementation: variadicEntry(perry_imp_initWithValidatedFormatLocale), isClassMethod: false)
+        #endif
     }
 
     /// The receiver's contents.
@@ -385,6 +416,22 @@ public class NSString: NSObject {
     @ObjCMethod("initWithFormat:locale:arguments:", types: "@40@0:8@16@24*32")
     func initialize(format: String, locale: ObjCObject?, arguments: UnsafeRawPointer?) -> Self {
         initialize(format: format, arguments: arguments)
+    }
+
+    /// The format with the arguments, when it takes only arguments the
+    /// valid specifiers take, each where and of the type they take it;
+    /// otherwise nil and NSFormattingError (2048).
+    @ObjCMethod("initWithValidatedFormat:validFormatSpecifiers:arguments:error:", types: "@48@0:8@16@24*32^@40")
+    func initialize(validatedFormat format: ObjCObject?, validFormatSpecifiers valid: ObjCObject?, arguments: UnsafeRawPointer?,
+                    error: UnsafeMutablePointer<id?>?) -> Self? {
+        ValidatedFormats.string(format?.id, valid?.id, arguments, error).map(setValue)
+    }
+
+    /// As without the locale, which is not applied.
+    @ObjCMethod("initWithValidatedFormat:validFormatSpecifiers:locale:arguments:error:", types: "@56@0:8@16@24@32*40^@48")
+    func initialize(validatedFormat format: ObjCObject?, validFormatSpecifiers valid: ObjCObject?, locale: ObjCObject?,
+                    arguments: UnsafeRawPointer?, error: UnsafeMutablePointer<id?>?) -> Self? {
+        ValidatedFormats.string(format?.id, valid?.id, arguments, error).map(setValue)
     }
 
     @ObjCMethod("dealloc")
@@ -527,4 +574,61 @@ public func perry_foundation_stringByAppendingFormat(_ object: id?, _ cmd: SEL?,
     var darwin = DarwinArguments(arguments)
     let suffix = Format.string(Strings.value(of: format) ?? "", &darwin)
     return Strings.autoreleased((Strings.value(of: object) ?? "") + suffix)
+}
+
+/// - (instancetype)initWithFormat:(NSString *)format locale:(id)locale, ...:
+/// formatted as -initWithFormat: formats; the locale is not applied.
+@c
+public func perry_foundation_initWithFormatLocale(_ object: id?, _ cmd: SEL?, _ format: id?, _ locale: id?,
+                                                  _ arguments: UnsafeRawPointer?) -> id? {
+    perry_foundation_initWithFormat(object, cmd, format, arguments)
+}
+
+/// + (instancetype)stringWithValidatedFormat:validFormatSpecifiers:error:, ...
+/// and +localizedStringWithValidatedFormat:…: nil and the error when the
+/// format doesn't match the valid specifiers.
+@c
+public func perry_foundation_stringWithValidatedFormat(_ cls: id?, _ cmd: SEL?, _ format: id?, _ valid: id?,
+                                                       _ error: UnsafeMutablePointer<id?>?, _ arguments: UnsafeRawPointer?) -> id? {
+    ValidatedFormats.string(format, valid, arguments, error).map { Strings.autoreleased($0, of: cls) }
+}
+
+/// - (instancetype)initWithValidatedFormat:validFormatSpecifiers:error:, ...
+@c
+public func perry_foundation_initWithValidatedFormat(_ object: id?, _ cmd: SEL?, _ format: id?, _ valid: id?,
+                                                     _ error: UnsafeMutablePointer<id?>?, _ arguments: UnsafeRawPointer?) -> id? {
+    guard let object else { return nil }
+    guard let text = ValidatedFormats.string(format, valid, arguments, error) else {
+        ObjC.release(object)
+        return nil
+    }
+    Storage.set(object, StringStorage(text))
+    return object
+}
+
+/// - (instancetype)initWithValidatedFormat:validFormatSpecifiers:locale:error:, ...:
+/// the locale is not applied.
+@c
+public func perry_foundation_initWithValidatedFormatLocale(_ object: id?, _ cmd: SEL?, _ format: id?, _ valid: id?, _ locale: id?,
+                                                           _ error: UnsafeMutablePointer<id?>?, _ arguments: UnsafeRawPointer?) -> id? {
+    perry_foundation_initWithValidatedFormat(object, cmd, format, valid, error, arguments)
+}
+
+/// Formats checked against the specifiers a program says are valid.
+enum ValidatedFormats {
+    /// The formatted string, when the format takes only arguments the
+    /// valid specifiers take (a format may take fewer); else nil and
+    /// NSFormattingError, as CFStringCreateStringWithValidatedFormat.
+    static func string(_ format: id?, _ valid: id?, _ arguments: UnsafeRawPointer?, _ error: UnsafeMutablePointer<id?>?) -> String? {
+        let text = Strings.value(of: format) ?? "", allowed = Strings.value(of: valid) ?? ""
+        guard CFStringMore.validate(text, against: allowed) else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 2048,
+                                                 description: "Format \u{2018}\(text)\u{2019} does not match valid format specifiers \u{2018}\(allowed)\u{2019}")
+            return nil
+        }
+        error?.pointee = nil
+        guard let arguments else { return text }
+        var darwin = DarwinArguments(arguments)
+        return Format.string(text, &darwin)
+    }
 }
