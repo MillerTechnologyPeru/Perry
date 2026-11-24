@@ -50,6 +50,36 @@ public final class NSDateInterval: NSObject {
         return seconds >= 0 && seconds <= storage.duration
     }
 
+    private var end: Date { storage.start.addingTimeInterval(storage.duration) }
+
+    /// NSComparisonResult: by start date, then by duration.
+    @ObjCMethod("compare:")
+    func compare(_ other: NSDateInterval) -> Int {
+        let (mine, theirs) = (storage, other.storage)
+        if mine.start != theirs.start { return mine.start < theirs.start ? -1 : 1 }
+        if mine.duration != theirs.duration { return mine.duration < theirs.duration ? -1 : 1 }
+        return 0
+    }
+
+    /// Whether either contains an end of the other.
+    @ObjCMethod("intersectsDateInterval:")
+    func intersects(_ other: NSDateInterval) -> Bool {
+        let (start, end) = (storage.start, self.end), (otherStart, otherEnd) = (other.storage.start, other.end)
+        return (start...end).contains(otherStart) || (start...end).contains(otherEnd)
+            || (otherStart...otherEnd).contains(start) || (otherStart...otherEnd).contains(end)
+    }
+
+    /// The span both cover; nil when they don't meet.
+    @ObjCMethod("intersectionWithDateInterval:")
+    func intersection(with other: NSDateInterval) -> UnsafeMutableRawPointer? {
+        guard intersects(other) else { return nil }
+        let start = max(storage.start, other.storage.start), end = min(self.end, other.end)
+        let object = Storage.allocate(ObjC.objectGetClass(objcObject).map { UnsafeMutableRawPointer($0) })
+        guard let object else { return nil }
+        Storage.set(object, DateIntervalStorage(start: start, duration: end.timeIntervalSince(start)))
+        return ObjC.autorelease(object)
+    }
+
     @ObjCMethod("isEqualToDateInterval:")
     func isEqual(toDateInterval other: NSDateInterval?) -> Bool {
         guard let other else { return false }
