@@ -21,15 +21,15 @@ final class SharedFrames: Sendable {
 
     /// Takes `count` records of seven 64-bit values (fd, width, height,
     /// stride, offset, fourcc, modifier); the surface duplicates each fd.
-    init(records: UnsafeRawPointer, count: Int) {
+    /// GL's rows are bottom first, Metal's top first.
+    init(records: UnsafeRawPointer, count: Int, topFirst: Bool = false) {
         let values = records.assumingMemoryBound(to: Int64.self)
         let buffers = (0..<count).map { index in
             let v = values + index * 7
             return ExternalSurface.Buffer(fileDescriptor: Int32(v[0]), width: Int32(v[1]), height: Int32(v[2]), stride: Int32(v[3]),
                                           offset: Int32(v[4]), fourCC: UInt32(truncatingIfNeeded: v[5]), modifier: UInt64(bitPattern: v[6]))
         }
-        // GL's rows are bottom first.
-        surface = ExternalSurface(buffers: buffers, rowOrder: .bottomFirst)
+        surface = ExternalSurface(buffers: buffers, rowOrder: topFirst ? .topFirst : .bottomFirst)
     }
 
     /// The app's: the buffer at `slot` is getting a new frame, finished
