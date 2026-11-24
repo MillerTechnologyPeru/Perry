@@ -37,6 +37,11 @@ static struct timespec deadline_after(int32_t duration) {
     return deadline;
 }
 
+// A condition variable is kept at a multiple of 8 bytes, where its 64-bit
+// fields want it: i386 alone asks for 4, and the armhf pthread functions an
+// i386 program is run with under box86 fault on one in between.
+#define ALIGNED_CONDITION _Alignas(8) pthread_cond_t
+
 static void condition_init(pthread_cond_t *condition) {
     pthread_condattr_t attributes;
     pthread_condattr_init(&attributes);
@@ -64,7 +69,7 @@ typedef struct queue_message {
 typedef struct {
     uint32_t magic;
     pthread_mutex_t mutex;
-    pthread_cond_t condition;
+    ALIGNED_CONDITION condition;
     queue_message *first, *last;
 } mp_queue;
 
@@ -158,7 +163,7 @@ OSStatus carbon_MPWaitOnQueue(void *identifier, void **first, void **second, voi
 typedef struct {
     uint32_t magic;
     pthread_mutex_t mutex;
-    pthread_cond_t condition;
+    ALIGNED_CONDITION condition;
     uint32_t flags;
 } mp_event;
 

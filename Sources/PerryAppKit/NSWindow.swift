@@ -898,6 +898,13 @@ open class NSWindow: NSResponder {
             return
         }
         do {
+            // SDL's OpenGL attributes are everyone's, and a program's last
+            // pixel format stays in them: a renderer made after a format
+            // with one buffer (MacSoft's Halo asks for one to find out what
+            // card it has) would get a window with one too, and nothing it
+            // presents is seen. Its own come from SDL's defaults.
+            // (The attributes' lock is held here already.)
+            SDL_GL_ResetAttributes()
             let made = try GLCurrent.preserving {
                 try SDLRenderer(window: window, driver: SDLRenderer.Driver(name: "opengles2") ?? .default)
             }

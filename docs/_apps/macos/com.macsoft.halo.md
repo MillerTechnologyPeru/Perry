@@ -110,9 +110,38 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/4263b7b7-a43a-4efb-94a6-e45e363f36d8
         caption: A level, with MangoHud's overlay
+  - pr: 392
+    date: 2026-11-24
+    perry: "d69b9c78"
+    platform: macos
+    cpu: i386
+    app_version: "2.0"
+    hardware: Retroid Pocket 5
+    os: ROCKNIX 20261101
+    packaging: Packaging/macos/com.macsoft.halo/portmaster
+    resolution: "800x600"
+    graphics: OpenGL
+    env:
+      - "PERRY_DISCS=Halo Universal=roms/ports/halo/disc"
+      - "PERRY_CONTAINER=roms/ports/halo/conf"
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "BOX86_MMAP_BASE=0x48000000"
+    level: 3
+    source: body
+    notes: Under box86 it finds its disc, shows its graphics settings and reaches its main menu, in a window. The settings window's labels and button titles are not drawn there. Sound, the controller mapping and play are untested.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/e1f19426-188e-45b5-8a54-06a6ea0868a0
+        caption: The main menu on the Retroid Pocket 5
 ---
 
 A Carbon application for PowerPC and Intel, run with the 32-bit Perry. It
 checks for its disc through IOKit, so the disc's image is mounted and named
 with `PERRY_DISCS`. The folder given as `PERRY_CONTAINER` must have no
 period in its path: Halo refuses a Documents folder whose path has one.
+
+On the Retroid Pocket 5 it runs under box86, started by a PortMaster script
+with gptokeyb for the controls. Halo keeps its game state at 0x40000000,
+where box86 would put its own pages, so box86 is built with
+`Packaging/shared/box86/box86-mmap-base.patch` and the launcher sets
+`BOX86_MMAP_BASE=0x48000000`.
