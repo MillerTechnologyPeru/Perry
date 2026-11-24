@@ -235,6 +235,20 @@ public final class NSScanner: NSObject {
         Scanners.store(value, storage.scan { storage.doubleValue(&$0) })
     }
 
+    /// A decimal number, as NSDecimal keeps it: up to 38 digits of
+    /// mantissa (later ones only move the exponent) and an exponent, with
+    /// trailing zeros moved into the exponent, as Darwin's are. The decimal
+    /// separator is the locale's, "." without one.
+    @ObjCMethod("scanDecimal:")
+    func scanDecimal(_ decimal: UnsafeMutableRawPointer?) -> Bool {
+        let separator = Array((storage.locale.flatMap {
+            Strings.value(of: ObjC.send($0, ObjC.selector("objectForKey:"), Strings.autoreleased(LocaleKeys.NSLocaleDecimalSeparator)))
+        } ?? ".").utf16)
+        guard let scanned = storage.scan({ ScannedDecimal.scan(storage.units, &$0, separator: separator) }) else { return false }
+        if let decimal { scanned.store(into: decimal) }
+        return true
+    }
+
     @ObjCMethod("scanFloat:")
     func scanFloat(_ value: UnsafeMutablePointer<Float>?) -> Bool {
         Scanners.store(value, storage.scan { storage.doubleValue(&$0).map(Float.init) })
@@ -321,5 +335,119 @@ public final class NSScanner: NSObject {
         guard let found else { return false }
         result?.pointee = Scanners.text(storage, found.0, found.1)
         return true
+    }
+}
+
+/// A decimal number as -scanDecimal: reads it, and its NSDecimal: a
+/// 32-bit word of the exponent (8 bits), the length in 16-bit words of
+/// the mantissa (4), the sign (1) and whether it is compact (1), then the
+/// mantissa as eight 16-bit words, least significant first.
+struct ScannedDecimal {
+    var mantissa = [UInt16](repeating: 0, count: 8)
+    var exponent = 0
+    var negative = false
+    var digitCount = 0
+
+    /// Multiplies the mantissa by 10 and adds a digit; false when that
+    /// would pass 38 digits or 128 bits.
+    private mutating func append(_ digit: UInt32) -> Bool {
+        guard digitCount < 38 else { return false }
+        var carry = digit
+        var result = mantissa
+        for index in 0..<8 {
+            let value = UInt32(result[index]) * 10 + carry
+            result[index] = UInt16(truncatingIfNeeded: value)
+            carry = value >> 16
+        }
+        guard carry == 0 else { return false }
+        mantissa = result
+        if digitCount > 0 || digit != 0 { digitCount += 1 }
+        return true
+    }
+
+    /// Divides the mantissa by 10 while it is a multiple of 10.
+    private mutating func compact() {
+        while mantissa.contains(where: { $0 != 0 }), exponent < 127 {
+            var remainder: UInt32 = 0
+            var quotient = mantissa
+            for index in stride(from: 7, through: 0, by: -1) {
+                let value = remainder << 16 | UInt32(mantissa[index])
+                quotient[index] = UInt16(value / 10)
+                remainder = value % 10
+            }
+            guard remainder == 0 else { return }
+            mantissa = quotient
+            exponent += 1
+        }
+    }
+
+    static func scan(_ units: [UInt16], _ index: inout Int, separator: [UInt16]) -> ScannedDecimal? {
+        func digit(_ at: Int) -> UInt32? {
+            guard at < units.count, (0x30...0x39).contains(units[at]) else { return nil }
+            return UInt32(units[at] - 0x30)
+        }
+        var decimal = ScannedDecimal()
+        var cursor = index
+        if cursor < units.count, units[cursor] == 0x2D || units[cursor] == 0x2B {   // - +
+            decimal.negative = units[cursor] == 0x2D
+            cursor += 1
+        }
+        var sawDigit = false
+        while let value = digit(cursor) {
+            if !decimal.append(value) { decimal.exponent += 1 }
+            sawDigit = true
+            cursor += 1
+        }
+        if !separator.isEmpty, cursor + separator.count <= units.count, Array(units[cursor..<cursor + separator.count]) == separator {
+            var after = cursor + separator.count
+            var sawFraction = false
+            while let value = digit(after) {
+                if decimal.append(value) { decimal.exponent -= 1 }
+                sawFraction = true
+                after += 1
+            }
+            if sawDigit || sawFraction { cursor = after }
+            sawDigit = sawDigit || sawFraction
+        }
+        guard sawDigit else { return nil }
+        if cursor < units.count, units[cursor] == 0x65 || units[cursor] == 0x45 {   // e E
+            var after = cursor + 1
+            var negativeExponent = false
+            if after < units.count, units[after] == 0x2D || units[after] == 0x2B {
+                negativeExponent = units[after] == 0x2D
+                after += 1
+            }
+            var power = 0, sawPower = false
+            while let value = digit(after) {
+                power = min(power * 10 + Int(value), 1000)
+                sawPower = true
+                after += 1
+            }
+            if sawPower {
+                decimal.exponent += negativeExponent ? -power : power
+                cursor = after
+            }
+        }
+        index = cursor
+        decimal.compact()
+        if !decimal.mantissa.contains(where: { $0 != 0 }) {
+            decimal.exponent = 0
+            decimal.negative = false
+        }
+        decimal.exponent = max(-128, min(127, decimal.exponent))
+        return decimal
+    }
+
+    /// Writes the NSDecimal.
+    func store(into pointer: UnsafeMutableRawPointer) {
+        let length = (mantissa.lastIndex(where: { $0 != 0 }) ?? -1) + 1
+        var word = UInt32(UInt8(bitPattern: Int8(exponent)))
+        word |= UInt32(length) << 8
+        word |= (negative ? 1 : 0) << 12
+        word |= 1 << 13   // compact
+        pointer.storeBytes(of: word, as: UInt32.self)
+        for (index, unit) in mantissa.enumerated() {
+            pointer.storeBytes(of: unit, toByteOffset: 4 + 2 * index, as: UInt16.self)
+        }
     }
 }
