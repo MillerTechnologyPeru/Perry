@@ -551,6 +551,8 @@ final class CustomSourceStorage {
         removed.forEach { $0.removeSource() }
     }
 
+    var isValid: Bool { lock.locked { valid } }
+
     func signal() {
         let loops = lock.locked { () -> [RunLoopState] in
             guard valid else { return [] }
@@ -619,7 +621,10 @@ public func CFRunLoopSourceCreate(_ allocator: UnsafeRawPointer?, _ order: Int,
 public func CFRunLoopSourceSignal(_ source: UnsafeMutableRawPointer?) { customSource(source)?.signal() }
 
 @c(_CFRunLoopSourceIsValid)
-public func CFRunLoopSourceIsValid(_ source: UnsafeMutableRawPointer?) -> Bool { source != nil }
+public func CFRunLoopSourceIsValid(_ source: UnsafeMutableRawPointer?) -> Bool {
+    guard let source else { return false }
+    return customSource(source)?.isValid ?? true
+}
 
 /// Every mode is the same run loop here.
 @c(_CFRunLoopAddSource)
