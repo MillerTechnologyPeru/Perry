@@ -79,6 +79,8 @@ final class SocketStorage {
     let callout: Callout?
     let info: UnsafeMutableRawPointer?
     let release: Release?
+    /// The context it was made with, for CFSocketGetContext.
+    var context = InfoContext()
     /// The CFSocket, not retained; nil once it is invalid.
     var object: id?
     var flags = SocketFlag.initial
@@ -365,6 +367,8 @@ final class NSCFSocket: NSObject {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: Sockets.socketClass)
     }
+
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { Sockets.typeID }
 }
 
 @ObjCClass("__NSCFRunLoopSource")
@@ -399,14 +403,7 @@ public func CFSocketCreate(_ allocator: UnsafeRawPointer?, _ family: Int32, _ ty
     default: descriptor = nil
     }
     guard let descriptor else { return nil }
-    typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
-    var info = context?.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
-    if let retain = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
-        info = UnsafeMutableRawPointer(mutating: retain(info))
-    }
-    let release = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: SocketStorage.Release?.self)
-    return Sockets.make(SocketStorage(descriptor: descriptor, isIPv6: family == 30, types: types, callout: callout, info: info,
-                                      release: release))
+    return Sockets.make(descriptor: descriptor, isIPv6: family == 30, types: types, callout: callout, context: context)
 }
 
 @c(_CFSocketGetNative)
@@ -519,6 +516,10 @@ final class CustomSourceStorage {
     let release: Release?
     var schedule: Scheduled?
     var cancel: Scheduled?
+    /// The order it was made with, and the words of its context as given
+    /// (CFRunLoopSourceGetContext gives them back, with the info kept).
+    var order = 0
+    var contextWords: [UInt] = []
     private let lock = NSLockStorage()
     private var loops: [RunLoopState] = []
     private var signalled = false
@@ -552,6 +553,9 @@ final class CustomSourceStorage {
     }
 
     var isValid: Bool { lock.locked { valid } }
+
+    /// Whether the source is on `loop`.
+    func isScheduled(on loop: RunLoopState) -> Bool { lock.locked { loops.contains { $0 === loop } } }
 
     func signal() {
         let loops = lock.locked { () -> [RunLoopState] in
@@ -613,6 +617,8 @@ public func CFRunLoopSourceCreate(_ allocator: UnsafeRawPointer?, _ order: Int,
         release: context.load(fromByteOffset: DarwinLayout.contextRelease, as: CustomSourceStorage.Release?.self))
     storage.schedule = context.load(fromByteOffset: 7 * DarwinLayout.word, as: CustomSourceStorage.Scheduled?.self)
     storage.cancel = context.load(fromByteOffset: 8 * DarwinLayout.word, as: CustomSourceStorage.Scheduled?.self)
+    storage.order = order
+    storage.contextWords = (0..<10).map { context.load(fromByteOffset: $0 * DarwinLayout.word, as: UInt.self) }
     Storage.set(object, storage)
     return object
 }
@@ -659,9 +665,3 @@ public func CFRunLoopSourceInvalidate(_ source: UnsafeMutableRawPointer?) {
     guard let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
     Sockets.unschedule(storage, from: nil)
 }
-
-/// A port another process registered under the name: there are no other
-/// processes here, so none is found, and CoreFoundation returns NULL for
-/// a name nothing has registered.
-@c(_CFMessagePortCreateRemote)
-public func CFMessagePortCreateRemote(_ allocator: UnsafeRawPointer?, _ name: id?) -> id? { nil }
