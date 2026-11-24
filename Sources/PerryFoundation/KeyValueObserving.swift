@@ -80,6 +80,9 @@ enum KeyValueObserving {
     nonisolated(unsafe) static var byOriginal: [Class: Class] = [:]
     nonisolated(unsafe) static var observances: [id: [Observance]] = [:]
     nonisolated(unsafe) static var pending: [Pending] = []
+    /// The registrations -setSharedObservers: made, by object: the next
+    /// snapshot set replaces them.
+    nonisolated(unsafe) static var shared: [id: [Observance]] = [:]
 
     /// PERRY_KVO_TRACE: each registration added and removed.
     static let tracing = getenv("PERRY_KVO_TRACE") != nil
@@ -115,6 +118,7 @@ enum KeyValueObserving {
         let cls = original(object)
         let forgotten: [Observance] = locked {
             deallocating.insert(object)
+            shared[object] = nil
             return observances.removeValue(forKey: object) ?? []
         }
         for observance in forgotten { unhook(observance) }
@@ -193,6 +197,34 @@ enum KeyValueObserving {
         locked { observances[object, default: []].append(observance) }
         if ObjC.objectGetClass(object) != subclass { _ = ObjC.objectSetClass(object, subclass) }
         hook(observance, object)
+    }
+
+    /// One observer an NSKeyValueSharedObservers adds to each object a
+    /// snapshot of it is set on.
+    struct SharedRegistration {
+        /// Unretained, as observers are.
+        let observer: id
+        let key: String
+        let options: UInt
+        let context: UnsafeMutableRawPointer?
+    }
+
+    /// Replaces the registrations an earlier snapshot made on the object
+    /// with the snapshot's: newest last, so notified first, as Darwin's
+    /// are. Darwin sends no initial notification for them.
+    static func setShared(_ object: id, _ registrations: [SharedRegistration]) {
+        let old = locked { shared.removeValue(forKey: object) ?? [] }
+        for observance in old where locked({ observances[object]?.contains { $0 === observance } ?? false }) {
+            remove(observance, from: object)
+        }
+        var added: [Observance] = []
+        for registration in registrations {
+            let observance = Observance(observer: registration.observer, keyPath: registration.key,
+                                        options: registration.options & ~optionInitial, context: registration.context)
+            add(observance, to: object)
+            added.append(observance)
+        }
+        if !added.isEmpty { locked { shared[object] = added } }
     }
 
     static func remove(_ observance: Observance, from object: id) {
@@ -361,6 +393,22 @@ extension NSObject {
                             + "\(object)> because it is not registered as an observer.")
         }
         KeyValueObserving.remove(found, from: object)
+    }
+
+    /// Observes the object with the observers a snapshot of an
+    /// NSKeyValueSharedObservers holds, in place of the last snapshot set;
+    /// nil removes them. The object must be of the snapshot's class.
+    @ObjCMethod("setSharedObservers:")
+    func setSharedObservers(_ snapshot: UnsafeMutableRawPointer?) {
+        let object = objcObject
+        guard let snapshot else { return KeyValueObserving.setShared(object, []) }
+        guard let storage = Storage.get(snapshot, as: SharedObserversStorage.self) else { return }
+        if let cls = storage.observableClass, !ObjC.isKind(object, of: cls) {
+            Exceptions.raise(name: "NSInternalInconsistencyException",
+                             reason: "<\(ObjC.className(object)): \(object)>: Attempted to set shared observers from snapshot "
+                                 + "<\(ObjC.className(snapshot)): \(snapshot)>, which is targetting a different class")
+        }
+        KeyValueObserving.setShared(object, storage.registrations)
     }
 
     @ObjCMethod("removeObserver:forKeyPath:")
