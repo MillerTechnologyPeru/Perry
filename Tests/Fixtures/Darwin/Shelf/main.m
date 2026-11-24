@@ -288,7 +288,9 @@ int main(void) {
             author.name = @"Italo Calvino";
             [memory.viewContext save:nil];
             say([NSString stringWithFormat:@"  %@ store: %@", type, list(fetch(memory.viewContext, @"Author", nil, nil), @"name")]);
-            [[NSFileManager defaultManager] removeItemAtURL:storeURL error:nil];
+            // Only the binary store has a file of its own: the in-memory
+            // one's URL is /dev/null, which a test run as root would lose.
+            if ([type isEqual:NSBinaryStoreType]) [[NSFileManager defaultManager] removeItemAtURL:storeURL error:nil];
         }
 
         // MARK: A model in code
