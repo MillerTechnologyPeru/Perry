@@ -117,6 +117,7 @@ OSStatus carbon_MPNotifyQueue(void *identifier, void *first, void *second, void 
     queue_message *message = calloc(1, sizeof *message);
     if (!message) return kMPInsufficientResourcesErr;
     message->words[0] = first; message->words[1] = second; message->words[2] = third;
+    CARBON_TRACE("queue %p: notified %p %p %p", identifier, first, second, third);
     pthread_mutex_lock(&queue->mutex);
     if (queue->last) queue->last->next = message; else queue->first = message;
     queue->last = message;
@@ -141,6 +142,7 @@ OSStatus carbon_MPWaitOnQueue(void *identifier, void **first, void **second, voi
         if (!queue->first) queue->last = NULL;
     }
     pthread_mutex_unlock(&queue->mutex);
+    CARBON_TRACE("queue %p: waited %d, status %d", identifier, timeout, (int)status);
     if (status != noErr) return status;
     if (first) *first = message->words[0];
     if (second) *second = message->words[1];
@@ -193,6 +195,7 @@ OSStatus carbon_MPSetEvent(void *identifier, uint32_t flags) CARBON_SYMBOL(MPSet
 OSStatus carbon_MPSetEvent(void *identifier, uint32_t flags) {
     mp_event *event = event_from(identifier);
     if (!event) return kMPInvalidIDErr;
+    CARBON_TRACE("event %p: set %#x", identifier, flags);
     pthread_mutex_lock(&event->mutex);
     event->flags |= flags;
     pthread_cond_signal(&event->condition);
@@ -211,6 +214,7 @@ OSStatus carbon_MPWaitForEvent(void *identifier, uint32_t *flags, int32_t timeou
     }
     OSStatus status = event->magic != MP_EVENT_MAGIC ? kMPDeletedErr : event->flags ? noErr : kMPTimeoutErr;
     if (flags) *flags = event->flags;
+    CARBON_TRACE("event %p: waited %d, status %d, flags %#x", identifier, timeout, (int)status, event->flags);
     if (status == noErr) event->flags = 0;
     pthread_mutex_unlock(&event->mutex);
     return status;
@@ -243,6 +247,7 @@ void *carbon_MPCurrentTaskID(void) {
 /// A task that ended tells its queue: the two words it was made with, and
 /// its result.
 static void task_ended(mp_task *task, OSStatus result) {
+    CARBON_TRACE("task %p ended with %d", (void *)task, (int)result);
     if (task->queue) carbon_MPNotifyQueue(task->queue, task->termination[0], task->termination[1], (void *)(intptr_t)result);
     task->magic = 0;
 }
