@@ -19,7 +19,8 @@ public protocol ObjCValue {
     /// The type it has as a method's result: ObjCType, except where 32-bit
     /// Darwin returns a value in other registers than it passes it in (a
     /// double or a 64-bit integer passes as two words, ObjCWordPair, and
-    /// returns in r0 and r1, a UInt64).
+    /// returns in r0 and r1, a UInt64), and where arm64 Darwin extends a
+    /// result narrower than 32 bits to 32 (an Int32 or a UInt32).
     associatedtype ObjCResultType = ObjCType
 
     /// The Objective-C type encoding: "q", "d", "@" and so on.
@@ -124,6 +125,46 @@ extension Int16: ObjCScalar { public static var objCTypeEncoding: String { "s" }
 extension UInt16: ObjCScalar { public static var objCTypeEncoding: String { "S" } }
 extension Int8: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
 extension UInt8: ObjCScalar { public static var objCTypeEncoding: String { "C" } }
+
+#if arch(arm64)
+// arm64 Darwin has the callee sign- or zero-extend a result narrower than 32
+// bits to 32, and code built for it uses w0 as it comes back: `int x =
+// [n shortValue]` takes all of it. Linux's AAPCS64 leaves the bits above the
+// value unspecified, so Swift may return a short with garbage above it
+// (0x7fffffff for an Int16 truncated from Int32.max). These return as the
+// 32-bit value they extend to, which a send narrows back; they still pass,
+// and encode, as themselves.
+extension Int8 {
+    public typealias ObjCResultType = Int32
+    @inline(__always) public static func objCResult(_ value: Int8) -> Int32 { Int32(value) }
+    @inline(__always) public static func objCArgumentForm(ofResult value: Int32) -> Int8 { Int8(truncatingIfNeeded: value) }
+}
+
+extension Int16 {
+    public typealias ObjCResultType = Int32
+    @inline(__always) public static func objCResult(_ value: Int16) -> Int32 { Int32(value) }
+    @inline(__always) public static func objCArgumentForm(ofResult value: Int32) -> Int16 { Int16(truncatingIfNeeded: value) }
+}
+
+extension UInt8 {
+    public typealias ObjCResultType = UInt32
+    @inline(__always) public static func objCResult(_ value: UInt8) -> UInt32 { UInt32(value) }
+    @inline(__always) public static func objCArgumentForm(ofResult value: UInt32) -> UInt8 { UInt8(truncatingIfNeeded: value) }
+}
+
+extension UInt16 {
+    public typealias ObjCResultType = UInt32
+    @inline(__always) public static func objCResult(_ value: UInt16) -> UInt32 { UInt32(value) }
+    @inline(__always) public static func objCArgumentForm(ofResult value: UInt32) -> UInt16 { UInt16(truncatingIfNeeded: value) }
+}
+
+/// arm64 Darwin's BOOL is a C bool, which it returns zero-extended.
+extension Bool {
+    public typealias ObjCResultType = UInt32
+    @inline(__always) public static func objCResult(_ value: Bool) -> UInt32 { value ? 1 : 0 }
+    @inline(__always) public static func objCArgumentForm(ofResult value: UInt32) -> Bool { UInt8(truncatingIfNeeded: value) != 0 }
+}
+#endif
 
 // MARK: - Structures
 
