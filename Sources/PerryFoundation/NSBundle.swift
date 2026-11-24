@@ -705,6 +705,73 @@ public final class NSBundle: NSObject {
         Arrays.owned(storage.resources(type: type, directory: directory).map { Strings.autoreleased($0) })
     }
 
+    @ObjCMethod("pathsForResourcesOfType:inDirectory:forLocalization:")
+    func paths(forResourcesOfType type: String?, inDirectory directory: String?, forLocalization localization: String?) -> NSArray {
+        Arrays.owned(storage.resources(type: type, directory: directory, localization: localization).map { Strings.autoreleased($0) })
+    }
+
+    @ObjCMethod("URLsForResourcesWithExtension:subdirectory:localization:")
+    func urls(forResourcesWithExtension type: String?, subdirectory: String?, localization: String?) -> NSArray {
+        Arrays.owned(storage.resources(type: type, directory: subdirectory, localization: localization)
+            .compactMap { URLs.autoreleased(URL(filePath: $0)) })
+    }
+
+    /// The bundle at a URL's resources, without keeping a bundle for it.
+    @ObjCClassMethod("URLForResource:withExtension:subdirectory:inBundleWithURL:")
+    static func url(forResource name: String?, withExtension type: String?, subdirectory: String?, inBundleWith bundleURL: NSURL?) -> NSURL? {
+        guard let bundle = bundleURL.flatMap({ Bundles.bundle(path: $0.url.path(percentEncoded: false)) }),
+              let storage = Bundles.storage(bundle) else { return nil }
+        return URLs.wrapped(storage.resource(name, type: type, directory: subdirectory).map { URL(filePath: $0) })
+    }
+
+    @ObjCClassMethod("URLsForResourcesWithExtension:subdirectory:inBundleWithURL:")
+    static func urls(forResourcesWithExtension type: String?, subdirectory: String?, inBundleWith bundleURL: NSURL?) -> NSArray? {
+        guard let bundle = bundleURL.flatMap({ Bundles.bundle(path: $0.url.path(percentEncoded: false)) }),
+              let storage = Bundles.storage(bundle) else { return nil }
+        let localization = Bundles.preferred(from: storage.localizations, preferences: nil)
+            ?? Bundles.developmentFallback(in: storage.localizations)
+        return Arrays.owned(storage.resources(type: type, directory: subdirectory, localization: localization)
+            .compactMap { URLs.autoreleased(URL(filePath: $0)) })
+    }
+
+    /// The CPU types the executable has code for (NSBundleExecutableArchitecture…),
+    /// from its Mach-O header or its fat header's architectures.
+    @ObjCMethod("executableArchitectures")
+    func executableArchitectures() -> NSArray? {
+        guard let path = storage.executablePath, let file = fopen(path, "rb") else { return nil }
+        defer { fclose(file) }
+        var header = [UInt8](repeating: 0, count: 4096)
+        let count = fread(&header, 1, header.count, file)
+        guard count >= 8 else { return nil }
+        func little(_ offset: Int) -> UInt32 {
+            (0..<4).reduce(UInt32(0)) { $0 | UInt32(header[offset + $1]) << (8 * UInt32($1)) }
+        }
+        func big(_ offset: Int) -> UInt32 {
+            (0..<4).reduce(UInt32(0)) { $0 << 8 | UInt32(header[offset + $1]) }
+        }
+        var types: [UInt32] = []
+        switch big(0) {
+        case 0xcafe_babe, 0xcafe_babf:  // FAT_MAGIC, FAT_MAGIC_64: 20- or 32-byte entries
+            let size = big(0) == 0xcafe_babe ? 20 : 32
+            for index in 0..<Int(min(big(4), 64)) where 8 + (index + 1) * size <= count {
+                types.append(big(8 + index * size))
+            }
+        default:
+            // MH_MAGIC and MH_MAGIC_64, as the file stores them.
+            guard [0xfeed_face, 0xfeed_facf].contains(little(0)) else { return nil }
+            types.append(little(4))
+        }
+        return Arrays.owned(types.compactMap { Numbers.make(nil, .signed(Int64(Int32(bitPattern: $0)))) })
+    }
+
+    /// The string in the localization of `localizations` the user prefers.
+    @ObjCMethod("localizedStringForKey:value:table:localizations:")
+    func localizedString(forKey key: String?, value: String?, table: String?, localizations: NSArray?) -> String {
+        let given = Arrays.elements(localizations?.objcObject).compactMap(Strings.value(of:))
+        let chosen = Bundles.preferred(from: given, preferences: nil) ?? Bundles.developmentFallback(in: given) ?? given.first
+        return localizedString(forKey: key, value: value, table: table, localization: chosen)
+    }
+
     /// The string for the key in the table's strings file, in the user's
     /// language where the bundle has it; else `value`, or the key when
     /// there is no value.
@@ -755,6 +822,16 @@ public final class NSBundle: NSObject {
     @ObjCMethod("localizedAttributedStringForKey:value:table:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
         localizedAttributedString(forKey: key, value: value, table: table, localization: nil)
+    }
+}
+
+extension BundleStorage {
+    /// The resources of a type outside any localization, then those in a
+    /// localization's .lproj, as Darwin lists both.
+    func resources(type: String?, directory: String?, localization: String?) -> [String] {
+        let unlocalized = resources(type: type, directory: directory)
+        guard let localization, !localization.isEmpty else { return unlocalized }
+        return unlocalized + resources(type: type, directory: Paths.appending(directory ?? "", localization + ".lproj"))
     }
 }
 
