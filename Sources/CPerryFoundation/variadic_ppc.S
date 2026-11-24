@@ -49,6 +49,10 @@
 
 // void NSLog(NSString *format, ...)
 VARIADIC _NSLog, perry_foundation_log, 1
+// CFStringRef CFStringCreateStringWithValidatedFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef, CFStringRef, CFErrorRef *, ...)
+VARIADIC _CFStringCreateStringWithValidatedFormat, perry_foundation_cf_create_with_validated_format, 5
+// void CFLog(CFLogLevel level, CFStringRef format, ...)
+VARIADIC _CFLog, perry_foundation_cf_log, 2
 
 // CFStringRef CFStringCreateWithFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef, ...)
 VARIADIC _CFStringCreateWithFormat, perry_foundation_cf_create_with_format, 3
