@@ -34,6 +34,71 @@ public class NSFormatter: NSObject {
     @ObjCMethod("setFormatterBehavior:") func setFormatterBehavior(_ behavior: UInt) {}
     @ObjCClassMethod("defaultFormatterBehavior") static func defaultFormatterBehavior() -> UInt { 1040 }
     @ObjCClassMethod("setDefaultFormatterBehavior:") static func setDefaultFormatterBehavior(_ behavior: UInt) {}
+
+    /// Nil, unless a subclass writes attributed strings.
+    @ObjCMethod("attributedStringForObjectValue:withDefaultAttributes:")
+    func formatterAttributedString(forObjectValue value: ObjCObject?, withDefaultAttributes attributes: ObjCObject?) -> UnsafeMutableRawPointer? {
+        nil
+    }
+
+    /// Abstract: Darwin raises for a formatter that doesn't parse; NO here,
+    /// with no value, so subclasses that don't parse answer as Darwin's do.
+    @ObjCMethod("getObjectValue:forString:errorDescription:")
+    func formatterObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                              errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        value?.pointee = nil
+        return false
+    }
+
+    /// Every partial string is valid, and none is replaced, unless a
+    /// subclass says otherwise.
+    @ObjCMethod("isPartialStringValid:newEditingString:errorDescription:")
+    func isPartialStringValid(_ partial: String?, newEditingString: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                              errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool { true }
+
+    /// Asks -isPartialStringValid:newEditingString:errorDescription:; a
+    /// replacement it gives becomes the partial string, with the selection
+    /// at its end, as on Darwin.
+    @ObjCMethod("isPartialStringValid:proposedSelectedRange:originalString:originalSelectedRange:errorDescription:")
+    func isPartialStringValid(_ partial: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                              proposedSelectedRange: UnsafeMutablePointer<NSRange>?, originalString: ObjCObject?,
+                              originalSelectedRange: NSRange,
+                              errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        guard let partial else { return true }
+        typealias Check = @convention(c) (id, SEL, id?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                                          UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool
+        var replacement: UnsafeMutableRawPointer?
+        let valid = unsafeBitCast(ObjC.msgSend, to: Check.self)(
+            objcObject, ObjC.selector("isPartialStringValid:newEditingString:errorDescription:"), partial.pointee, &replacement,
+            errorDescription)
+        if !valid, let replacement {
+            partial.pointee = replacement
+            proposedSelectedRange?.pointee = NSRange(location: UInt(Strings.value(of: replacement)?.utf16.count ?? 0), length: 0)
+        }
+        return valid
+    }
+}
+
+enum FormatterErrors {
+    /// NSFormattingError, NSCocoaErrorDomain's 2048, with the description
+    /// given: the error a formatter's parse reports.
+    static func formatting(_ description: String) -> UnsafeMutableRawPointer? {
+        Errors.autoreleased(domain: Errors.cocoaDomain, code: 2048, description: description)
+    }
+
+    /// "The value “abc” is invalid.", Darwin's words for a string that
+    /// isn't a value.
+    static func invalid(_ string: String) -> String { "The value \u{201C}\(string)\u{201D} is invalid." }
+
+    /// The UTF-16 range of a string a range pointer names, clamped to it,
+    /// or all of it.
+    static func text(_ string: String, in range: UnsafeMutablePointer<NSRange>?) -> String {
+        guard let range else { return string }
+        let units = Array(string.utf16)
+        let start = min(Int(range.pointee.location), units.count)
+        let end = min(start + Int(range.pointee.length), units.count)
+        return String(decoding: units[start..<end], as: UTF16.self)
+    }
 }
 
 // MARK: - Dates
@@ -49,6 +114,21 @@ final class DateFormatterStorage {
     var lenient = false
     /// AM and PM symbols set over the locale's, by their index in ICU's list.
     var amPMSymbols: [Int32: String] = [:]
+    /// Symbol lists set over the locale's, by UDateFormatSymbolType.
+    var symbolOverrides: [UInt32: [String]] = [:]
+    /// "Today", "Yesterday", "Tomorrow" for those days, in the date style.
+    var relative = false
+    /// The NSFormattingContext set, if one was.
+    var context: Int?
+    /// Where two-digit years start: 1950, as on Darwin.
+    var twoDigitStart = Date(timeIntervalSince1970: -631_152_000)
+    /// Where parsed dates take the fields the string leaves out.
+    var defaultDate: Date?
+    /// When the Gregorian calendar replaced the Julian, if moved from
+    /// 15 October 1582.
+    var gregorianStart: Date?
+    var generatesCalendarDates = false
+    var allowsNaturalLanguage = false
     /// What CFDateFormatter's Get functions return, and properties it only
     /// keeps, alive as long as the formatter.
     let held = HeldObjects()
@@ -124,17 +204,73 @@ final class DateFormatterStorage {
         }
     }
 
+    /// Whether ICU's relative date style formats: relative formatting with
+    /// a date style and no format set, as CFDateFormatter has it.
+    private var formatsRelatively: Bool { relative && dateStyle != 0 && format == nil }
+
+    /// NSFormattingContext as ICU's capitalization context.
+    static func capitalization(_ context: Int) -> UDisplayContext {
+        switch context {
+        case 2: return UDISPCTX_CAPITALIZATION_FOR_STANDALONE
+        case 3: return UDISPCTX_CAPITALIZATION_FOR_UI_LIST_OR_MENU
+        case 4: return UDISPCTX_CAPITALIZATION_FOR_BEGINNING_OF_SENTENCE
+        case 5: return UDISPCTX_CAPITALIZATION_FOR_MIDDLE_OF_SENTENCE
+        default: return UDISPCTX_CAPITALIZATION_NONE
+        }
+    }
+
+    static func firstSymbolIndex(_ type: UDateFormatSymbolType) -> Int32 {
+        [UDAT_WEEKDAYS, UDAT_SHORT_WEEKDAYS, UDAT_NARROW_WEEKDAYS, UDAT_STANDALONE_WEEKDAYS,
+         UDAT_STANDALONE_SHORT_WEEKDAYS, UDAT_STANDALONE_NARROW_WEEKDAYS].contains(type) ? 1 : 0
+    }
+
     var handle: DateHandle? {
-        let pattern = self.pattern
-        let key = "\(pattern)|\(localeID)|\(effectiveTimeZone.identifier)|\(lenient)|\(amPMSymbols)"
+        // A format set while formatting relatively is put aside for the
+        // styles' pattern, as CFDateFormatter does.
+        let pattern = relative && format != nil ? defaultPattern : self.pattern
+        let relativeStyles = formatsRelatively
+        let key = "\(pattern)|\(localeID)|\(effectiveTimeZone.identifier)|\(lenient)|\(amPMSymbols)|\(relativeStyles)|\(context ?? -1)"
         if let cached, cached.key == key { return cached.handle }
         changed()
-        guard let handle = Self.open(time: UDAT_PATTERN, date: UDAT_PATTERN, locale: localeID,
-                                     zone: effectiveTimeZone.identifier, pattern: pattern) else { return nil }
+        let opened: DateHandle?
+        if relativeStyles {
+            let date = UDateFormatStyle(rawValue: Self.icuStyle(dateStyle).rawValue | UDAT_RELATIVE.rawValue)
+            opened = Self.open(time: Self.icuStyle(timeStyle), date: date, locale: localeID, zone: effectiveTimeZone.identifier, pattern: nil)
+        } else {
+            opened = Self.open(time: UDAT_PATTERN, date: UDAT_PATTERN, locale: localeID, zone: effectiveTimeZone.identifier, pattern: pattern)
+        }
+        guard let handle = opened else { return nil }
+        var status = U_ZERO_ERROR
+        // Relative days are capitalized unless a context says otherwise.
+        if relative { swift_udat_setContext(handle, UDISPCTX_CAPITALIZATION_FOR_UI_LIST_OR_MENU, &status) }
+        if let context {
+            status = U_ZERO_ERROR
+            swift_udat_setContext(handle, Self.capitalization(context), &status)
+        }
         swift_udat_setLenient(handle, lenient ? 1 : 0)
+        status = U_ZERO_ERROR
+        swift_udat_set2DigitYearStart(handle, twoDigitStart.timeIntervalSince1970 * 1000, &status)
         for (index, symbol) in amPMSymbols {
             var status = U_ZERO_ERROR
             ICU.withUChars(symbol) { swift_udat_setSymbols(handle, UDAT_AM_PMS, index, UnsafeMutablePointer(mutating: $0), $1, &status) }
+        }
+        for (raw, symbols) in symbolOverrides {
+            let type = UDateFormatSymbolType(rawValue: raw)
+            let first = Self.firstSymbolIndex(type)
+            for (index, symbol) in symbols.enumerated() {
+                var status = U_ZERO_ERROR
+                ICU.withUChars(symbol) {
+                    swift_udat_setSymbols(handle, type, first + Int32(index), UnsafeMutablePointer(mutating: $0), $1, &status)
+                }
+            }
+        }
+        if let gregorianStart, let current = swift_udat_getCalendar(handle) {
+            status = U_ZERO_ERROR
+            if let changed = swift_ucal_clone(current, &status), !ICU.failed(status) {
+                swift_ucal_setGregorianChange(changed, gregorianStart.timeIntervalSince1970 * 1000, &status)
+                swift_udat_setCalendar(handle, changed)
+                swift_ucal_close(changed)
+            }
         }
         cached = (key, handle)
         return handle
@@ -142,34 +278,61 @@ final class DateFormatterStorage {
 
     func string(from date: Date) -> String {
         lock.locked {
-            guard !pattern.isEmpty, let handle else { return "" }
+            guard !(relative && format != nil ? defaultPattern : pattern).isEmpty, let handle else { return "" }
             let milliseconds = date.timeIntervalSince1970 * 1000
             return ICU.string { swift_udat_format(handle, milliseconds, $0, $1, nil, $2) } ?? ""
         }
     }
 
-    /// The date, when the whole string parses.
-    func date(from string: String) -> Date? {
+    /// Parses the start of `text` into a calendar that holds the default
+    /// date, or else 1 January 2000 in a Gregorian calendar (the epoch in
+    /// another), as CFDateFormatter does: the fields the string leaves out
+    /// come from it. The date and how many UTF-16 units it took.
+    func parseStart(_ text: String) -> (date: Date, length: Int)? {
         lock.locked {
-            guard let handle else { return nil }
-            return ICU.withUChars(string) { chars, length in
+            guard let handle, let formatCalendar = swift_udat_getCalendar(handle) else { return nil }
+            var status = U_ZERO_ERROR
+            guard let parsing = swift_ucal_clone(formatCalendar, &status), !ICU.failed(status) else { return nil }
+            defer { swift_ucal_close(parsing) }
+            if let defaultDate {
+                swift_ucal_setMillis(parsing, defaultDate.timeIntervalSince1970 * 1000, &status)
+            } else {
+                swift_ucal_clear(parsing)
+                if (calendar ?? Calendar(identifier: effectiveLocale.calendar.identifier)).identifier == .gregorian {
+                    swift_ucal_set(parsing, UCAL_YEAR, 2000)
+                }
+            }
+            return ICU.withUChars(text) { chars, length -> (date: Date, length: Int)? in
                 var position: Int32 = 0
                 var status = U_ZERO_ERROR
-                let milliseconds = swift_udat_parse(handle, chars, length, &position, &status)
-                guard !ICU.failed(status), position == length else { return nil }
-                return Date(timeIntervalSince1970: milliseconds / 1000)
+                swift_udat_parseCalendar(handle, parsing, chars, length, &position, &status)
+                guard !ICU.failed(status), position > 0 else { return nil }
+                let milliseconds = swift_ucal_getMillis(parsing, &status)
+                guard !ICU.failed(status) else { return nil }
+                return (Date(timeIntervalSince1970: milliseconds / 1000), Int(position))
             }
         }
     }
 
-    /// A symbol list; ICU's weekdays start at index 1.
+    /// The date, when the whole string parses.
+    func date(from string: String) -> Date? {
+        guard let (date, length) = parseStart(string), length == string.utf16.count else { return nil }
+        return date
+    }
+
+    /// A symbol list: the one set, or the locale's.
     func symbols(_ type: UDateFormatSymbolType) -> [String] {
+        if let set = symbolOverrides[type.rawValue] { return set }
+        return localeSymbols(type)
+    }
+
+    /// The locale's symbol list; ICU's weekdays start at index 1.
+    func localeSymbols(_ type: UDateFormatSymbolType) -> [String] {
         guard let handle = Self.open(time: UDAT_DEFAULT, date: UDAT_DEFAULT, locale: localeID,
                                      zone: effectiveTimeZone.identifier, pattern: nil) else { return [] }
         defer { swift_udat_close(handle) }
         let count = swift_udat_countSymbols(handle, type)
-        let first: Int32 = [UDAT_WEEKDAYS, UDAT_SHORT_WEEKDAYS, UDAT_NARROW_WEEKDAYS, UDAT_STANDALONE_WEEKDAYS,
-                            UDAT_STANDALONE_SHORT_WEEKDAYS, UDAT_STANDALONE_NARROW_WEEKDAYS].contains(type) ? 1 : 0
+        let first = Self.firstSymbolIndex(type)
         return (first..<count).compactMap { index in ICU.string { swift_udat_getSymbols(handle, type, index, $0, $1, $2) } }
     }
 
@@ -232,10 +395,75 @@ public final class NSDateFormatter: NSFormatter {
     @ObjCMethod("getObjectValue:forString:errorDescription:")
     func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String,
                         errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
-        guard let date = storage.date(from: string) else { return false }
+        guard let date = storage.date(from: string) else {
+            errorDescription?.pointee = Strings.autoreleased(FormatterErrors.invalid(string))
+            return false
+        }
         value?.pointee = Dates.autoreleased(date)
         return true
     }
+
+    /// The date at the start of the range (or string), which becomes the
+    /// range parsed; NSFormattingError when there's none, as on Darwin.
+    @ObjCMethod("getObjectValue:forString:range:error:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                        range: UnsafeMutablePointer<NSRange>?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        let text = FormatterErrors.text(string ?? "", in: range)
+        guard let (date, length) = storage.parse(text) else {
+            error?.pointee = FormatterErrors.formatting(FormatterErrors.invalid(text))
+            return false
+        }
+        range?.pointee.length = UInt(length)
+        value?.pointee = Dates.autoreleased(date)
+        return true
+    }
+
+    /// The legacy initializer: the format, and whether natural language
+    /// was asked for, which is kept and nothing more, as on iOS.
+    @ObjCMethod("initWithDateFormat:allowNaturalLanguage:")
+    func initialize(dateFormat: String?, allowNaturalLanguage: Bool) -> Self {
+        storage.update {
+            $0.format = dateFormat
+            $0.allowsNaturalLanguage = allowNaturalLanguage
+        }
+        return self
+    }
+
+    @ObjCMethod("allowsNaturalLanguage") func allowsNaturalLanguage() -> Bool { storage.allowsNaturalLanguage }
+
+    /// Whether "Today", "Yesterday" and "Tomorrow" stand for those days,
+    /// in a date style: ICU's relative date styles.
+    @ObjCMethod("doesRelativeDateFormatting") func doesRelativeDateFormatting() -> Bool { storage.relative }
+    @ObjCMethod("setDoesRelativeDateFormatting:")
+    func setDoesRelativeDateFormatting(_ relative: Bool) { storage.update { $0.relative = relative } }
+
+    /// NSFormattingContext: how names are capitalized.
+    @ObjCMethod("formattingContext") func formattingContext() -> Int { storage.context ?? 0 }
+    @ObjCMethod("setFormattingContext:")
+    func setFormattingContext(_ context: Int) { storage.update { $0.context = context } }
+
+    @ObjCMethod("defaultDate") func defaultDate() -> UnsafeMutableRawPointer? { storage.defaultDate.flatMap { Dates.autoreleased($0) } }
+    @ObjCMethod("setDefaultDate:")
+    func setDefaultDate(_ date: ObjCObject?) { storage.update { $0.defaultDate = date.map { Dates.date($0.id) } } }
+
+    @ObjCMethod("twoDigitStartDate") func twoDigitStartDate() -> UnsafeMutableRawPointer? { Dates.autoreleased(storage.twoDigitStart) }
+    @ObjCMethod("setTwoDigitStartDate:")
+    func setTwoDigitStartDate(_ date: ObjCObject?) {
+        storage.update { $0.twoDigitStart = date.map { Dates.date($0.id) } ?? Date(timeIntervalSince1970: -631_152_000) }
+    }
+
+    /// 15 October 1582 unless set.
+    @ObjCMethod("gregorianStartDate")
+    func gregorianStartDate() -> UnsafeMutableRawPointer? {
+        Dates.autoreleased(storage.gregorianStart ?? Date(timeIntervalSince1970: -12_219_292_800))
+    }
+    @ObjCMethod("setGregorianStartDate:")
+    func setGregorianStartDate(_ date: ObjCObject?) { storage.update { $0.gregorianStart = date.map { Dates.date($0.id) } } }
+
+    /// Kept: NSCalendarDate isn't on iOS, so dates are NSDates either way.
+    @ObjCMethod("generatesCalendarDates") func generatesCalendarDates() -> Bool { storage.generatesCalendarDates }
+    @ObjCMethod("setGeneratesCalendarDates:")
+    func setGeneratesCalendarDates(_ generates: Bool) { storage.update { $0.generatesCalendarDates = generates } }
 
     @ObjCMethod("dateFormat") func dateFormat() -> String { storage.pattern }
 
@@ -329,6 +557,50 @@ public final class NSDateFormatter: NSFormatter {
     @ObjCMethod("standaloneWeekdaySymbols") func standaloneWeekdaySymbols() -> ObjCObject { symbols(UDAT_STANDALONE_WEEKDAYS) }
     @ObjCMethod("quarterSymbols") func quarterSymbols() -> ObjCObject { symbols(UDAT_QUARTERS) }
     @ObjCMethod("shortQuarterSymbols") func shortQuarterSymbols() -> ObjCObject { symbols(UDAT_SHORT_QUARTERS) }
+    @ObjCMethod("standaloneQuarterSymbols") func standaloneQuarterSymbols() -> ObjCObject { symbols(UDAT_STANDALONE_QUARTERS) }
+    @ObjCMethod("shortStandaloneQuarterSymbols")
+    func shortStandaloneQuarterSymbols() -> ObjCObject { symbols(UDAT_STANDALONE_SHORT_QUARTERS) }
+    @ObjCMethod("veryShortStandaloneMonthSymbols")
+    func veryShortStandaloneMonthSymbols() -> ObjCObject { symbols(UDAT_STANDALONE_NARROW_MONTHS) }
+    @ObjCMethod("shortStandaloneWeekdaySymbols")
+    func shortStandaloneWeekdaySymbols() -> ObjCObject { symbols(UDAT_STANDALONE_SHORT_WEEKDAYS) }
+    @ObjCMethod("veryShortStandaloneWeekdaySymbols")
+    func veryShortStandaloneWeekdaySymbols() -> ObjCObject { symbols(UDAT_STANDALONE_NARROW_WEEKDAYS) }
+
+    /// Sets a symbol list over the locale's; nil goes back to the locale's.
+    private func setSymbols(_ type: UDateFormatSymbolType, _ list: ObjCObject?) {
+        let values = list.map { Arrays.elements($0.id).map { Strings.value(of: $0) ?? "" } }
+        storage.update { $0.symbolOverrides[type.rawValue] = values }
+    }
+
+    @ObjCMethod("setEraSymbols:") func setEraSymbols(_ list: ObjCObject?) { setSymbols(UDAT_ERAS, list) }
+    @ObjCMethod("setLongEraSymbols:") func setLongEraSymbols(_ list: ObjCObject?) { setSymbols(UDAT_ERA_NAMES, list) }
+    @ObjCMethod("setMonthSymbols:") func setMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_MONTHS, list) }
+    @ObjCMethod("setShortMonthSymbols:") func setShortMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_SHORT_MONTHS, list) }
+    @ObjCMethod("setVeryShortMonthSymbols:")
+    func setVeryShortMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_NARROW_MONTHS, list) }
+    @ObjCMethod("setStandaloneMonthSymbols:")
+    func setStandaloneMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_MONTHS, list) }
+    @ObjCMethod("setShortStandaloneMonthSymbols:")
+    func setShortStandaloneMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_SHORT_MONTHS, list) }
+    @ObjCMethod("setVeryShortStandaloneMonthSymbols:")
+    func setVeryShortStandaloneMonthSymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_NARROW_MONTHS, list) }
+    @ObjCMethod("setWeekdaySymbols:") func setWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_WEEKDAYS, list) }
+    @ObjCMethod("setShortWeekdaySymbols:") func setShortWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_SHORT_WEEKDAYS, list) }
+    @ObjCMethod("setVeryShortWeekdaySymbols:")
+    func setVeryShortWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_NARROW_WEEKDAYS, list) }
+    @ObjCMethod("setStandaloneWeekdaySymbols:")
+    func setStandaloneWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_WEEKDAYS, list) }
+    @ObjCMethod("setShortStandaloneWeekdaySymbols:")
+    func setShortStandaloneWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_SHORT_WEEKDAYS, list) }
+    @ObjCMethod("setVeryShortStandaloneWeekdaySymbols:")
+    func setVeryShortStandaloneWeekdaySymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_NARROW_WEEKDAYS, list) }
+    @ObjCMethod("setQuarterSymbols:") func setQuarterSymbols(_ list: ObjCObject?) { setSymbols(UDAT_QUARTERS, list) }
+    @ObjCMethod("setShortQuarterSymbols:") func setShortQuarterSymbols(_ list: ObjCObject?) { setSymbols(UDAT_SHORT_QUARTERS, list) }
+    @ObjCMethod("setStandaloneQuarterSymbols:")
+    func setStandaloneQuarterSymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_QUARTERS, list) }
+    @ObjCMethod("setShortStandaloneQuarterSymbols:")
+    func setShortStandaloneQuarterSymbols(_ list: ObjCObject?) { setSymbols(UDAT_STANDALONE_SHORT_QUARTERS, list) }
     @ObjCMethod("AMSymbol")
     func amSymbol() -> String { storage.amPMSymbols[0] ?? storage.symbols(UDAT_AM_PMS).first ?? "AM" }
     @ObjCMethod("PMSymbol")
@@ -420,6 +692,17 @@ public final class NSISO8601DateFormatter: NSFormatter {
         storage.formatter.date(from: string).flatMap { Dates.autoreleased($0) }
     }
 
+    @ObjCMethod("getObjectValue:forString:errorDescription:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String,
+                        errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        guard let date = storage.formatter.date(from: string) else {
+            errorDescription?.pointee = Strings.autoreleased(FormatterErrors.invalid(string))
+            return false
+        }
+        value?.pointee = Dates.autoreleased(date)
+        return true
+    }
+
     @ObjCClassMethod("stringFromDate:timeZone:formatOptions:")
     static func string(from date: NSDate, timeZone: ObjCObject?, formatOptions: UInt) -> String {
         let storage = ISO8601Storage()
@@ -448,6 +731,16 @@ final class NumberFormatterStorage {
     var symbols: [UInt32: String] = [:]
     /// What zero formats as, instead of its digits.
     var zeroSymbol: String?
+    /// What NSNumberFormatter writes nil and the infinities as: Darwin's
+    /// "", "+∞" and "-∞" until set (nil for ICU's).
+    var nilSymbol = ""
+    var positiveInfinitySymbol: String? = "+\u{221E}"
+    var negativeInfinitySymbol: String? = "-\u{221E}"
+    /// The negative format as set, which Darwin gives back as it was.
+    var explicitNegative: String?
+    var localizesFormat = true
+    var formattingContext = 0
+    var partialStringValidation = false
     /// What CFNumberFormatter's Get functions return, alive as long as the
     /// formatter.
     let held = HeldObjects()
@@ -470,6 +763,7 @@ final class NumberFormatterStorage {
         doubleAttributes = [:]
         textAttributes = textAttributes.filter { $0.key == UNUM_CURRENCY_CODE.rawValue }
         symbols = [:]
+        explicitNegative = nil
         changed()
     }
 
@@ -588,11 +882,49 @@ final class NumberFormatterStorage {
         return String(pattern.split(separator: ";", maxSplits: 1).first ?? "")
     }
 
+    /// The negative format as set; else the pattern's negative part, or
+    /// the positive format when it has none, as Darwin answers.
     var negativeFormat: String {
+        if let explicitNegative { return explicitNegative }
         guard let handle else { return "" }
         let pattern = ICU.string { swift_unum_toPattern(handle, 0, $0, $1, $2) } ?? ""
-        let parts = pattern.split(separator: ";", maxSplits: 1)
-        return parts.count > 1 ? String(parts[1]) : "-" + (parts.first.map(String.init) ?? "")
+        let parts = pattern.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        return parts.count > 1 ? String(parts[1]) : String(parts.first ?? "")
+    }
+
+    /// Keeps a copy of an object under `key`, or nothing.
+    func keep(_ key: String, copying object: id?) {
+        let copy = object.flatMap { ObjC.send($0, Selectors.copyWithZone, nil) }
+        held.hold(key, copy)
+        if let copy { ObjC.release(copy) }
+    }
+
+    /// A double as the formatter writes it.
+    func string(fromDouble value: Double) -> String {
+        guard let handle else { return "" }
+        return ICU.string { swift_unum_formatDouble(handle, value, $0, $1, nil, $2) } ?? ""
+    }
+}
+
+extension NumberFormatterStorage {
+    /// A decimal formatter in the current locale that rounds half up, to
+    /// fraction digits or to significant digits: what NSByteCountFormatter
+    /// writes its numbers with.
+    static func roundingHalfUp(fractionDigits: (min: Int, max: Int)? = nil,
+                               significantDigits: (min: Int, max: Int)? = nil) -> NumberFormatterStorage {
+        let formatter = NumberFormatterStorage()
+        formatter.setStyle(1)
+        formatter.setAttribute(UNUM_ROUNDING_MODE, 6)    // UNUM_ROUND_HALFUP
+        if let fractionDigits {
+            formatter.setAttribute(UNUM_MIN_FRACTION_DIGITS, fractionDigits.min)
+            formatter.setAttribute(UNUM_MAX_FRACTION_DIGITS, fractionDigits.max)
+        }
+        if let significantDigits {
+            formatter.setAttribute(UNUM_SIGNIFICANT_DIGITS_USED, 1)
+            formatter.setAttribute(UNUM_MIN_SIGNIFICANT_DIGITS, significantDigits.min)
+            formatter.setAttribute(UNUM_MAX_SIGNIFICANT_DIGITS, significantDigits.max)
+        }
+        return formatter
     }
 }
 
@@ -667,20 +999,114 @@ public final class NSNumberFormatter: NSFormatter {
         bool(coder.id, ObjC.selector("encodeBool:forKey:"), storage.allowsFloats, Strings.autoreleased("NS.allowsfloats"))
     }
 
-    @ObjCMethod("stringFromNumber:") func string(from number: ObjCObject) -> String? { storage.string(from: number.id) }
+    /// A number as written: the infinities by their symbols, as on Darwin.
+    private func written(_ number: id) -> String? {
+        let value = Numbers.storage(number).double
+        if value.isInfinite, let symbol = value > 0 ? storage.positiveInfinitySymbol : storage.negativeInfinitySymbol {
+            return symbol
+        }
+        return storage.string(from: number)
+    }
 
+    @ObjCMethod("stringFromNumber:")
+    func string(from number: ObjCObject?) -> String? { number.flatMap { written($0.id) } }
+
+    /// The nil symbol for nil; nil for what isn't a number.
     @ObjCMethod("stringForObjectValue:")
-    func numberString(forObjectValue value: ObjCObject?) -> String? { value.flatMap { storage.string(from: $0.id) } }
+    func numberString(forObjectValue value: ObjCObject?) -> String? {
+        guard let value else { return storage.nilSymbol }
+        guard ObjC.isKind(value.id, of: Numbers.numberClass) else { return nil }
+        return written(value.id)
+    }
+
+    /// The number a whole string is, the infinities by their symbols and
+    /// NaN never; or why it isn't, in Darwin's words.
+    private func parsed(_ string: String) -> (number: id?, error: String?) {
+        var number: id?
+        if let symbol = storage.positiveInfinitySymbol, string == symbol {
+            number = Numbers.make(nil, .double(.infinity))
+        } else if let symbol = storage.negativeInfinitySymbol, string == symbol {
+            number = Numbers.make(nil, .double(-.infinity))
+        } else {
+            number = storage.number(from: string)
+        }
+        guard let number, !Numbers.storage(number).double.isNaN else { return (nil, FormatterErrors.invalid(string)) }
+        return checked(number)
+    }
+
+    /// The number, unless it's below the minimum or above the maximum.
+    private func checked(_ number: id) -> (number: id?, error: String?) {
+        let value = Numbers.storage(number).double
+        if let minimum = storage.held["minimum"], value < Numbers.storage(minimum).double {
+            return (nil, "The value \(written(number) ?? "") is too small.")
+        }
+        if let maximum = storage.held["maximum"], value > Numbers.storage(maximum).double {
+            return (nil, "The value \(written(number) ?? "") is too large.")
+        }
+        return (number, nil)
+    }
 
     @ObjCMethod("numberFromString:")
-    func number(from string: String) -> UnsafeMutableRawPointer? { storage.number(from: string) }
+    func number(from string: String?) -> UnsafeMutableRawPointer? { string.flatMap { parsed($0).number } }
 
     @ObjCMethod("getObjectValue:forString:errorDescription:")
     func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String,
                         errorDescription: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
-        guard let number = storage.number(from: string) else { return false }
+        let (number, error) = parsed(string)
+        guard let number else {
+            errorDescription?.pointee = error.map { Strings.autoreleased($0) }
+            return false
+        }
         value?.pointee = number
         return true
+    }
+
+    /// The number at the start of the range (or string), which becomes the
+    /// range parsed; NSFormattingError when there's none or it's out of
+    /// bounds.
+    @ObjCMethod("getObjectValue:forString:range:error:")
+    func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String?,
+                        range: UnsafeMutablePointer<NSRange>?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        let text = FormatterErrors.text(string ?? "", in: range)
+        guard let (parsedValue, length) = storage.parse(text, integersOnly: false), !parsedValue.isNaN else {
+            error?.pointee = FormatterErrors.formatting(FormatterErrors.invalid(text))
+            return false
+        }
+        let whole = parsedValue == parsedValue.rounded() && abs(parsedValue) < 9e15
+        guard let made = Numbers.make(nil, whole ? .signed(Int64(parsedValue)) : .double(parsedValue)) else { return false }
+        let (number, failure) = checked(made)
+        guard let number else {
+            error?.pointee = FormatterErrors.formatting(failure ?? FormatterErrors.invalid(text))
+            return false
+        }
+        range?.pointee.length = UInt(length)
+        value?.pointee = number
+        return true
+    }
+
+    /// The value written with the default attributes and the text
+    /// attributes set for its kind (zero, negative, ...) over them.
+    @ObjCMethod("attributedStringForObjectValue:withDefaultAttributes:")
+    func numberAttributedString(forObjectValue value: ObjCObject?, withDefaultAttributes defaults: ObjCObject?) -> UnsafeMutableRawPointer? {
+        guard let text = numberString(forObjectValue: value) else { return nil }
+        let kind: String
+        if let value {
+            let double = Numbers.storage(value.id).double
+            kind = double.isNaN ? "NotANumber" : double.isInfinite ? (double > 0 ? "PositiveInfinity" : "NegativeInfinity")
+                : double == 0 ? "Zero" : double < 0 ? "NegativeValues" : "PositiveValues"
+        } else {
+            kind = "Nil"
+        }
+        var entries = defaults.map { Dictionaries.entries($0.id) } ?? []
+        if let extra = storage.held["textAttributesFor" + kind] {
+            for entry in Dictionaries.entries(extra) {
+                entries.removeAll { AttributedStorage.equal($0.key, entry.key) }
+                entries.append(entry)
+            }
+        }
+        let attributes = Dictionaries.make(entries)
+        defer { ObjC.release(attributes) }
+        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: attributes), mutable: false))
     }
 
     @ObjCClassMethod("localizedStringFromNumber:numberStyle:")
@@ -806,6 +1232,7 @@ public final class NSNumberFormatter: NSFormatter {
     @ObjCMethod("setPositiveFormat:")
     func setPositiveFormat(_ format: String?) {
         storage.pattern = format
+        storage.explicitNegative = nil
         storage.changed()
     }
 
@@ -813,6 +1240,7 @@ public final class NSNumberFormatter: NSFormatter {
     func setNegativeFormat(_ format: String?) {
         guard let format else { return }
         storage.pattern = storage.positiveFormat + ";" + format
+        storage.explicitNegative = format
         storage.changed()
     }
 
@@ -850,9 +1278,173 @@ public final class NSNumberFormatter: NSFormatter {
     @ObjCMethod("zeroSymbol") func zeroSymbol() -> String? { storage.zeroSymbol }
     @ObjCMethod("setZeroSymbol:") func setZeroSymbol(_ value: String?) { storage.zeroSymbol = value }
     @ObjCMethod("notANumberSymbol") func notANumberSymbol() -> String { storage.symbol(UNUM_NAN_SYMBOL) }
-    @ObjCMethod("positiveInfinitySymbol") func positiveInfinitySymbol() -> String { storage.symbol(UNUM_INFINITY_SYMBOL) }
     @ObjCMethod("currencyDecimalSeparator")
     func currencyDecimalSeparator() -> String { storage.symbol(UNUM_MONETARY_SEPARATOR_SYMBOL) }
     @ObjCMethod("currencyGroupingSeparator")
     func currencyGroupingSeparator() -> String { storage.symbol(UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL) }
+    @ObjCMethod("setCurrencyDecimalSeparator:")
+    func setCurrencyDecimalSeparator(_ value: String?) { storage.setSymbol(UNUM_MONETARY_SEPARATOR_SYMBOL, value) }
+    @ObjCMethod("setCurrencyGroupingSeparator:")
+    func setCurrencyGroupingSeparator(_ value: String?) { storage.setSymbol(UNUM_MONETARY_GROUPING_SEPARATOR_SYMBOL, value) }
+    @ObjCMethod("setInternationalCurrencySymbol:")
+    func setInternationalCurrencySymbol(_ value: String?) { storage.setSymbol(UNUM_INTL_CURRENCY_SYMBOL, value) }
+    @ObjCMethod("setExponentSymbol:") func setExponentSymbol(_ value: String?) { storage.setSymbol(UNUM_EXPONENTIAL_SYMBOL, value) }
+    @ObjCMethod("setPerMillSymbol:") func setPerMillSymbol(_ value: String?) { storage.setSymbol(UNUM_PERMILL_SYMBOL, value) }
+    /// Nil goes back to the locale's.
+    @ObjCMethod("setNotANumberSymbol:") func setNotANumberSymbol(_ value: String?) { storage.setSymbol(UNUM_NAN_SYMBOL, value) }
+
+    @ObjCMethod("nilSymbol") func nilSymbol() -> String { storage.nilSymbol }
+    @ObjCMethod("setNilSymbol:") func setNilSymbol(_ value: String?) { storage.nilSymbol = value ?? "" }
+
+    /// "+∞" and "-∞" until set; nil writes ICU's.
+    @ObjCMethod("positiveInfinitySymbol") func positiveInfinitySymbol() -> String? { storage.positiveInfinitySymbol }
+    @ObjCMethod("setPositiveInfinitySymbol:")
+    func setPositiveInfinitySymbol(_ value: String?) { storage.positiveInfinitySymbol = value }
+    @ObjCMethod("negativeInfinitySymbol") func negativeInfinitySymbol() -> String? { storage.negativeInfinitySymbol }
+    @ObjCMethod("setNegativeInfinitySymbol:")
+    func setNegativeInfinitySymbol(_ value: String?) { storage.negativeInfinitySymbol = value }
+
+    @ObjCMethod("minimumGroupingDigits")
+    func minimumGroupingDigits() -> Int { max(1, storage.attribute(UNUM_MINIMUM_GROUPING_DIGITS)) }
+    @ObjCMethod("setMinimumGroupingDigits:")
+    func setMinimumGroupingDigits(_ value: Int) { storage.setAttribute(UNUM_MINIMUM_GROUPING_DIGITS, value) }
+
+    // MARK: Bounds, contexts and validation
+
+    /// Parsed numbers below the minimum or above the maximum fail; numbers
+    /// format whatever their value, as on Darwin.
+    @ObjCMethod("minimum") func minimum() -> UnsafeMutableRawPointer? { storage.held["minimum"] }
+    @ObjCMethod("setMinimum:")
+    func setMinimum(_ value: ObjCObject?) { storage.keep("minimum", copying: value?.id) }
+    @ObjCMethod("maximum") func maximum() -> UnsafeMutableRawPointer? { storage.held["maximum"] }
+    @ObjCMethod("setMaximum:")
+    func setMaximum(_ value: ObjCObject?) { storage.keep("maximum", copying: value?.id) }
+
+    @ObjCMethod("formattingContext") func formattingContext() -> Int { storage.formattingContext }
+    @ObjCMethod("setFormattingContext:") func setFormattingContext(_ context: Int) { storage.formattingContext = context }
+    @ObjCMethod("isPartialStringValidationEnabled") func isPartialStringValidationEnabled() -> Bool { storage.partialStringValidation }
+    @ObjCMethod("setPartialStringValidationEnabled:")
+    func setPartialStringValidationEnabled(_ enabled: Bool) { storage.partialStringValidation = enabled }
+
+    /// A handler of the rounding mode, as an NSRoundingMode: ceiling and up
+    /// round up, floor, down and half down round down, half even is the
+    /// bankers', half up plain; its scale is NSDecimalNoScale.
+    @ObjCMethod("roundingBehavior")
+    func roundingBehavior() -> UnsafeMutableRawPointer? {
+        let modes: [UInt] = [2, 1, 1, 2, 3, 1, 0]
+        let mode = storage.attribute(UNUM_ROUNDING_MODE)
+        guard let cls = Units.named("NSDecimalNumberHandler") else { return nil }
+        typealias Make = @convention(c) (id?, SEL, UInt, Int16, Bool, Bool, Bool, Bool) -> id?
+        return unsafeBitCast(ObjC.msgSend, to: Make.self)(
+            UnsafeMutableRawPointer(cls),
+            ObjC.selector("decimalNumberHandlerWithRoundingMode:scale:raiseOnExactness:raiseOnOverflow:raiseOnUnderflow:raiseOnDivideByZero:"),
+            modes.indices.contains(mode) ? modes[mode] : 0, Int16.max, false, false, false, false)
+    }
+
+    /// Sets the rounding mode from the behavior's: plain rounds half up,
+    /// down down, up up, the bankers' half even. Its scale isn't used, as
+    /// on Darwin.
+    @ObjCMethod("setRoundingBehavior:")
+    func setRoundingBehavior(_ behavior: ObjCObject?) {
+        guard let behavior else { return }
+        typealias Mode = @convention(c) (id, SEL) -> UInt
+        let mode = unsafeBitCast(ObjC.msgSend, to: Mode.self)(behavior.id, ObjC.selector("roundingMode"))
+        let modes = [6, 2, 3, 4]
+        storage.setAttribute(UNUM_ROUNDING_MODE, mode < 4 ? modes[Int(mode)] : 6)
+    }
+
+    // MARK: Attributed strings
+
+    /// What a symbol writes as, as an attributed string: the one set, while
+    /// its text is still the symbol, or the symbol without attributes.
+    private func attributed(_ key: String, _ symbol: String?) -> UnsafeMutableRawPointer? {
+        guard let symbol else { return nil }
+        if let kept = storage.held[key], Strings.value(of: ObjC.send(kept, ObjC.selector("string"))) == symbol { return kept }
+        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(symbol.utf16), attributes: nil), mutable: false))
+    }
+
+    /// Keeps an attributed string set for a symbol; its text.
+    private func keepAttributed(_ key: String, _ value: ObjCObject?) -> String? {
+        storage.keep(key, copying: value?.id)
+        return value.flatMap { Strings.value(of: ObjC.send($0.id, ObjC.selector("string"))) }
+    }
+
+    @ObjCMethod("attributedStringForZero")
+    func attributedStringForZero() -> UnsafeMutableRawPointer? { attributed("attributedStringForZero", storage.zeroSymbol) }
+    @ObjCMethod("setAttributedStringForZero:")
+    func setAttributedStringForZero(_ value: ObjCObject?) { storage.zeroSymbol = keepAttributed("attributedStringForZero", value) }
+    @ObjCMethod("attributedStringForNil")
+    func attributedStringForNil() -> UnsafeMutableRawPointer? { attributed("attributedStringForNil", storage.nilSymbol) }
+    @ObjCMethod("setAttributedStringForNil:")
+    func setAttributedStringForNil(_ value: ObjCObject?) { storage.nilSymbol = keepAttributed("attributedStringForNil", value) ?? "" }
+    @ObjCMethod("attributedStringForNotANumber")
+    func attributedStringForNotANumber() -> UnsafeMutableRawPointer? { attributed("attributedStringForNotANumber", notANumberSymbol()) }
+    @ObjCMethod("setAttributedStringForNotANumber:")
+    func setAttributedStringForNotANumber(_ value: ObjCObject?) {
+        storage.setSymbol(UNUM_NAN_SYMBOL, keepAttributed("attributedStringForNotANumber", value))
+    }
+
+    /// Text attributes, kept for -attributedStringForObjectValue:withDefaultAttributes:;
+    /// plain strings don't have them.
+    private func textAttributes(_ kind: String) -> UnsafeMutableRawPointer? { storage.held["textAttributesFor" + kind] }
+    private func setTextAttributes(_ kind: String, _ value: ObjCObject?) {
+        storage.keep("textAttributesFor" + kind, copying: value?.id)
+    }
+
+    @ObjCMethod("textAttributesForPositiveValues") func textAttributesForPositiveValues() -> UnsafeMutableRawPointer? { textAttributes("PositiveValues") }
+    @ObjCMethod("setTextAttributesForPositiveValues:")
+    func setTextAttributesForPositiveValues(_ value: ObjCObject?) { setTextAttributes("PositiveValues", value) }
+    @ObjCMethod("textAttributesForNegativeValues") func textAttributesForNegativeValues() -> UnsafeMutableRawPointer? { textAttributes("NegativeValues") }
+    @ObjCMethod("setTextAttributesForNegativeValues:")
+    func setTextAttributesForNegativeValues(_ value: ObjCObject?) { setTextAttributes("NegativeValues", value) }
+    @ObjCMethod("textAttributesForZero") func textAttributesForZero() -> UnsafeMutableRawPointer? { textAttributes("Zero") }
+    @ObjCMethod("setTextAttributesForZero:") func setTextAttributesForZero(_ value: ObjCObject?) { setTextAttributes("Zero", value) }
+    @ObjCMethod("textAttributesForNil") func textAttributesForNil() -> UnsafeMutableRawPointer? { textAttributes("Nil") }
+    @ObjCMethod("setTextAttributesForNil:") func setTextAttributesForNil(_ value: ObjCObject?) { setTextAttributes("Nil", value) }
+    @ObjCMethod("textAttributesForNotANumber") func textAttributesForNotANumber() -> UnsafeMutableRawPointer? { textAttributes("NotANumber") }
+    @ObjCMethod("setTextAttributesForNotANumber:")
+    func setTextAttributesForNotANumber(_ value: ObjCObject?) { setTextAttributes("NotANumber", value) }
+    @ObjCMethod("textAttributesForPositiveInfinity")
+    func textAttributesForPositiveInfinity() -> UnsafeMutableRawPointer? { textAttributes("PositiveInfinity") }
+    @ObjCMethod("setTextAttributesForPositiveInfinity:")
+    func setTextAttributesForPositiveInfinity(_ value: ObjCObject?) { setTextAttributes("PositiveInfinity", value) }
+    @ObjCMethod("textAttributesForNegativeInfinity")
+    func textAttributesForNegativeInfinity() -> UnsafeMutableRawPointer? { textAttributes("NegativeInfinity") }
+    @ObjCMethod("setTextAttributesForNegativeInfinity:")
+    func setTextAttributesForNegativeInfinity(_ value: ObjCObject?) { setTextAttributes("NegativeInfinity", value) }
+
+    // MARK: Legacy (Mac OS X 10.0) behavior
+
+    /// The grouping separator and whether it's used, by their 10.0 names.
+    @ObjCMethod("thousandSeparator") func thousandSeparator() -> String { groupingSeparator() }
+    @ObjCMethod("setThousandSeparator:") func setThousandSeparator(_ value: String?) { setGroupingSeparator(value) }
+    @ObjCMethod("hasThousandSeparators") func hasThousandSeparators() -> Bool { usesGroupingSeparator() }
+    @ObjCMethod("setHasThousandSeparators:") func setHasThousandSeparators(_ value: Bool) { setUsesGroupingSeparator(value) }
+    /// Kept: the symbols are the locale's either way.
+    @ObjCMethod("localizesFormat") func localizesFormat() -> Bool { storage.localizesFormat }
+    @ObjCMethod("setLocalizesFormat:") func setLocalizesFormat(_ value: Bool) { storage.localizesFormat = value }
+
+    /// "positive;zero;negative": the zero part is the zero symbol, or zero
+    /// as the formatter writes it.
+    @ObjCMethod("format")
+    func format() -> String {
+        let zero = storage.zeroSymbol ?? Numbers.make(nil, .signed(0)).flatMap { storage.string(from: $0) } ?? "0"
+        return storage.positiveFormat + ";" + zero + ";" + storage.negativeFormat
+    }
+
+    /// Sets the positive format, then: with three parts, the zero symbol
+    /// and the negative format; with two, the negative format; with one,
+    /// that format with a minus sign. Without a zero part, zero is kept as
+    /// the formatter then writes it, as on Darwin.
+    @ObjCMethod("setFormat:")
+    func setFormat(_ format: String?) {
+        guard let format else { return }
+        let parts = format.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+        let positive = parts[0]
+        let negative = parts.count >= 3 ? parts[2] : parts.count == 2 ? parts[1] : "-" + positive
+        storage.pattern = positive + ";" + negative
+        storage.explicitNegative = negative
+        storage.changed()
+        storage.zeroSymbol = parts.count >= 3 ? parts[1] : Numbers.make(nil, .signed(0)).flatMap { storage.string(from: $0) }
+    }
 }
