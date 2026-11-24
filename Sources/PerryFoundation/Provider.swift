@@ -55,10 +55,11 @@ enum Conformances {
     /// Each with the protocols it inherits from: secure coding is coding.
     static let protocols: [(name: String, adopting: [String])] = [
         ("NSCopying", []), ("NSMutableCopying", []), ("NSCoding", []), ("NSSecureCoding", ["NSCoding"]), ("NSFastEnumeration", []),
+        ("NSItemProviderReading", []), ("NSItemProviderWriting", []),
     ]
 
     static let classes: [(name: String, protocols: [String])] = [
-        ("NSString", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSString", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSItemProviderReading", "NSItemProviderWriting"]),
         ("NSAttributedString", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
         ("NSArray", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
         ("NSDictionary", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
@@ -68,7 +69,7 @@ enum Conformances {
         ("NSValue", ["NSCopying", "NSSecureCoding"]),
         ("NSNumber", ["NSCopying", "NSSecureCoding"]),
         ("NSDate", ["NSCopying", "NSSecureCoding"]),
-        ("NSURL", ["NSCopying", "NSSecureCoding"]),
+        ("NSURL", ["NSCopying", "NSSecureCoding", "NSItemProviderReading", "NSItemProviderWriting"]),
         ("NSUUID", ["NSCopying", "NSSecureCoding"]),
         ("NSIndexPath", ["NSCopying", "NSSecureCoding"]),
         ("NSIndexSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
