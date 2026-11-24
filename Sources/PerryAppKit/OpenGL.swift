@@ -216,6 +216,21 @@ open class NSOpenGLContext: NSObject {
     /// can't be made current too. Shared by every context of the group.
     var shareRoot: SDLGLContext?
     var swapInterval: Int32 = 0
+    /// The interval the window's surface has, nil while one asked for is
+    /// still to be given it. EGL's swap interval is the surface's of the
+    /// context current on the calling thread, and a program sets its
+    /// context's whichever context is current then (MacSoft's Halo sets it
+    /// with another of its contexts current, and its window went on swapping
+    /// unsynchronized): it's given when this context is next current on its
+    /// window.
+    var appliedInterval: Int32?
+
+    /// Gives the window's surface the swap interval asked for, with this
+    /// context current on it.
+    private func applySwapInterval() {
+        guard appliedInterval != swapInterval else { return }
+        if (try? SDL.glSetSwapInterval(swapInterval)) != nil { appliedInterval = swapInterval }
+    }
 
     public required override init() { super.init() }
 
@@ -261,7 +276,10 @@ open class NSOpenGLContext: NSObject {
             $0[thread] = binding
             return true
         }
-        if resumed { return }
+        if resumed {
+            applySwapInterval()
+            return
+        }
         if context == nil {
             GLAttributes.lock()
             defer { GLAttributes.unlock() }
@@ -289,13 +307,13 @@ open class NSOpenGLContext: NSObject {
             } catch {
                 appKitWarning("SDL could not make an OpenGL context for window \(window.id), surface \(format?.surfaceKind ?? []), sharing: \(sharing): \(error)")
             }
-            try? SDL.glSetSwapInterval(swapInterval)
         }
         guard let context else { return }
         guard let bound = Self.bind(context, to: window) else {
             appKitWarning("SDL could not make the OpenGL context current")
             return
         }
+        if bound != nil { applySwapInterval() }
         let identifier = ObjectIdentifier(self)
         Self.withBindings {
             $0[thread] = Binding(context: self, window: bound)
@@ -398,7 +416,9 @@ open class NSOpenGLContext: NSObject {
     func setValues(_ values: UnsafePointer<Int32>?, parameter: Int) {
         guard parameter == 222, let values else { return }
         swapInterval = values.pointee
-        if context != nil { try? SDL.glSetSwapInterval(swapInterval) }
+        // Now, if this context is the one current here on its window.
+        let thread = pthread_self()
+        if Self.withBindings({ $0[thread].map { $0.context === self && $0.window != nil } ?? false }) { applySwapInterval() }
     }
 
     @ObjCMethod("getValues:forParameter:")
