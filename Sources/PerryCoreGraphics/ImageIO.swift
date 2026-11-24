@@ -2,15 +2,17 @@ import CPerryImageIO
 import Glibc
 import PerryObjCInterop
 
-// ImageIO: image sources read PNG, JPEG, GIF, WebP, HEIF and TIFF through the
-// codecs in CPerryImageIO; image destinations write PNG, JPEG and GIF.
+// ImageIO: image sources read PNG, JPEG, GIF, WebP, HEIF, TIFF, BMP and ICO
+// through the codecs in CPerryImageIO; image destinations write PNG, JPEG and
+// GIF.
 // Sources decode when first asked about an image; images with alpha come
 // out premultiplied (RGBA), opaque JPEGs as RGBX, as on iOS.
 
 enum ImageTypes {
     static let png = "public.png", jpeg = "public.jpeg", gif = "com.compuserve.gif", webp = "org.webmproject.webp"
     static let heic = "public.heic", heif = "public.heif", tiff = "public.tiff", pdf = "com.adobe.pdf"
-    static let readable = [jpeg, png, gif, heic, heif, webp, tiff, pdf]
+    static let bmp = "com.microsoft.bmp", ico = "com.microsoft.ico", cur = "com.microsoft.cur"
+    static let readable = [jpeg, png, gif, heic, heif, webp, tiff, pdf, bmp, ico, cur]
     static let writable = [jpeg, png, gif]
 
     /// The type the bytes start like.
@@ -20,6 +22,19 @@ enum ImageTypes {
         if bytes.starts(with: Array("GIF8".utf8)) { return gif }
         if bytes.starts(with: [0x49, 0x49, 0x2a, 0x00]) || bytes.starts(with: [0x4d, 0x4d, 0x00, 0x2a]) { return tiff }
         if bytes.starts(with: Array("%PDF".utf8)) { return pdf }
+        // A bitmap file's header, then its DIB header's size, one of the
+        // versions there are.
+        if bytes.count >= 18, bytes.starts(with: Array("BM".utf8)),
+           [12, 40, 52, 56, 64, 108, 124].contains(Int(bytes[14]) | Int(bytes[15]) << 8 | Int(bytes[16]) << 16 | Int(bytes[17]) << 24) {
+            return bmp
+        }
+        // An icon or cursor directory: a zero word, its kind and at least
+        // one entry, whose image starts past the directory.
+        if bytes.count >= 22, bytes[0] == 0, bytes[1] == 0, bytes[2] == 1 || bytes[2] == 2, bytes[3] == 0 {
+            let count = Int(bytes[4]) | Int(bytes[5]) << 8
+            let offset = Int(bytes[18]) | Int(bytes[19]) << 8 | Int(bytes[20]) << 16 | Int(bytes[21]) << 24
+            if count > 0, offset >= 6 + 16 * count { return bytes[2] == 1 ? ico : cur }
+        }
         if bytes.count >= 12, bytes.starts(with: Array("RIFF".utf8)), Array(bytes[8..<12]) == Array("WEBP".utf8) { return webp }
         if bytes.count >= 12, Array(bytes[4..<8]) == Array("ftyp".utf8) {
             let brand = String(decoding: bytes[8..<12], as: UTF8.self)
@@ -180,6 +195,8 @@ final class SourceState: @unchecked Sendable {
             case ImageTypes.webp: return perry_webp_decode(base, buffer.count, &info)
             case ImageTypes.tiff: return perry_tiff_decode(base, buffer.count, &info)
             case ImageTypes.pdf: return perry_pdf_decode(base, buffer.count, &info)
+            case ImageTypes.bmp: return perry_bmp_decode(base, buffer.count, &info)
+            case ImageTypes.ico, ImageTypes.cur: return perry_ico_decode(base, buffer.count, &info)
             default: return perry_heif_decode(base, buffer.count, &info)
             }
         }
