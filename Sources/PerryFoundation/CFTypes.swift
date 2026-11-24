@@ -13,6 +13,7 @@ enum CFTypeIDs {
     static let boolean: UInt = 21, number: UInt = 22, characterSet: UInt = 25, error: UInt = 27, url: UInt = 29
     static let bundle: UInt = 31, uuid: UInt = 34, date: UInt = 42, runLoop: UInt = 43, timeZone: UInt = 48, locale: UInt = 55
     static let dateFormatter: UInt = 56, numberFormatter: UInt = 57
+    static let calendar: UInt = 49, attributedString: UInt = 62, dateComponents: UInt = 66
 
     /// The type ID of a bridged object, by its class.
     static func of(_ object: id) -> UInt? {
@@ -22,7 +23,9 @@ enum CFTypeIDs {
             (DataObjects.dataClass, data), (Dates.dateClass, date), (URLs.urlClass, url), (Errors.errorClass, error),
             (CharacterSets.setClass, characterSet), (TimeZones.zoneClass, timeZone), (Locales.localeClass, locale),
             (Bundles.bundleClass, bundle), (DateFormatters.formatterClass, dateFormatter),
-            (NumberFormatters.formatterClass, numberFormatter),
+            (NumberFormatters.formatterClass, numberFormatter), (AttributedStrings.stringClass, attributedString),
+            (Calendars.calendarClass, calendar), (DateComponentsBox.componentsClass, dateComponents),
+            (Sockets.sourceClass, 46), (Notifications.centerClass, 52),
         ]
         if object == Nulls.null { return null }
         return checks.first { cls, _ in cls.map { ObjC.isKind(object, of: $0) } ?? false }?.1
@@ -46,7 +49,11 @@ public func CFCopyTypeIDDescription(_ type: UInt) -> id? {
         CFTypeIDs.characterSet: "CFCharacterSet", CFTypeIDs.error: "CFError", CFTypeIDs.url: "CFURL", CFTypeIDs.bundle: "CFBundle",
         CFTypeIDs.uuid: "CFUUID", CFTypeIDs.date: "CFDate", CFTypeIDs.runLoop: "CFRunLoop", CFTypeIDs.timeZone: "CFTimeZone",
         CFTypeIDs.locale: "CFLocale", CFTypeIDs.dateFormatter: "CFDateFormatter",
-        CFTypeIDs.numberFormatter: "CFNumberFormatter",
+        CFTypeIDs.numberFormatter: "CFNumberFormatter", CFTypeIDs.calendar: "CFCalendar",
+        CFTypeIDs.attributedString: "CFAttributedString", CFTypeIDs.dateComponents: "CFDateComponents",
+        2: "CFAllocator", 35: "CFMessagePort", 36: "CFMachPort", 38: "CFReadStream", 39: "CFWriteStream", 45: "CFRunLoopObserver",
+        46: "CFRunLoopSource", 47: "CFRunLoopTimer", 52: "CFNotificationCenter", 54: "CFUserNotification", 61: "CFSocket",
+        64: "CFFileSecurity", 72: "CFURLEnumerator",
     ]
     if let name = CFRuntimeClasses.runtimeClass(type)?.pointee.className {
         return Strings.make(String(cString: name))
@@ -1001,12 +1008,25 @@ public func CFURLCreateWithFileSystemPathRelativeToBase(_ allocator: UnsafeRawPo
 nonisolated(unsafe) private var constantUUIDs: [UUID: id] = [:]
 private let constantUUIDLock = Monitor()
 
+#if arch(arm64)
+/// What uuid_bytes.S's _CFUUIDGetConstantUUIDWithBytes calls with the bytes
+/// gathered, as Darwin's arm64 ABI packs them on the stack.
+@c
+public func perry_foundation_cf_uuid_constant_with_bytes(_ allocator: UnsafeRawPointer?, _ bytes: UnsafePointer<UInt8>) -> id? {
+    constantUUID(UUIDBytes.uuid(bytes))
+}
+#else
 @c(_CFUUIDGetConstantUUIDWithBytes)
 public func CFUUIDGetConstantUUIDWithBytes(_ allocator: UnsafeRawPointer?, _ b0: UInt8, _ b1: UInt8, _ b2: UInt8, _ b3: UInt8,
                                            _ b4: UInt8, _ b5: UInt8, _ b6: UInt8, _ b7: UInt8, _ b8: UInt8, _ b9: UInt8,
                                            _ b10: UInt8, _ b11: UInt8, _ b12: UInt8, _ b13: UInt8, _ b14: UInt8, _ b15: UInt8) -> id? {
-    let uuid = UUID(uuid: (b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15))
-    return constantUUIDLock.locked {
+    constantUUID(UUID(uuid: (b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15)))
+}
+#endif
+
+/// The one CFUUID kept for a UUID, as constant UUIDs are.
+private func constantUUID(_ uuid: UUID) -> id? {
+    constantUUIDLock.locked {
         if let made = constantUUIDs[uuid] { return made }
         let made = NSCFUUID.make(uuid)
         constantUUIDs[uuid] = made
