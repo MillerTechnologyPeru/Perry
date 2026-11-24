@@ -64,6 +64,16 @@ final class OrderedSetStorage {
         members.swapAt(a, b)
         reindex()
     }
+
+    /// The members made `replacement`, in its order, the first of equal
+    /// ones kept; the new ones are retained before the old ones go.
+    func setMembers(_ replacement: [id]) {
+        let old = members
+        var seen: Set<ObjectKey> = []
+        members = replacement.filter { seen.insert(ObjectKey(object: $0)).inserted }.map { ObjC.retain($0)! }
+        reindex()
+        old.forEach { ObjC.release($0) }
+    }
 }
 
 enum OrderedSets {
@@ -84,6 +94,34 @@ enum OrderedSets {
         guard Int(index) < count else {
             foundationFatal("-[NSOrderedSet \(method)]: index \(index) beyond bounds [0 .. \(count - 1)]")
         }
+    }
+
+    /// The members in a range, which must lie within them.
+    static func slice(_ members: [id], _ range: NSRange, _ method: String) -> [id] {
+        guard Int(range.location + range.length) <= members.count else {
+            foundationFatal("\(method): range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(members.count - 1)]")
+        }
+        return Array(members[Int(range.location)..<Int(range.location + range.length)])
+    }
+
+    /// The members, or with `copyItems` each one's -copy (+1, for the caller
+    /// to release once stored).
+    static func copies(_ members: [id], _ copyItems: Bool) -> [id] {
+        copyItems ? members.map { ObjC.send($0, Selectors.copyWithZone, nil) ?? ObjC.retain($0)! } : members
+    }
+
+    /// A new ordered set of `cls`, autoreleased, of the members or their copies.
+    static func make(_ cls: id, _ members: [id], copyItems: Bool) -> id? {
+        let stored = copies(members, copyItems)
+        defer { if copyItems { stored.forEach { ObjC.release($0) } } }
+        return make(cls, stored)
+    }
+
+    /// Fills an allocated ordered set with the members or their copies.
+    static func fill(_ object: id, _ members: [id], copyItems: Bool = false) {
+        let stored = copies(members, copyItems)
+        Storage.set(object, OrderedSetStorage(stored))
+        if copyItems { stored.forEach { ObjC.release($0) } }
     }
 }
 
@@ -147,9 +185,76 @@ public class NSOrderedSet: NSObject {
         return OrderedSets.make(cls.pointer, Array(members[Int(range.location)..<Int(range.location + range.length)]))
     }
 
+    /// The members of a range of an array, copied with `copyItems`.
+    @ObjCClassMethod("orderedSetWithArray:range:copyItems:")
+    static func make(_ cls: ObjCClass, array: ObjCObject?, range: NSRange, copyItems: Bool) -> UnsafeMutableRawPointer? {
+        let members = OrderedSets.slice(Arrays.elements(array?.id), range, "+[NSOrderedSet orderedSetWithArray:range:copyItems:]")
+        return OrderedSets.make(cls.pointer, members, copyItems: copyItems)
+    }
+
+    @ObjCClassMethod("orderedSetWithObjects:count:")
+    static func make(_ cls: ObjCClass, objects: UnsafePointer<id?>?, count: UInt) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, Arrays.objects(objects, count: count, method: "+[NSOrderedSet orderedSetWithObjects:count:]"))
+    }
+
+    @ObjCClassMethod("orderedSetWithSet:copyItems:")
+    static func make(_ cls: ObjCClass, set: ObjCObject?, copyItems: Bool) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, Sets.elements(set?.id), copyItems: copyItems)
+    }
+
     @ObjCMethod("init")
     func initialize() -> Self {
         Storage.set(objcObject, OrderedSetStorage())
+        return self
+    }
+
+    @ObjCMethod("initWithObject:")
+    func initialize(object: ObjCObject) -> Self {
+        OrderedSets.fill(objcObject, [object.id])
+        return self
+    }
+
+    @ObjCMethod("initWithObjects:count:")
+    func initialize(objects: UnsafePointer<id?>?, count: UInt) -> Self {
+        OrderedSets.fill(objcObject, Arrays.objects(objects, count: count, method: "-[NSOrderedSet initWithObjects:count:]"))
+        return self
+    }
+
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject?) -> Self {
+        OrderedSets.fill(objcObject, CollectionCoding.objects(coder?.id))
+        return self
+    }
+
+    @ObjCMethod("initWithArray:copyItems:")
+    func initialize(array: ObjCObject?, copyItems: Bool) -> Self {
+        OrderedSets.fill(objcObject, Arrays.elements(array?.id), copyItems: copyItems)
+        return self
+    }
+
+    @ObjCMethod("initWithArray:range:copyItems:")
+    func initialize(array: ObjCObject?, range: NSRange, copyItems: Bool) -> Self {
+        let members = OrderedSets.slice(Arrays.elements(array?.id), range, "-[NSOrderedSet initWithArray:range:copyItems:]")
+        OrderedSets.fill(objcObject, members, copyItems: copyItems)
+        return self
+    }
+
+    @ObjCMethod("initWithOrderedSet:copyItems:")
+    func initialize(orderedSet other: ObjCObject?, copyItems: Bool) -> Self {
+        OrderedSets.fill(objcObject, OrderedSets.storage(other?.id).members, copyItems: copyItems)
+        return self
+    }
+
+    @ObjCMethod("initWithOrderedSet:range:copyItems:")
+    func initialize(orderedSet other: ObjCObject?, range: NSRange, copyItems: Bool) -> Self {
+        let members = OrderedSets.slice(OrderedSets.storage(other?.id).members, range, "-[NSOrderedSet initWithOrderedSet:range:copyItems:]")
+        OrderedSets.fill(objcObject, members, copyItems: copyItems)
+        return self
+    }
+
+    @ObjCMethod("initWithSet:copyItems:")
+    func initialize(set: ObjCObject?, copyItems: Bool) -> Self {
+        OrderedSets.fill(objcObject, Sets.elements(set?.id), copyItems: copyItems)
         return self
     }
 
@@ -296,11 +401,144 @@ public class NSOrderedSet: NSObject {
         return notFound
     }
 
+    /// "{(" and ")}" around the members, quoted and indented as an array's.
     @ObjCMethod("description")
-    func description() -> String {
-        let name = ObjC.isKind(objcObject, of: OrderedSets.mutableClass) ? "NSMutableOrderedSet" : "NSOrderedSet"
-        let lines = storage.members.map { "    " + Format.describe($0) }
-        return "{(\n" + lines.joined(separator: ",\n") + "\n)}" + (name.isEmpty ? "" : "")
+    func description() -> String { Describe.list(storage.members, open: "{(", close: ")}", indent: 0) }
+
+    @ObjCMethod("descriptionWithLocale:")
+    func description(withLocale locale: ObjCObject?) -> String { description() }
+
+    @ObjCMethod("descriptionWithLocale:indent:")
+    func description(withLocale locale: ObjCObject?, indent: UInt) -> String {
+        Describe.list(storage.members, open: "{(", close: ")}", indent: Int(indent))
+    }
+
+    @ObjCMethod("getObjects:range:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, range: NSRange) {
+        let members = OrderedSets.slice(storage.members, range, "-[NSOrderedSet getObjects:range:]")
+        guard let buffer else { return }
+        for (offset, member) in members.enumerated() { buffer[offset] = member }
+    }
+
+    @ObjCMethod("objectEnumerator") func objectEnumerator() -> ObjCObject { Enumerators.make(storage.members) }
+    @ObjCMethod("reverseObjectEnumerator") func reverseObjectEnumerator() -> ObjCObject { Enumerators.make(storage.members.reversed()) }
+
+    // MARK: Enumerating and searching
+
+    private func enumerate(_ indexes: [Int], options: UInt, block: ObjCObject) {
+        typealias Invoke = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let members = storage.members
+        for index in options & 2 != 0 ? indexes.reversed() : indexes {
+            OrderedSets.check(UInt(index), members.count, "enumerateObjectsAtIndexes:options:usingBlock:")
+            var stop = false
+            invoke(block.id, members[index], UInt(index), &stop)
+            if stop { return }
+        }
+    }
+
+    /// NSEnumerationReverse (2) runs from the last; concurrent runs in order.
+    @ObjCMethod("enumerateObjectsWithOptions:usingBlock:")
+    func enumerateObjects(options: UInt, using block: ObjCObject) { enumerate(Array(storage.members.indices), options: options, block: block) }
+
+    @ObjCMethod("enumerateObjectsAtIndexes:options:usingBlock:")
+    func enumerateObjects(atIndexes indexes: ObjCObject, options: UInt, using block: ObjCObject) {
+        enumerate(IndexSets.storage(indexes.id).indexes, options: options, block: block)
+    }
+
+    @ObjCMethod("indexesOfObjectsPassingTest:")
+    func indexes(ofObjectsPassingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        indexes(options: 0, ofObjectsPassingTest: block)
+    }
+
+    @ObjCMethod("indexesOfObjectsWithOptions:passingTest:")
+    func indexes(options: UInt, ofObjectsPassingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        Arrays.indexSet(Arrays.passing(storage.members, nil, options: options, block: block.id, first: false,
+                                       method: "-[NSOrderedSet indexesOfObjectsWithOptions:passingTest:]"))
+    }
+
+    @ObjCMethod("indexesOfObjectsAtIndexes:options:passingTest:")
+    func indexes(atIndexes indexes: ObjCObject, options: UInt, passingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        Arrays.indexSet(Arrays.passing(storage.members, IndexSets.storage(indexes.id).indexes, options: options, block: block.id,
+                                       first: false, method: "-[NSOrderedSet indexesOfObjectsAtIndexes:options:passingTest:]"))
+    }
+
+    @ObjCMethod("indexOfObjectAtIndexes:options:passingTest:")
+    func index(atIndexes indexes: ObjCObject, options: UInt, passingTest block: ObjCObject) -> UInt {
+        Arrays.passing(storage.members, IndexSets.storage(indexes.id).indexes, options: options, block: block.id, first: true,
+                       method: "-[NSOrderedSet indexOfObjectAtIndexes:options:passingTest:]").first.map { UInt($0) } ?? notFound
+    }
+
+    /// A binary search of the range, as NSArray's.
+    @ObjCMethod("indexOfObject:inSortedRange:options:usingComparator:")
+    func index(of target: ObjCObject?, inSortedRange range: NSRange, options: UInt, comparator: ObjCBlock) -> UInt {
+        Arrays.search(storage.members, for: target?.id, in: range, options: options, comparator: comparator)
+    }
+
+    // MARK: Deriving
+
+    @ObjCMethod("filteredOrderedSetUsingPredicate:")
+    func filtered(using predicate: NSPredicate) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(UnsafeMutableRawPointer(OrderedSets.setClass), storage.members.filter { predicate.evaluate(with: ObjCObject($0)) })
+    }
+
+    @ObjCMethod("sortedArrayUsingComparator:")
+    func sortedArray(comparator: ObjCBlock) -> ObjCObject {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        return ObjCObject(Arrays.autoreleased(storage.members.sorted { compare(comparator.object, $0, $1) < 0 }))
+    }
+
+    /// NSSortOptions only tune the sort, which is stable.
+    @ObjCMethod("sortedArrayWithOptions:usingComparator:")
+    func sortedArray(options: UInt, comparator: ObjCBlock) -> ObjCObject { sortedArray(comparator: comparator) }
+
+    @ObjCMethod("sortedArrayUsingDescriptors:")
+    func sortedArray(usingDescriptors descriptors: ObjCObject?) -> ObjCObject {
+        ObjCObject(Arrays.autoreleased(SortDescriptors.sorted(storage.members, by: descriptors?.objcObject)))
+    }
+
+    // MARK: Differences
+
+    @ObjCMethod("differenceFromOrderedSet:withOptions:usingEquivalenceTest:")
+    func difference(from other: ObjCObject?, options: UInt, test: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        let old = OrderedSets.storage(other?.id).members
+        guard let test else {
+            return OrderedDifferences.difference(from: old, to: storage.members, options: options) { ObjectKey(object: $0) == ObjectKey(object: $1) }
+        }
+        let compare = Blocks.invoke(test, as: (@convention(c) (id, id?, id?) -> Bool).self)
+        return OrderedDifferences.difference(from: old, to: storage.members, options: options) { compare(test, $0, $1) }
+    }
+
+    @ObjCMethod("differenceFromOrderedSet:withOptions:")
+    func difference(from other: ObjCObject?, options: UInt) -> UnsafeMutableRawPointer? { difference(from: other, options: options, test: nil) }
+
+    @ObjCMethod("differenceFromOrderedSet:")
+    func difference(from other: ObjCObject?) -> UnsafeMutableRawPointer? { difference(from: other, options: 0, test: nil) }
+
+    /// nil when the difference doesn't apply to the members.
+    @ObjCMethod("orderedSetByApplyingDifference:")
+    func applying(difference: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        NSOrderedCollectionDifference.apply(difference, to: storage.members).flatMap {
+            OrderedSets.make(UnsafeMutableRawPointer(OrderedSets.setClass), $0)
+        }
+    }
+
+    // MARK: Observing
+
+    /// An ordered set can't be observed itself: these raise, as on Darwin.
+    @ObjCMethod("addObserver:forKeyPath:options:context:")
+    func rejectObserver(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, options: UInt, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "addObserver:forKeyPath:options:context:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:", keyPath)
+    }
+
+    @ObjCMethod("removeObserver:forKeyPath:context:")
+    func rejectRemoval(_ observer: ObjCObject?, forKeyPath keyPath: ObjCObject?, context: UnsafeMutableRawPointer?) {
+        CollectionObserving.unsupported(objcObject, "removeObserver:forKeyPath:context:", keyPath)
     }
 }
 
@@ -390,6 +628,127 @@ public final class NSMutableOrderedSet: NSOrderedSet {
 
     @ObjCMethod("minusOrderedSet:")
     func minus(_ other: ObjCObject) { remove(objectsIn: ObjCObject(Arrays.autoreleased(OrderedSets.storage(other.id).members))) }
+
+    @ObjCMethod("addObjects:count:")
+    func add(objects: UnsafePointer<id?>?, count: UInt) {
+        Arrays.objects(objects, count: count, method: "-[NSMutableOrderedSet addObjects:count:]").forEach { storage.append($0) }
+    }
+
+    /// Keeps the members the set has.
+    @ObjCMethod("intersectSet:")
+    func intersect(set other: ObjCObject?) {
+        let contains = ObjC.selector("containsObject:")
+        storage.setMembers(storage.members.filter { member in other.map { ObjC.sendBool($0.id, contains, member) } ?? false })
+    }
+
+    @ObjCMethod("filterUsingPredicate:")
+    func filter(using predicate: NSPredicate) {
+        storage.setMembers(storage.members.filter { predicate.evaluate(with: ObjCObject($0)) })
+    }
+
+    /// Each object inserted at its index, in ascending order; an object
+    /// already a member is left where it is.
+    @ObjCMethod("insertObjects:atIndexes:")
+    func insert(_ objects: ObjCObject?, atIndexes indexes: ObjCObject) {
+        let added = Arrays.elements(objects?.id), positions = IndexSets.storage(indexes.id).indexes
+        guard added.count == positions.count else {
+            foundationFatal("-[NSMutableOrderedSet insertObjects:atIndexes:]: count of array (\(added.count)) differs from count of index set (\(positions.count))")
+        }
+        for (object, position) in zip(added, positions) {
+            guard position <= storage.members.count else {
+                foundationFatal("-[NSMutableOrderedSet insertObjects:atIndexes:]: index \(position) beyond bounds [0 .. \(storage.members.count)]")
+            }
+            storage.insert(object, at: position)
+        }
+    }
+
+    @ObjCMethod("removeObjectsAtIndexes:")
+    func remove(atIndexes indexes: ObjCObject) {
+        let doomed = Set(IndexSets.storage(indexes.id).indexes)
+        if let beyond = doomed.first(where: { $0 >= storage.members.count }) {
+            OrderedSets.check(UInt(beyond), storage.members.count, "removeObjectsAtIndexes:")
+        }
+        storage.setMembers(storage.members.enumerated().filter { !doomed.contains($0.offset) }.map(\.element))
+    }
+
+    @ObjCMethod("removeObjectsInRange:")
+    func remove(range: NSRange) {
+        _ = OrderedSets.slice(storage.members, range, "-[NSMutableOrderedSet removeObjectsInRange:]")
+        let start = Int(range.location), end = start + Int(range.length)
+        storage.setMembers(storage.members.enumerated().filter { !(start..<end).contains($0.offset) }.map(\.element))
+    }
+
+    /// The members at the indexes taken out, then put back in their order
+    /// at `index` of what remains.
+    @ObjCMethod("moveObjectsAtIndexes:toIndex:")
+    func move(atIndexes indexes: ObjCObject, to index: UInt) {
+        let positions = Set(IndexSets.storage(indexes.id).indexes), members = storage.members
+        if let beyond = positions.first(where: { $0 >= members.count }) {
+            OrderedSets.check(UInt(beyond), members.count, "moveObjectsAtIndexes:toIndex:")
+        }
+        let moved = members.enumerated().filter { positions.contains($0.offset) }.map(\.element)
+        var rest = members.enumerated().filter { !positions.contains($0.offset) }.map(\.element)
+        guard Int(index) <= rest.count else {
+            foundationFatal("-[NSMutableOrderedSet moveObjectsAtIndexes:toIndex:]: index \(index) beyond bounds [0 .. \(rest.count)]")
+        }
+        rest.insert(contentsOf: moved, at: Int(index))
+        storage.setMembers(rest)
+    }
+
+    @ObjCMethod("replaceObjectsAtIndexes:withObjects:")
+    func replace(atIndexes indexes: ObjCObject, withObjects objects: ObjCObject?) {
+        let positions = IndexSets.storage(indexes.id).indexes, replacements = Arrays.elements(objects?.id)
+        guard positions.count == replacements.count else {
+            foundationFatal("-[NSMutableOrderedSet replaceObjectsAtIndexes:withObjects:]: count of array (\(replacements.count)) differs from count of index set (\(positions.count))")
+        }
+        for (position, replacement) in zip(positions, replacements) {
+            OrderedSets.check(UInt(position), storage.members.count, "replaceObjectsAtIndexes:withObjects:")
+            storage.replace(at: position, with: replacement)
+        }
+    }
+
+    /// The range's members replaced by the C array's objects; an object
+    /// equal to a member before the range is left out.
+    @ObjCMethod("replaceObjectsInRange:withObjects:count:")
+    func replace(range: NSRange, withObjects objects: UnsafePointer<id?>?, count: UInt) {
+        _ = OrderedSets.slice(storage.members, range, "-[NSMutableOrderedSet replaceObjectsInRange:withObjects:count:]")
+        let added = Arrays.objects(objects, count: count, method: "-[NSMutableOrderedSet replaceObjectsInRange:withObjects:count:]")
+        let members = storage.members, start = Int(range.location), end = start + Int(range.length)
+        storage.setMembers(Array(members[..<start]) + added + Array(members[end...]))
+    }
+
+    private func sort(_ range: Range<Int>, comparator: ObjCBlock) {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        var members = storage.members
+        members.replaceSubrange(range, with: members[range].sorted { compare(comparator.object, $0, $1) < 0 })
+        storage.setMembers(members)
+    }
+
+    @ObjCMethod("sortUsingComparator:")
+    func sort(comparator: ObjCBlock) { sort(0..<storage.members.count, comparator: comparator) }
+
+    /// NSSortOptions only tune the sort, which is stable.
+    @ObjCMethod("sortWithOptions:usingComparator:")
+    func sort(options: UInt, comparator: ObjCBlock) { sort(comparator: comparator) }
+
+    @ObjCMethod("sortRange:options:usingComparator:")
+    func sort(range: NSRange, options: UInt, comparator: ObjCBlock) {
+        _ = OrderedSets.slice(storage.members, range, "-[NSMutableOrderedSet sortRange:options:usingComparator:]")
+        sort(IndexSets.range(range), comparator: comparator)
+    }
+
+    @ObjCMethod("sortUsingDescriptors:")
+    func sort(usingDescriptors descriptors: ObjCObject?) {
+        storage.setMembers(SortDescriptors.sorted(storage.members, by: descriptors?.objcObject))
+    }
+
+    /// The members made what the difference turns them into; unchanged if
+    /// it doesn't apply to them.
+    @ObjCMethod("applyDifference:")
+    func apply(difference: UnsafeMutableRawPointer?) {
+        guard let changed = NSOrderedCollectionDifference.apply(difference, to: storage.members) else { return }
+        storage.setMembers(changed)
+    }
 }
 
 // MARK: - Counted sets
