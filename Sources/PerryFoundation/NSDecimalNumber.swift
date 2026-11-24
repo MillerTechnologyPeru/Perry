@@ -320,11 +320,21 @@ public class NSDecimalNumber: NSNumber {
     @ObjCMethod("unsignedLongValue") override func unsignedLongValue() -> UInt { UInt(truncatingIfNeeded: wrapped) }
     @ObjCMethod("unsignedIntegerValue") override func unsignedIntegerValue() -> UInt { UInt(truncatingIfNeeded: wrapped) }
     @ObjCMethod("intValue") override func intValue() -> Int32 { saturatedInt32 }
-    @ObjCMethod("shortValue") override func shortValue() -> Int16 { Int16(truncatingIfNeeded: saturatedInt32) }
-    @ObjCMethod("charValue") override func charValue() -> Int8 { Int8(truncatingIfNeeded: saturatedInt32) }
     @ObjCMethod("unsignedIntValue") override func unsignedIntValue() -> UInt32 { saturatedUInt32 }
-    @ObjCMethod("unsignedShortValue") override func unsignedShortValue() -> UInt16 { UInt16(truncatingIfNeeded: saturatedUInt32) }
-    @ObjCMethod("unsignedCharValue") override func unsignedCharValue() -> UInt8 { UInt8(truncatingIfNeeded: saturatedUInt32) }
+
+    // Darwin's shorter accessors, signed or not, are intValue narrowed, and
+    // they return intValue's 32 bits as they are: code that uses the whole
+    // register, as `int x = n.shortValue` does on arm64, sees 0x7fffffff for
+    // the short of 123456789012345678.9, and 0xffffffff for the unsigned
+    // short of -1, where a format's %hd and %hu print -1 and 65535.
+    override func shortValue() -> Int16 { Int16(truncatingIfNeeded: saturatedInt32) }
+    override func charValue() -> Int8 { Int8(truncatingIfNeeded: saturatedInt32) }
+    override func unsignedShortValue() -> UInt16 { UInt16(truncatingIfNeeded: saturatedInt32) }
+    override func unsignedCharValue() -> UInt8 { UInt8(truncatingIfNeeded: saturatedInt32) }
+    @ObjCMethod("shortValue", types: "s16@0:8") func darwinShortValue() -> Int32 { saturatedInt32 }
+    @ObjCMethod("charValue", types: "c16@0:8") func darwinCharValue() -> Int32 { saturatedInt32 }
+    @ObjCMethod("unsignedShortValue", types: "S16@0:8") func darwinUnsignedShortValue() -> Int32 { saturatedInt32 }
+    @ObjCMethod("unsignedCharValue", types: "C16@0:8") func darwinUnsignedCharValue() -> Int32 { saturatedInt32 }
     @ObjCMethod("boolValue") override func boolValue() -> Bool { decimal.length != 0 }
 
     /// NSDecimalString's digits: "NaN", "0", "-12.34".
