@@ -83,9 +83,9 @@ reports:
       - "PERRY_CONTAINER=~/perry-halo/container-ub"
       - "PERRY_UNIMPLEMENTED=continue"
       - "PERRY_OBJC_UNRECOGNIZED=continue"
-    level: 3
-    source: body
-    notes: Its loading picture, a TIFF in a PICT resource, shows while it starts, and none of Carbon's functions it calls are missing. Sound in a level and play are untested.
+    level: 4
+    source: maintainer
+    notes: Its loading picture, a TIFF in a PICT resource, shows while it starts, and none of Carbon's functions it calls are missing. The maintainer played it and found sound and play working. Multiplayer is untested, and its libcrypto.0.9.7 is not available.
     screenshots:
       - url: https://github.com/user-attachments/assets/1d43b507-bd94-4760-b118-c32ee6ed9c5b
         caption: The loading picture
