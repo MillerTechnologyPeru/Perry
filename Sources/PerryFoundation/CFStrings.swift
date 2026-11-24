@@ -202,7 +202,7 @@ public func CFStringCreateWithCharactersNoCopy(_ allocator: UnsafeRawPointer?, _
 @c(_CFStringCreateCopy)
 public func CFStringCreateCopy(_ allocator: UnsafeRawPointer?, _ string: id?) -> id? { Strings.make(CFStrings.value(string)) }
 
-@c(_CFStringCreateWithSubstring)
+@DarwinC("_CFStringCreateWithSubstring")
 public func CFStringCreateWithSubstring(_ allocator: UnsafeRawPointer?, _ string: id?, _ range: CFRange) -> id? {
     Strings.make(CFStrings.string(CFStrings.units(string)[CFArrays.range(range)]))
 }
@@ -299,7 +299,7 @@ public func CFStringGetCharacterAtIndex(_ string: id?, _ index: Int) -> UInt16 {
 /// The range's UTF-16 units. A range past the end, which CoreFoundation
 /// doesn't check (Age of Empires III asks for 256 of a cursor's name,
 /// however long), gets zeros for the units that aren't there.
-@c(_CFStringGetCharacters)
+@DarwinC("_CFStringGetCharacters")
 public func CFStringGetCharacters(_ string: id?, _ range: CFRange, _ buffer: UnsafeMutablePointer<UInt16>?) {
     guard let buffer, range.length > 0, range.location >= 0 else { return }
     let units = Array(CFStrings.value(string).utf16)
@@ -313,7 +313,7 @@ public func CFStringGetCharacters(_ string: id?, _ range: CFRange, _ buffer: Uns
 
 /// Converts the range's characters, stopping where one cannot be converted
 /// without `lossByte` or the buffer is full; the characters converted.
-@c(_CFStringGetBytes)
+@DarwinC("_CFStringGetBytes")
 public func CFStringGetBytes(_ string: id?, _ range: CFRange, _ encoding: UInt32, _ lossByte: UInt8, _ externalRepresentation: Bool,
                              _ buffer: UnsafeMutablePointer<UInt8>?, _ maxLength: Int, _ usedLength: UnsafeMutablePointer<Int>?) -> Int {
     let units = Array(CFStrings.units(string)[CFArrays.range(range)])
@@ -442,13 +442,13 @@ public func CFStringCompare(_ string: id?, _ other: id?, _ flags: UInt) -> Int {
     CFStrings.compare(CFStrings.value(string), CFStrings.value(other), flags)
 }
 
-@c(_CFStringCompareWithOptions)
+@DarwinC("_CFStringCompareWithOptions")
 public func CFStringCompareWithOptions(_ string: id?, _ other: id?, _ range: CFRange, _ flags: UInt) -> Int {
     let part = CFStrings.string(CFStrings.units(string)[CFArrays.range(range)])
     return CFStrings.compare(part, CFStrings.value(other), flags)
 }
 
-@c(_CFStringCompareWithOptionsAndLocale)
+@DarwinC("_CFStringCompareWithOptionsAndLocale")
 public func CFStringCompareWithOptionsAndLocale(_ string: id?, _ other: id?, _ range: CFRange, _ flags: UInt, _ locale: id?) -> Int {
     CFStringCompareWithOptions(string, other, range, flags)
 }
@@ -458,7 +458,7 @@ public func CFStringFind(_ string: id?, _ target: id?, _ flags: UInt) -> CFRange
     CFStrings.find(string, target, CFStrings.whole(string), flags)
 }
 
-@c(_CFStringFindWithOptions)
+@DarwinC("_CFStringFindWithOptions")
 public func CFStringFindWithOptions(_ string: id?, _ target: id?, _ range: CFRange, _ flags: UInt,
                                     _ result: UnsafeMutablePointer<CFRange>?) -> Bool {
     let found = CFStrings.find(string, target, range, flags)
@@ -513,7 +513,7 @@ public func CFStringAppendCharacters(_ string: id?, _ characters: UnsafePointer<
     CFStrings.mutate(string) { $0 += text }
 }
 
-@c(_CFStringReplace)
+@DarwinC("_CFStringReplace")
 public func CFStringReplace(_ string: id?, _ range: CFRange, _ replacement: id?) {
     var units = CFStrings.units(string)
     units.replaceSubrange(CFArrays.range(range), with: CFStrings.units(replacement))
@@ -523,7 +523,7 @@ public func CFStringReplace(_ string: id?, _ range: CFRange, _ replacement: id?)
 @c(_CFStringInsert)
 public func CFStringInsert(_ string: id?, _ index: Int, _ inserted: id?) { CFStringReplace(string, CFRange(location: index, length: 0), inserted) }
 
-@c(_CFStringDelete)
+@DarwinC("_CFStringDelete")
 public func CFStringDelete(_ string: id?, _ range: CFRange) {
     var units = CFStrings.units(string)
     units.removeSubrange(CFArrays.range(range))
@@ -535,7 +535,7 @@ public func CFStringReplaceAll(_ string: id?, _ replacement: id?) {
     CFStrings.set(string, CFStrings.value(replacement))
 }
 
-@c(_CFStringFindAndReplace)
+@DarwinC("_CFStringFindAndReplace")
 public func CFStringFindAndReplace(_ string: id?, _ target: id?, _ replacement: id?, _ range: CFRange, _ flags: UInt) -> Int {
     ObjC.autoreleasepool {
         Int(unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, id?, UInt, NSRange) -> UInt).self)(
