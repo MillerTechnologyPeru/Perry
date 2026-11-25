@@ -195,6 +195,9 @@ open class NSMenuItem: NSObject {
     var action: ObjCSelector?
     var keyEquivalent = ""
     var keyEquivalentModifierMask: UInt = ModifierFlags.command
+    /// Whether the key equivalent works while the item is hidden: kept, as
+    /// hidden items' equivalents are matched anyway.
+    var allowsKeyEquivalentWhenHidden = false
     /// Not retained.
     var target: UnsafeMutableRawPointer?
     var submenu: NSMenu?
@@ -320,6 +323,8 @@ open class NSMenuItem: NSObject {
     @ObjCMethod("setKeyEquivalent:") func setKeyEquivalent(_ key: String?) { keyEquivalent = key ?? "" }
     @ObjCMethod("keyEquivalentModifierMask") func itemKeyEquivalentModifierMask() -> UInt { keyEquivalentModifierMask }
     @ObjCMethod("setKeyEquivalentModifierMask:") func setKeyEquivalentModifierMask(_ mask: UInt) { keyEquivalentModifierMask = mask }
+    @ObjCMethod("allowsKeyEquivalentWhenHidden") func itemAllowsKeyEquivalentWhenHidden() -> Bool { allowsKeyEquivalentWhenHidden }
+    @ObjCMethod("setAllowsKeyEquivalentWhenHidden:") func setAllowsKeyEquivalentWhenHidden(_ value: Bool) { allowsKeyEquivalentWhenHidden = value }
     @ObjCMethod("submenu") func itemSubmenu() -> NSMenu? { submenu }
     @ObjCMethod("setSubmenu:")
     func setSubmenu(_ menu: NSMenu?) {
