@@ -62,23 +62,13 @@ export SWIFTCI_USE_LOCAL_DEPS=1
 spm=(--scratch-path "$work/spm")
 [ "$platform" = iphoneos ] || spm=(--build-system native --scratch-path "$work/spm-$target")
 # An arm64 target's code is for apple-a7, plain Armv8.0, as
-# Scripts/darwin-toolchain.sh builds the overlays (Scripts/check-armv8.sh):
-# given in a destination file, which reaches the target's compiles alone,
-# not the macros', and the modules SwiftPM precompiles for them.
+# Scripts/darwin-toolchain.sh builds the overlays (Scripts/check-armv8.sh),
+# and the modules SwiftPM precompiles for it with it. SwiftPM's build system
+# gives -Xswiftc, -Xcc and -Xcxx to the target's compiles alone, not the
+# macros' (a destination file would be taken for a macOS build instead).
 spm_target=(--triple "$target" --sdk "$sdk") cpu=()
 case $target in arm64-*)
-    cat > "$work/destination-$target.json" <<JSON
-{
-  "version": 1,
-  "sdk": "$sdk",
-  "toolchain-bin-dir": "$(dirname "$(xcrun -f swiftc)")",
-  "target": "$target",
-  "extra-cc-flags": ["-mcpu=apple-a7"],
-  "extra-cpp-flags": ["-mcpu=apple-a7"],
-  "extra-swiftc-flags": ["-target-cpu", "apple-a7"]
-}
-JSON
-    spm_target=(--destination "$work/destination-$target.json")
+    spm_target+=(-Xswiftc -target-cpu -Xswiftc apple-a7 -Xcc -mcpu=apple-a7 -Xcxx -mcpu=apple-a7)
     cpu=(-target-cpu apple-a7) ;;
 esac
 (cd "$foundation" && swift build "${spm[@]}" "${spm_target[@]}" --product FoundationInternationalization)
