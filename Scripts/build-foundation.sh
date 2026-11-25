@@ -61,8 +61,28 @@ foundation=$packages/swift-foundation
 export SWIFTCI_USE_LOCAL_DEPS=1
 spm=(--scratch-path "$work/spm")
 [ "$platform" = iphoneos ] || spm=(--build-system native --scratch-path "$work/spm-$target")
-(cd "$foundation" && swift build "${spm[@]}" --triple "$target" --sdk "$sdk" --product FoundationInternationalization)
-products=$(cd "$foundation" && swift build "${spm[@]}" --triple "$target" --sdk "$sdk" --show-bin-path)
+# An arm64 target's code is for apple-a7, plain Armv8.0, as
+# Scripts/darwin-toolchain.sh builds the overlays (Scripts/check-armv8.sh):
+# given in a destination file, which reaches the target's compiles alone,
+# not the macros', and the modules SwiftPM precompiles for them.
+spm_target=(--triple "$target" --sdk "$sdk") cpu=()
+case $target in arm64-*)
+    cat > "$work/destination-$target.json" <<JSON
+{
+  "version": 1,
+  "sdk": "$sdk",
+  "toolchain-bin-dir": "$(dirname "$(xcrun -f swiftc)")",
+  "target": "$target",
+  "extra-cc-flags": ["-mcpu=apple-a7"],
+  "extra-cpp-flags": ["-mcpu=apple-a7"],
+  "extra-swiftc-flags": ["-target-cpu", "apple-a7"]
+}
+JSON
+    spm_target=(--destination "$work/destination-$target.json")
+    cpu=(-target-cpu apple-a7) ;;
+esac
+(cd "$foundation" && swift build "${spm[@]}" "${spm_target[@]}" --product FoundationInternationalization)
+products=$(cd "$foundation" && swift build "${spm[@]}" "${spm_target[@]}" --show-bin-path)
 host=$(cd "$foundation" && swift build "${spm[@]}" --show-bin-path)
 objects=() modules=$products
 for each in _FoundationCShims _FoundationICU _RopeModule DequeModule OrderedCollections InternalCollectionsUtilities; do
@@ -120,7 +140,7 @@ sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "$merged" "$root/Darwin/Foundation/Sources" -name '*.swift' | sort)
 shims=$foundation/Sources/_FoundationCShims/include
 icu=$packages/swift-foundation-icu/icuSources/include
-xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
+xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" ${cpu[@]+"${cpu[@]}"} \
     -module-name Foundation -package-name swift_foundation -parse-as-library \
     -enable-library-evolution -swift-version 5 -O -wmo -import-underlying-module -D FOUNDATION_OBJC_TYPES \
     -emit-library -emit-module -emit-module-path "$out/Foundation.swiftmodule" \
