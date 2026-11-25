@@ -60,6 +60,24 @@ JSON
     # loader binds where the library is loaded.
     catalyst=(-Fsystem "$frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift" -L "$support/usr/lib"
               -Xlinker -U -Xlinker __AXSHoverTextEnabled) ;;
+arm64-*)
+    # An arm64 target's code is for apple-a7, plain Armv8.0, as
+    # Scripts/darwin-toolchain.sh builds the overlays SwiftUI imports
+    # (Scripts/check-armv8.sh): in a destination file for the same reason,
+    # so that the modules SwiftPM precompiles agree with theirs.
+    mkdir -p "$work"
+    cat > "$work/destination-$target.json" <<JSON
+{
+  "version": 1,
+  "sdk": "$sdk",
+  "toolchain-bin-dir": "$(dirname "$(xcrun -f swiftc)")",
+  "target": "$target",
+  "extra-cc-flags": ["-mcpu=apple-a7"],
+  "extra-cpp-flags": ["-mcpu=apple-a7"],
+  "extra-swiftc-flags": ["-target-cpu", "apple-a7"]
+}
+JSON
+    spm_target=(--destination "$work/destination-$target.json") ;;
 esac
 packages=$root/Darwin/SwiftUI
 mkdir -p "$work" "$out/SwiftUI.framework"
