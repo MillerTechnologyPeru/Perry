@@ -50,6 +50,10 @@ open class NSColor: NSObject {
         super.init()
         guard let coder else { return }
         let decoded = Coder(coder: coder)
+        guard decoded.isKeyed else {
+            decodeTypedStream(decoded)
+            return
+        }
         func numbers(_ key: String) -> [CGFloat] {
             guard let bytes = decoded.bytes(key) else { return [] }
             return String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self).split(separator: " ").compactMap { Double($0) }.map { CGFloat($0) }
@@ -77,6 +81,36 @@ open class NSColor: NSObject {
             } else if let fallback = numbers("NSRGB").first {
                 (red, green, blue) = (fallback, fallback, fallback)
             }
+        }
+    }
+
+    /// NSColor as NSArchiver writes it: its color space as a char (1 and 2
+    /// RGB, 3 and 4 gray, 5 CMYK, 6 a catalog color), then its components
+    /// as floats ("ffff", "ff", "fffff"), or the catalog's name, the
+    /// color's and its value as objects.
+    private func decodeTypedStream(_ decoded: Coder) {
+        func float() -> CGFloat { CGFloat(decoded.value("f", Float(0))) }
+        switch decoded.value("c", Int8(0)) {
+        case 1, 2:
+            (red, green, blue, alpha) = (float(), float(), float(), float())
+        case 3, 4:
+            let white = float()
+            (red, green, blue, alpha) = (white, white, white, float())
+        case 5:
+            let (c, m, y, k) = (float(), float(), float(), float())
+            (red, green, blue, alpha) = ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k), float())
+        case 6:
+            catalogName = decoded.nextObject()?.stringValue
+            colorName = decoded.nextObject()?.stringValue
+            let fallback = decoded.nextObject()?.as(NSColor.self)
+            if let name = colorName, let system = NSColor.system(name) {
+                (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
+                markResolved()
+            } else if let fallback {
+                (red, green, blue, alpha) = (fallback.red, fallback.green, fallback.blue, fallback.alpha)
+            }
+        default:
+            break
         }
     }
 
