@@ -582,6 +582,12 @@ let package = Package(
             name: "PerryDesktopDock",
             dependencies: [.product(name: "DBus", package: "DBus")]
         ),
+        // A Mac app's notifications on the desktop, through its notification
+        // server, org.freedesktop.Notifications.
+        .target(
+            name: "PerryDesktopNotifications",
+            dependencies: [.product(name: "DBus", package: "DBus")]
+        ),
         // AppKit: variadic entry points.
         .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
@@ -641,6 +647,10 @@ let package = Package(
         .testTarget(
             name: "PerryDesktopDockTests",
             dependencies: ["PerryDesktopDock", .product(name: "DBus", package: "DBus")]
+        ),
+        .testTarget(
+            name: "PerryDesktopNotificationsTests",
+            dependencies: ["PerryDesktopNotifications", .product(name: "DBus", package: "DBus")]
         ),
     ]
 )
