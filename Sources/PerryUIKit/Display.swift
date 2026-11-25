@@ -104,7 +104,12 @@ enum Display {
         return true
     }
 
-    /// Opens the window, once, when a window first shows.
+    /// Opens the window, once, when a window first shows. Its first frame
+    /// comes from the display timer, on a later turn of the run loop, as
+    /// iOS lays a window out after -makeKeyAndVisible returns: a pass run
+    /// inside it would lay out the app's views before the app has finished
+    /// setting up (Unity's view layout makes its keyboard delegate there,
+    /// and +[KeyboardDelegate Initialize], next in its setup, then asserts).
     static func startIfWanted() {
         guard !started, wanted else { return }
         started = true
@@ -124,7 +129,7 @@ enum Display {
         }
         if !software, let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
-            tick()
+            startTimer()
             return
         }
         guard let library = dlopen("libX11.so.6", RTLD_NOW) else {
@@ -177,7 +182,7 @@ enum Display {
         (Display.display, Display.window, Display.gc, Display.image, Display.context) = (display, window, gcOf(display, screen), image, context)
         x = X(pending: pending, nextEvent: nextEvent, putImage: putImage, flush: flush)
         _ = flush(display)
-        tick()
+        startTimer()
     }
 
     static func markDirty() { dirty = true }
