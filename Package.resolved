@@ -16,7 +16,7 @@
       "location" : "https://github.com/PureSwift/Cacao.git",
       "state" : {
         "branch" : "develop",
-        "revision" : "08771f053fb6d7c13b5ae26641896a9ad7b9bf2a"
+        "revision" : "33679bb74ad34c6d3b8d088a7688345888e194cb"
       }
     },
     {
@@ -97,7 +97,7 @@
       "location" : "https://github.com/PureSwift/SDL.git",
       "state" : {
         "branch" : "master",
-        "revision" : "8b77f4f74969dc2ebb622b93c282ffe308ace832"
+        "revision" : "9609062945011b3a0f1c04305322a493eb523e02"
       }
     },
     {
