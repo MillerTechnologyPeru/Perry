@@ -125,9 +125,16 @@ enum TextEncodings {
 private enum CoreFoundation {
     static let library = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
+    /// Each function, found once: programs convert text a piece at a time,
+    /// many thousands of times, and a lookup by name is slow.
+    private static let lock = Lock()
+    nonisolated(unsafe) private static var found: [String: UnsafeMutableRawPointer] = [:]
+
     static func function<T>(_ name: String, as type: T.Type) -> T? {
+        if let symbol = lock.withLock({ found[name] }) { return unsafeBitCast(symbol, to: type) }
         guard let lookup = providerSymbolLookup,
               let symbol = library.withCString({ library in name.withCString { lookup(library, $0) } }) else { return nil }
+        lock.withLock { found[name] = symbol }
         return unsafeBitCast(symbol, to: type)
     }
 
