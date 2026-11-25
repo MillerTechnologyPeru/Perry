@@ -69,8 +69,8 @@ enum Arrays {
     }
 
     /// PERRY_FOUNDATION_RANGE=continue: reading an element past an array's
-    /// end gives nil, with a warning, where it raises on Darwin and ends
-    /// the process here. For getting past a failure to see what follows.
+    /// end gives nil, with a warning, where it raises NSRangeException.
+    /// For getting past an exception nothing catches to see what follows.
     nonisolated(unsafe) static let readsPastEnd = getenv("PERRY_FOUNDATION_RANGE").map { String(cString: $0) == "continue" } ?? false
 
     /// Whether the element can be read; false only under that switch.
@@ -84,10 +84,12 @@ enum Arrays {
         return true
     }
 
+    /// Raises NSRangeException for an index past the end, with Darwin's
+    /// reason.
     static func checkIndex(_ index: UInt, _ count: Int, _ method: String) {
-        if Int(index) >= count {
-            foundationFatal("-[NSArray \(method)]: index \(index) beyond bounds [0 .. \(count - 1)]")
-        }
+        guard index >= UInt(count) else { return }
+        let bounds = count == 0 ? "for empty NSArray" : "[0 .. \(count - 1)]"
+        Exceptions.raise(name: "NSRangeException", reason: "*** -[NSArray \(method)]: index \(index) beyond bounds \(bounds)")
     }
 
     static func objects(_ buffer: UnsafePointer<id?>?, count: UInt, method: String) -> [id] {
