@@ -27,6 +27,11 @@ int perry_tls_set_version(perry_tls *tls, int maximum, int value);
 int perry_tls_version_limit(perry_tls *tls, int maximum);
 int perry_tls_set_break_on_server_auth(perry_tls *tls, int value);
 int perry_tls_break_on_server_auth(perry_tls *tls);
+/// How the server's chain is checked: PERRY_TLS_VERIFY (on unless turned
+/// off), PERRY_TLS_ALLOW_EXPIRED and PERRY_TLS_ALLOW_ANY_ROOT.
+enum { PERRY_TLS_VERIFY = 0, PERRY_TLS_ALLOW_EXPIRED = 1, PERRY_TLS_ALLOW_ANY_ROOT = 2 };
+int perry_tls_set_verify_option(perry_tls *tls, int option, int value);
+int perry_tls_verify_option(perry_tls *tls, int option);
 /// ALPN's wire format: each protocol after its length byte.
 int perry_tls_set_alpn(perry_tls *tls, const unsigned char *wire, unsigned length);
 size_t perry_tls_alpn(perry_tls *tls, const unsigned char **protocol);
