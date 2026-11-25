@@ -44,7 +44,13 @@ extension MKGradientPolylineRenderer {
         __locations.map { CGFloat($0.doubleValue) }
     }
 
+    #if os(macOS)
     public func setColors(_ colors: [NSColor], locations: [CGFloat]) {
         __setColors(colors, atLocations: locations.map { NSNumber(value: Double($0)) })
     }
+    #else
+    public func setColors(_ colors: [UIColor], locations: [CGFloat]) {
+        __setColors(colors, atLocations: locations.map { NSNumber(value: Double($0)) })
+    }
+    #endif
 }

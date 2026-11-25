@@ -1,5 +1,8 @@
 import Foundation
 
+// The audio hardware's API is macOS's alone.
+#if os(macOS)
+
 // CATapDescription's initializers and properties with process object IDs
 // and the stream index as Swift numbers.
 
@@ -42,3 +45,5 @@ extension CATapDescription {
         set(streamObject) { __stream = streamObject.map { NSNumber(value: $0) } }
     }
 }
+
+#endif

@@ -1,26 +1,33 @@
 #!/bin/bash
-# Builds all of Perry's Swift overlays and Swift frameworks on a Mac with
-# Xcode 27, one script after another in the order they need, into a Swift
-# runtime directory (PERRY_SWIFT_RUNTIME). For arm64 that is the directory
-# Scripts/swift-runtime.sh assembles, on a Mac with an iOS Simulator
-# runtime before iOS 27; nothing here needs it, so the overlays can be
-# built into an empty directory and the runtime laid under them later,
-# as long as Perry's libraries are the ones kept where both have a file.
+# Builds all of Perry's Swift overlays and Swift frameworks with Xcode 27's
+# SDKs, one script after another in the order they need, into a Swift
+# runtime directory (PERRY_SWIFT_RUNTIME): on a Mac, or in perry-dev under
+# Scripts/docker-darwin.sh. The standard library (Scripts/build-swift-runtime.sh)
+# is installed there apart; nothing here needs it, so the overlays can be
+# built into an empty directory and the standard library added before or
+# after.
 #
-# arm64 is iOS's set: UIKit's additions and CoreText's overlay, WebKit,
-# the Swift frameworks with DeveloperToolsSupport first, Accessibility,
-# Combine, MarketplaceKit, Foundation, SwiftUI (optimized) and the SwiftUI
-# cross-import overlays, which build against SwiftUI's modules.
+# Both architectures get the overlays written from the SDKs' interfaces
+# (Darwin/<Module>/README.md), System from swift-system's sources
+# (Scripts/build-system.sh), and Darwin's split names
+# (libswift_DarwinFoundation1.dylib and the rest) as links to
+# libswiftDarwin.dylib, which defines all their symbols.
 #
-# x86_64 is Mac apps': the overlays written from the macOS SDK's
-# interfaces (Darwin/<Module>/README.md), AppKit's, CreateML's and
-# XCTest's among them, TabularData, CryptoKit, Combine and Foundation for
-# macOS (x86_64-apple-macos15.0), and UIKit's additions,
+# arm64 is iOS's set: those overlays for arm64-apple-ios18.0, without the
+# modules the iPhoneOS SDK lacks or has no Swift library of (AppKit,
+# CreateML, XCTest, IOKit, OpenCL, SafariServices) and with iOS's own
+# (AssetsLibrary, CallKit, CarPlay, DataDetection, HomeKit, MediaPlayer,
+# OSLog), UIKit's, WebKit, the Swift frameworks with
+# DeveloperToolsSupport first, Accessibility, Combine, MarketplaceKit,
+# Foundation, SwiftUI (optimized) and the SwiftUI cross-import overlays,
+# which build against SwiftUI's modules.
+#
+# x86_64 is Mac apps': the overlays for macOS (x86_64-apple-macos15.0),
+# AppKit's, CreateML's and XCTest's among them, TabularData, CryptoKit,
+# Combine and Foundation for macOS, and UIKit's,
 # DeveloperToolsSupport, Accessibility and SwiftUI for Mac Catalyst
 # (x86_64-apple-ios18.0-macabi), whose libraries sit beside them, as on a
-# Mac. The macOS overlays are not iOS's: several use macOS-only API, and
-# Darwin's calls variadic C functions as x86_64 passes their arguments;
-# for iOS the runtime keeps the simulator's and Xcode's.
+# Mac.
 #
 # A step that fails stops the build, naming the step and the command to run
 # it again; each step's time is printed as it ends and all of them at the
@@ -36,7 +43,7 @@
 #   PERRY_OVERLAY_ARCH: the architecture, when not given (default arm64)
 set -eu
 cd "$(dirname "$0")/.."
-[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
+. Scripts/darwin-toolchain.sh
 
 arch=${2:-${PERRY_OVERLAY_ARCH:-arm64}}
 case $arch in
@@ -48,9 +55,9 @@ mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
 # The overlays are written against the Xcode 27 SDKs' interfaces.
-sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
+sdk_version=$(darwin_sdk_version iphoneos)
 [ "${sdk_version%%.*}" -ge 27 ] || {
-    echo "Perry's overlays need Xcode 27's SDKs; $(xcode-select -p) has iOS $sdk_version (select another with xcode-select or DEVELOPER_DIR)" >&2
+    echo "Perry's overlays need Xcode 27's SDKs; $(darwin_sdk iphoneos) is iOS $sdk_version (select another Xcode with xcode-select or DEVELOPER_DIR)" >&2
     exit 1
 }
 unset PERRY_OVERLAY_PLATFORM PERRY_OVERLAY_TARGET TARGET CONFIGURATION
@@ -79,22 +86,42 @@ step() {
 macos() { step "$1 (macOS)" env PERRY_OVERLAY_PLATFORM=macosx PERRY_OVERLAY_TARGET=x86_64-apple-macos15.0 "${@:2}"; }
 catalyst() { step "$1 (Mac Catalyst)" env PERRY_OVERLAY_PLATFORM=macosx PERRY_OVERLAY_TARGET=x86_64-apple-ios18.0-macabi "${@:2}"; }
 
-# The overlays Scripts/build-overlay.sh builds for macOS, written from its
-# SDK's interfaces; the last three are macOS's own (Darwin/<Module>/platform).
-mac_overlays=(AVFoundation Accelerate CloudKit Compression Contacts CoreAudio CoreData CoreFoundation CoreGraphics
-              CoreImage CoreLocation CoreMedia CoreText CryptoTokenKit Darwin Dispatch GLKit GameplayKit IOKit Intents
-              MapKit Metal MetalKit ModelIO NaturalLanguage Network ObjectiveC OpenCL Photos QuartzCore SafariServices
-              SceneKit SpriteKit UniformTypeIdentifiers Vision XPC os simd AppKit CreateML XCTest)
+# The overlays Scripts/build-overlay.sh builds for both, written from the
+# SDKs' interfaces, and those for macOS alone: AppKit, CreateML and XCTest
+# are macOS's own (Darwin/<Module>/platform), and the iPhoneOS SDK has no
+# Swift library of IOKit, OpenCL or SafariServices.
+overlays=(AVFoundation Accelerate CloudKit Compression Contacts CoreAudio CoreData CoreFoundation CoreGraphics
+          CoreImage CoreLocation CoreMedia CoreText CryptoTokenKit Darwin Dispatch GLKit GameplayKit Intents
+          MapKit Metal MetalKit ModelIO NaturalLanguage Network ObjectiveC Photos QuartzCore
+          SceneKit SpriteKit UniformTypeIdentifiers Vision XPC os simd)
+mac_overlays=(AppKit CreateML XCTest IOKit OpenCL SafariServices)
+# Those for iOS alone, whose libraries the iOS Simulator's runtime has and
+# macOS's doesn't.
+ios_overlays=(AssetsLibrary CallKit CarPlay DataDetection HomeKit MediaPlayer OSLog)
+# The names newer SDKs split Darwin's library into, all of whose symbols
+# Perry's Darwin defines.
+darwin_parts=(_DarwinFoundation1 _DarwinFoundation2 _DarwinFoundation3 _errno _math _signal _stdio _time sys_time unistd)
 # Scripts/build-framework.sh's, after DeveloperToolsSupport, which SwiftUI
 # builds against.
 frameworks=(ActivityKit AppIntents CryptoKit DeclaredAgeRange GroupActivities MusicKit StoreKit TabularData TipKit
             WeatherKit WidgetKit)
 
+# Leads Darwin's split names to libswiftDarwin.dylib.
+link_darwin_parts() {
+    local part
+    for part in "${darwin_parts[@]}"; do
+        ln -sf libswiftDarwin.dylib "$out/libswift$part.dylib"
+    done
+}
+
 total=$(date +%s)
 if [ "$arch" = arm64 ]; then
-    for module in UIKitAdditions CoreText; do
+    for module in "${overlays[@]}" "${ios_overlays[@]}"; do
         step "$module" Scripts/build-overlay.sh "$module" "$out"
     done
+    link_darwin_parts
+    step System Scripts/build-system.sh "$out"
+    step UIKit Scripts/build-overlay.sh UIKit "$out"
     step WebKit Scripts/build-webkit.sh "$out"
     for module in DeveloperToolsSupport "${frameworks[@]}"; do
         step "$module" Scripts/build-framework.sh "$module" "$out"
@@ -108,15 +135,17 @@ if [ "$arch" = arm64 ]; then
     step _StoreKit_SwiftUI Scripts/build-storekit-swiftui.sh "$out"
     step _AuthenticationServices_SwiftUI Scripts/build-authenticationservices-swiftui.sh "$out"
 else
-    for module in "${mac_overlays[@]}"; do
+    for module in "${overlays[@]}" "${mac_overlays[@]}"; do
         macos "$module" Scripts/build-overlay.sh "$module" "$out"
     done
+    link_darwin_parts
+    macos System Scripts/build-system.sh "$out"
     for module in TabularData CryptoKit; do
         macos "$module" Scripts/build-framework.sh "$module" "$out"
     done
     macos Combine Scripts/build-combine.sh "$out"
     macos Foundation Scripts/build-foundation.sh "$out"
-    catalyst UIKitAdditions Scripts/build-overlay.sh UIKitAdditions "$out"
+    catalyst UIKit Scripts/build-overlay.sh UIKit "$out"
     catalyst DeveloperToolsSupport Scripts/build-framework.sh DeveloperToolsSupport "$out"
     catalyst Accessibility Scripts/build-accessibility.sh "$out"
     catalyst SwiftUI env CONFIGURATION=release Scripts/build-swiftui.sh "$out"

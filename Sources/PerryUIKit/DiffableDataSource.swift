@@ -7,7 +7,7 @@ import PerryObjCInterop
 // order, each with its items, identified by objects compared with
 // -isEqual:. Applying one to a data source reloads the collection view:
 // differences are not animated. Swift's generic data source and snapshot
-// are UIKit's Swift module's (Darwin/UIKitAdditions), not these.
+// are UIKit's Swift module's (Darwin/UIKit), not these.
 
 final class SnapshotState: ObjectState {
     var sections: [NSObject] = []

@@ -146,13 +146,7 @@ enum DarwinFixtures {
     }()
 
     /// Fixtures the script doesn't build for this architecture, and why.
-    static let leftOut: [String: String] = {
-        #if arch(x86_64)
-        ["Tempo": "Swift, and Perry has no x86_64 Swift runtime"]
-        #else
-        [:]
-        #endif
-    }()
+    static let leftOut: [String: String] = [:]
 
     /// Fixtures built for this architecture whose output is known to differ
     /// from their reference here, and why: matchesDarwin leaves them out.
@@ -210,10 +204,16 @@ enum DarwinFixtures {
     /// Fixtures written in Swift, which run on Apple's Swift runtime.
     static let swift = ["Tempo"]
 
-    /// Apple's Swift runtime as Scripts/swift-runtime.sh assembles it, with
-    /// Perry's Swift frameworks; nil when it isn't there.
+    /// The Swift runtime directory of this machine's architecture: the
+    /// standard library Scripts/build-swift-runtime.sh builds, with Perry's
+    /// overlays and Swift frameworks; nil when it isn't there.
     static var swiftRuntime: URL? {
-        let directory = TestEnvironment.packageRoot.appending(path: ".build/perry-swift-runtime")
+        #if arch(x86_64)
+        let name = ".build/perry-swift-runtime-x86_64"
+        #else
+        let name = ".build/perry-swift-runtime"
+        #endif
+        let directory = TestEnvironment.packageRoot.appending(path: name)
         return FileManager.default.fileExists(atPath: directory.appending(path: "libswiftCore.dylib").path) ? directory : nil
     }
 

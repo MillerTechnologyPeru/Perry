@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Perry's Combine on a Mac with Xcode: Darwin/Combine, OpenCombine
+# Builds Perry's Combine with Xcode's SDKs: Darwin/Combine, OpenCombine
 # made to stand in for Apple's Combine.framework. It is compiled for iOS
 # arm64 as the module Combine with library evolution, so apps built
 # against Apple's bind to it by the same Swift symbols, and installed as
@@ -10,7 +10,7 @@
 #   default output: .build/perry-swift-runtime
 set -eu
 cd "$(dirname "$0")/.."
-[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
+. Scripts/darwin-toolchain.sh
 
 out=${1:-.build/perry-swift-runtime}
 work=.build/perry-combine
@@ -18,14 +18,14 @@ work=.build/perry-combine
 # target, as for Scripts/build-overlay.sh: macosx and x86_64-apple-macos15.0
 # for a Mac app on x86_64.
 platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
-sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+sdk=$(darwin_sdk "$platform")
 target=${PERRY_OVERLAY_TARGET:-arm64-apple-ios15.0}
 mkdir -p "$work" "$out/Combine.framework"
 
-xcrun --sdk "$platform" clang++ -target "$target" -isysroot "$sdk" -std=c++17 -O2 -Wno-\#warnings \
+darwin_clangxx "$platform" -target "$target" -isysroot "$sdk" -std=c++17 -O2 -Wno-\#warnings \
     -I Darwin/Combine/Helpers/include -c Darwin/Combine/Helpers/COpenCombineHelpers.cpp -o "$work/helpers.o"
 
-xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" -module-name Combine -parse-as-library \
+darwin_swiftc "$platform" -target "$target" -sdk "$sdk" -module-name Combine -parse-as-library \
     -enable-library-evolution -O -emit-library \
     -emit-module -emit-module-path "$work/Combine.swiftmodule" \
     -I Darwin/Combine/Helpers/include \

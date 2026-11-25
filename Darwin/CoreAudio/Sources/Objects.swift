@@ -1,5 +1,8 @@
 import Foundation
 
+// The audio hardware's API is macOS's alone.
+#if os(macOS)
+
 // The audio hardware's objects as classes, each property a selector of
 // AudioHardware.h read or written with AudioObjectGetPropertyData and
 // AudioObjectSetPropertyData.
@@ -1029,3 +1032,5 @@ open class AudioHardwareTap: AudioHardwareObject, @unchecked Sendable {
 extension AudioHardwareDirection: Equatable {}
 extension AudioHardwareDirection: Hashable {}
 extension AudioHardwareDirection: RawRepresentable {}
+
+#endif

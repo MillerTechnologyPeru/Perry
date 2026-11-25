@@ -87,6 +87,57 @@ jobs:
           path: perry-fixtures-x86_64.tar.gz
           retention-days: 7
 
+  # Swift's runtime and standard library from swift.org's sources
+  # (Scripts/build-swift-runtime.sh), for iOS arm64 and for macOS and Mac
+  # Catalyst x86_64, with the Xcode the overlays are built with. The first
+  # build takes about an hour; the cache keeps the libraries, keyed by the
+  # script, the patch, the release it builds (in the script) and the Xcode.
+  swift-stdlib:
+    name: Swift standard library ${{ matrix.target }}
+    runs-on: xcode-27
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [iphoneos-arm64, macosx-x86_64]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Restore the libraries
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .build/swift-source/install/${{ matrix.target }}
+          key: perry-swift-stdlib-${{ matrix.target }}-${{ hashFiles('Scripts/build-swift-runtime.sh', 'Scripts/swift-runtime.patch', 'Scripts/darwin-toolchain.sh') }}-${{ env.DEVELOPER_DIR }}
+
+      - name: Build the libraries
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+          Scripts/build-swift-runtime.sh ${{ matrix.target }}
+
+      - name: Check their provenance
+        run: Scripts/check-runtime-provenance.sh .build/swift-source/install/${{ matrix.target }}
+
+      # Plain Armv8.0: no dot product, LSE atomics or the other extensions
+      # a CPU Perry runs on may lack.
+      - name: Check their instructions
+        if: matrix.target == 'iphoneos-arm64'
+        run: Scripts/check-armv8.sh .build/swift-source/install/${{ matrix.target }}
+
+      - name: Pack the libraries
+        run: tar -czf perry-swift-stdlib-${{ matrix.target }}.tar.gz -C .build/swift-source/install/${{ matrix.target }} .
+
+      - name: Upload the libraries
+        uses: actions/upload-artifact@v7
+        with:
+          name: perry-swift-stdlib-${{ matrix.target }}
+          path: perry-swift-stdlib-${{ matrix.target }}.tar.gz
+          retention-days: 7
+
   # Darwin's Swift runtime for Perry: the iOS Simulator runtime's libraries
   # and Xcode's Swift 5.0 overlays. Scripts/swift-runtime.sh needs a
   # simulator runtime from before iOS 27, which keeps its libraries as
@@ -120,7 +171,7 @@ jobs:
   # x86_64 for Mac and Mac Catalyst apps (Scripts/build-swift-overlays.sh).
   swift-overlays:
     name: Swift overlays ${{ matrix.arch }}
-    needs: swift-runtime
+    needs: [swift-runtime, swift-stdlib]
     runs-on: xcode-27
     timeout-minutes: 90
     strategy:
@@ -129,8 +180,10 @@ jobs:
         include:
           - arch: arm64
             runtime: perry-swift-runtime
+            stdlib: iphoneos-arm64
           - arch: x86_64
             runtime: perry-swift-runtime-x86_64
+            stdlib: macosx-x86_64
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
@@ -163,8 +216,31 @@ jobs:
           tar -xzf perry-swift-runtime-base.tar.gz -C .build
           rm perry-swift-runtime-base.tar.gz
 
+      - name: Download the standard library
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-swift-stdlib-${{ matrix.stdlib }}
+
+      # Over the base's libraries of the same names.
+      - name: Unpack the standard library
+        run: |
+          mkdir -p .build/${{ matrix.runtime }}
+          tar -xzf perry-swift-stdlib-${{ matrix.stdlib }}.tar.gz -C .build/${{ matrix.runtime }}
+          rm perry-swift-stdlib-${{ matrix.stdlib }}.tar.gz
+
       - name: Build the overlays
         run: Scripts/build-swift-overlays.sh .build/${{ matrix.runtime }} ${{ matrix.arch }}
+
+      # The libraries not built from source here (the simulator's and
+      # Xcode's), in the job's summary. A report until none is left.
+      - name: Check the runtime's provenance
+        run: Scripts/check-runtime-provenance.sh --report .build/${{ matrix.runtime }}
+
+      # Everything built here, Armv8.0 only (the simulator's libraries are
+      # left out: the provenance report lists them).
+      - name: Check the runtime's instructions
+        if: matrix.arch == 'arm64'
+        run: Scripts/check-armv8.sh .build/${{ matrix.runtime }}
 
       - name: Pack the overlays
         run: tar -czf ${{ matrix.runtime }}.tar.gz -C .build ${{ matrix.runtime }}
@@ -178,8 +254,8 @@ jobs:
 
   # Perry for Linux, with the 32-bit targets each host runs: i386 on
   # x86_64, armv7 on arm64 (under qemu-arm where the CPU has no AArch32).
-  # The tests run the Darwin fixtures of the host's architecture, and the
-  # arm64 job the Swift fixtures on the runtime above. The Swift jobs are
+  # The tests run the Darwin fixtures of the host's architecture, the Swift
+  # ones on the runtime above of the same architecture. The Swift jobs are
   # waited for but not required: without the runtime the Swift fixtures
   # are left out.
   linux:
@@ -195,9 +271,11 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
             fixtures: perry-fixtures
+            runtime: perry-swift-runtime
           - arch: x86_64
             runner: ubuntu-24.04
             fixtures: perry-fixtures-x86_64
+            runtime: perry-swift-runtime-x86_64
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -226,16 +304,16 @@ jobs:
           rm ${{ matrix.fixtures }}.tar.gz
 
       - name: Download the Swift runtime
-        if: matrix.arch == 'arm64' && needs.swift-overlays.result == 'success'
+        if: needs.swift-overlays.result == 'success'
         uses: actions/download-artifact@v8
         with:
-          name: perry-swift-runtime
+          name: ${{ matrix.runtime }}
 
       - name: Unpack the Swift runtime
-        if: matrix.arch == 'arm64' && needs.swift-overlays.result == 'success'
+        if: needs.swift-overlays.result == 'success'
         run: |
-          tar -xzf perry-swift-runtime.tar.gz -C .build
-          rm perry-swift-runtime.tar.gz
+          tar -xzf ${{ matrix.runtime }}.tar.gz -C .build
+          rm ${{ matrix.runtime }}.tar.gz
 
       # cctools-port's ld64, which links the i386 and armv7 fixtures.
       - name: Restore cctools

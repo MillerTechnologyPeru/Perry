@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Perry's Accessibility on a Mac with Xcode: Darwin/Accessibility,
+# Builds Perry's Accessibility with Xcode's SDKs: Darwin/Accessibility,
 # the Swift part of Apple's Accessibility.framework that attributed text
 # needs (its attribute scope, which SwiftUI's holds), as
 # Accessibility.framework/Accessibility in the directory given (see

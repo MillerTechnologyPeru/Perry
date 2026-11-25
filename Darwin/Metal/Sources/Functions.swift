@@ -1,5 +1,7 @@
 import Foundation
 
+// Device notifications are macOS's alone.
+#if os(macOS)
 @available(swift 4)
 @available(macOS 10.13, *)
 public func MTLCopyAllDevicesWithObserver(handler: @escaping (MTLDevice, MTLDeviceNotificationName) -> Void)
@@ -10,6 +12,7 @@ public func MTLCopyAllDevicesWithObserver(handler: @escaping (MTLDevice, MTLDevi
     // which MTLRemoveDeviceObserver ignores.
     return (devices, observer as? NSObject ?? NSObject())
 }
+#endif
 
 @available(macOS 13.0, macCatalyst 16.0, iOS 16.0, tvOS 16.0, *)
 public func MTLIOCreateCompressionContext(_ path: String, _ type: MTLIOCompressionMethod, _ chunkSize: Int) -> MTLIOCompressionContext? {

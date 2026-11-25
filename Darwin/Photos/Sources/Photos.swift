@@ -10,6 +10,8 @@ import Foundation
 
 // MARK: - Project change requests
 
+// Projects are macOS's alone.
+#if os(macOS)
 @available(macOS 10.13, *)
 extension PHProjectChangeRequest {
     /// Removes the assets of a collection from the project.
@@ -24,6 +26,7 @@ extension PHProjectChangeRequest {
         __removeAssets(assets)
     }
 }
+#endif
 
 // MARK: - Change details
 

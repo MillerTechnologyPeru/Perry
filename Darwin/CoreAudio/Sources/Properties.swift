@@ -1,5 +1,8 @@
 import Foundation
 
+// The audio hardware's API is macOS's alone.
+#if os(macOS)
+
 // Property addresses, the audio hardware's errors and the reading and
 // writing of objects' properties that the AudioHardware classes share.
 
@@ -208,3 +211,5 @@ func input(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddres
 func output(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
     PropertyAddress(selector, scope: kAudioObjectPropertyScopeOutput)
 }
+
+#endif

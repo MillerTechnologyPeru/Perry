@@ -34,9 +34,10 @@
 # which Mac Catalyst doesn't have, the iOS Simulator program, in an iOS
 # bundle. On an arm64 Mac the macOS apps run under Rosetta, and the
 # simulator's reference comes from the same sources built for the simulator
-# of the Mac's own architecture, the only one its runtime may have. The
-# Swift fixtures are left out: Scripts/swift-runtime.sh assembles an arm64
-# runtime only. The default, arm64, builds the iOS apps described above.
+# of the Mac's own architecture, the only one its runtime may have. A Swift
+# fixture is its macOS program, which Perry runs on the x86_64 runtime
+# directory (.build/perry-swift-runtime-x86_64). The default, arm64, builds
+# the iOS apps described above.
 #
 # A reference run that fails or hangs fails the build, after the other
 # fixtures are built, with what it printed to stderr. PERRY_FIXTURES_UNRECORDED
@@ -85,11 +86,19 @@ for src in Tests/Fixtures/Darwin/*/; do
     app="$out/$name.app"
     rm -rf "$app"
     # A Swift fixture, main.swift, built with swiftc for its MinimumOSVersion,
-    # and for macOS for its reference. Perry runs it on Apple's Swift
-    # runtime, .build/perry-swift-runtime (Scripts/swift-runtime.sh).
+    # and for macOS for its reference. Perry runs it on the Swift runtime
+    # directory of its architecture (Scripts/build-swift-runtime.sh and
+    # Scripts/build-swift-overlays.sh). On x86_64 the macOS program is the
+    # fixture as well.
     if [ -f "$src/main.swift" ]; then
-        if [ "$arch" != arm64 ]; then
-            echo "$name left out: Perry has no $arch Swift runtime"
+        if [ "$arch" = x86_64 ]; then
+            macos="$app/Contents"
+            mkdir -p "$macos/MacOS"
+            xcrun --sdk macosx swiftc -target x86_64-apple-macos14 -sdk "$macsdk" \
+                -swift-version 5 -O -o "$macos/MacOS/$name" "$src"/*.swift
+            cp "$src/Info.plist" "$macos/Info.plist"
+            record "$name" 60 "$macos/MacOS/$name"
+            echo "$app"
             continue
         fi
         mkdir -p "$app"

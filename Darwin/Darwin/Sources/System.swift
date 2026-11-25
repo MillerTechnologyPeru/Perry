@@ -6,22 +6,22 @@ import _DarwinFoundation3.unistd
 // environment, and the macros the import of the headers can't give Swift:
 // file modes, signal handlers and failure values.
 //
-// A variadic C function is reached here through a prototype of its own
-// that takes the extra argument as a fixed one, which the x86_64 calling
-// convention passes the same way.
+// A variadic C function is reached here through a C function of the
+// library's own (Variadic.c), which passes the extra argument as a variadic
+// one: on arm64 that is on the stack, where a fixed one is in a register.
 
 // MARK: Files
 
-@_silgen_name("open")
+@_silgen_name("_perry_open")
 private func c_open(_ path: UnsafePointer<CChar>, _ oflag: Int32, _ mode: UInt32) -> Int32
 
-@_silgen_name("openat")
+@_silgen_name("_perry_openat")
 private func c_openat(_ fd: Int32, _ path: UnsafePointer<CChar>, _ oflag: Int32, _ mode: UInt32) -> Int32
 
-@_silgen_name("fcntl")
+@_silgen_name("_perry_fcntl")
 private func c_fcntl(_ fd: Int32, _ cmd: Int32, _ value: Int) -> Int32
 
-@_silgen_name("ioctl")
+@_silgen_name("_perry_ioctl")
 private func c_ioctl(_ fd: Int32, _ request: UInt, _ value: Int) -> Int32
 
 public func open(_ path: UnsafePointer<CChar>, _ oflag: Int32) -> Int32 {
@@ -68,7 +68,7 @@ public func ioctl(_ fd: CInt, _ request: UInt) -> CInt {
 
 public typealias Semaphore = UnsafeMutablePointer<sem_t>
 
-@_silgen_name("sem_open")
+@_silgen_name("_perry_sem_open")
 private func c_sem_open(_ name: UnsafePointer<CChar>, _ oflag: Int32, _ mode: UInt32, _ value: UInt32) -> Semaphore?
 
 /// SEM_FAILED, the address -1.

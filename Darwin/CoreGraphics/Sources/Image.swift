@@ -13,6 +13,8 @@ public func CGImageCreateWithMaskingColors(_ image: CGImage?, _ components: Unsa
     image?.__copy(maskingColorComponents: components)
 }
 
+// Events and the mouse are macOS's alone.
+#if os(macOS)
 @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0, *)
 extension CGEvent {
     public var data: CFData? {
@@ -31,6 +33,7 @@ public func CGGetLastMouseDelta() -> (x: Int32, y: Int32) {
 public func CGGetLastMouseDelta(_ deltaX: UnsafeMutablePointer<Int32>?, _ deltaY: UnsafeMutablePointer<Int32>?) {
     __CGGetLastMouseDelta(deltaX, deltaY)
 }
+#endif
 
 // The pixel layout enumerations: every case, and a description of each.
 
