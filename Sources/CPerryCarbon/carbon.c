@@ -329,6 +329,7 @@ void carbon_Microseconds(UnsignedWide *microseconds) {
 }
 #endif  // PERRY_CARBON_SWIFT
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // Durations: positive milliseconds, negative microseconds. AbsoluteTime
 // counts nanoseconds here, as mach_absolute_time does.
 static int64_t duration_nanoseconds(int32_t duration) {
@@ -356,6 +357,7 @@ int32_t carbon_IncrementAtomic(int32_t *value) { return __atomic_fetch_add(value
 
 int32_t carbon_DecrementAtomic(int32_t *value) CARBON_SYMBOL(DecrementAtomic);
 int32_t carbon_DecrementAtomic(int32_t *value) { return __atomic_fetch_sub(value, 1, __ATOMIC_SEQ_CST); }
+#endif  // PERRY_CARBON_SWIFT
 
 #ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Extended numbers
@@ -411,6 +413,7 @@ double carbon_x80tod(const extended80 *value) {
 }
 #endif  // PERRY_CARBON_SWIFT
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Multiprocessing Services
 
 void *carbon_MPAllocateAligned(size_t size, uint8_t alignment, uint32_t options) CARBON_SYMBOL(MPAllocateAligned);
@@ -435,6 +438,7 @@ OSStatus carbon_MPDelayUntil(const uint64_t *deadline) {
     while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, NULL) != 0) {}
     return noErr;
 }
+#endif  // PERRY_CARBON_SWIFT
 
 #ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Strings
