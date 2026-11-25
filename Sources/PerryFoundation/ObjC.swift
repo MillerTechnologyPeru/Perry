@@ -48,6 +48,10 @@ enum ObjC {
     nonisolated(unsafe) static var instanceVariable: (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?)?
     nonisolated(unsafe) static var ivarOffset: (@convention(c) (UnsafeMutableRawPointer?) -> Int)?
     nonisolated(unsafe) static var ivarType: (@convention(c) (UnsafeMutableRawPointer?) -> SEL?)?
+    /// protocol_copyMethodDescriptionList: (protocol, required, instance,
+    /// count) to a malloc'd array of { SEL, types } pairs.
+    nonisolated(unsafe) static var protocolMethods:
+        (@convention(c) (id?, Bool, Bool, UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer?)?
     /// How a message ends that forwarding found nothing for.
     nonisolated(unsafe) static var notForwarded: (@convention(c) (id?, SEL?) -> Void)?
     /// Darwin's dladdr, which knows the Mach-O images: the path of the
@@ -96,6 +100,8 @@ enum ObjC {
         instanceVariable = bind("_class_getInstanceVariable", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
         ivarOffset = bind("_ivar_getOffset", (@convention(c) (UnsafeMutableRawPointer?) -> Int).self)
         ivarType = bind("_ivar_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)
+        protocolMethods = bind("_protocol_copyMethodDescriptionList",
+                               (@convention(c) (id?, Bool, Bool, UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer?).self)
         if let vtable = lookup("_objc_ehtype_vtable") {
             perry_foundation_set_exception_type_vtable(vtable + 2 * MemoryLayout<UnsafeRawPointer>.size)
         }
