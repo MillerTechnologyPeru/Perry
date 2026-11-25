@@ -58,9 +58,14 @@ extension WorkGroup {
     }
 
     public convenience init?(port: mach_port_t, name: String? = nil) {
+        #if os(macOS)
         let cName = name.map { strdup($0)! }
         defer { free(cName) }
         self.init(__name: cName, port: port)
+        #else
+        // Only macOS's C library makes a workgroup of a port.
+        return nil
+        #endif
     }
 
     public func copy(name: String? = nil) -> WorkGroup? {
