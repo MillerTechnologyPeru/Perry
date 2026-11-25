@@ -21,6 +21,9 @@
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 enum {
     GL_NONE = 0, GL_FRONT_LEFT = 0x0400, GL_BACK_RIGHT = 0x0403, GL_FRONT = 0x0404, GL_BACK = 0x0405, GL_LEFT = 0x0406,
@@ -60,6 +63,8 @@ static struct {
     void (*GetFloatv)(unsigned, float *);
     void (*GetBooleanv)(unsigned, unsigned char *);
     void (*ColorMask)(unsigned char, unsigned char, unsigned char, unsigned char);
+    void (*ReadPixels)(int, int, int, int, unsigned, unsigned, void *);
+    void (*PixelStorei)(unsigned, int);
 } gl;
 
 static bool load(void) {
@@ -71,7 +76,8 @@ static bool load(void) {
                LOAD(BindRenderbuffer) && LOAD(TexImage2D) && LOAD(TexParameteri) && LOAD(RenderbufferStorage) &&
                LOAD(FramebufferTexture2D) && LOAD(FramebufferRenderbuffer) && LOAD(CheckFramebufferStatus) &&
                LOAD(BlitFramebuffer) && LOAD(IsEnabled) && LOAD(Enable) && LOAD(Disable) && LOAD(Clear) &&
-               LOAD(ClearColor) && LOAD(GetFloatv) && LOAD(GetBooleanv) && LOAD(ColorMask);
+               LOAD(ClearColor) && LOAD(GetFloatv) && LOAD(GetBooleanv) && LOAD(ColorMask) && LOAD(ReadPixels) &&
+               LOAD(PixelStorei);
 #undef LOAD
     loaded = all ? 1 : -1;
     return all;
@@ -343,7 +349,63 @@ static struct { bool pending; int read; unsigned char scissor; } swap;
 /// or zeros), the framebuffer is that size, drawn into from here on if it
 /// wasn't yet, and goes to the window scaled: as large as fits, centered,
 /// with black around it.
+// MARK: - Snapshots
+
+/// With PERRY_OPENGL_SNAPSHOT set to a path, what a window is about to show
+/// is written there every couple of seconds as a binary PPM, read back from
+/// its back buffer before the swap: to see a full-screen program's frames
+/// where the desktop allows no screenshots.
+static void snapshot(void) {
+    static const char *path;
+    static int checked;
+    static double last;
+    if (!checked) {
+        checked = 1;
+        path = getenv("PERRY_OPENGL_SNAPSHOT");
+    }
+    if (!path || !load()) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double seconds = now.tv_sec + now.tv_nsec / 1e9;
+    if (last && seconds - last < 2) return;
+    last = seconds;
+    int width = 0, height = 0, read_framebuffer = 0, read_buffer = GL_BACK, pack = 4;
+    int saved_draw = 0;
+    gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &saved_draw);
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_framebuffer);
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    window_size(&width, &height);
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned)saved_draw);
+    if (width <= 0 || height <= 0) return;
+    unsigned char *pixels = malloc((size_t)width * height * 3);
+    if (!pixels) return;
+    gl.GetIntegerv(GL_READ_BUFFER, &read_buffer);
+    gl.GetIntegerv(0x0D05 /* GL_PACK_ALIGNMENT */, &pack);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl.ReadBuffer(GL_BACK);
+    gl.PixelStorei(0x0D05, 1);
+    gl.ReadPixels(0, 0, width, height, 0x1907 /* GL_RGB */, GL_UNSIGNED_BYTE, pixels);
+    gl.PixelStorei(0x0D05, pack);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned)read_framebuffer);
+    gl.ReadBuffer((unsigned)read_buffer);
+    FILE *file = fopen(path, "wb");
+    if (file) {
+        fprintf(file, "P6\n%d %d\n255\n", width, height);
+        // OpenGL's rows go up; a PPM's go down.
+        for (int row = height - 1; row >= 0; row--) fwrite(pixels + (size_t)row * width * 3, 1, (size_t)width * 3, file);
+        fclose(file);
+    }
+    free(pixels);
+}
+
+static void before_swap(int width, int height);
+
 void perry_aux_before_swap(int width, int height) {
+    before_swap(width, height);
+    snapshot();
+}
+
+static void before_swap(int width, int height) {
     swap.pending = false;
     presented.width = width > 0 && height > 0 ? width : 0;
     presented.height = width > 0 && height > 0 ? height : 0;
