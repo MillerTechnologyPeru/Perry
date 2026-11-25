@@ -58,6 +58,10 @@ export PERRY_CONTAINER=$here/conf
 export PERRY_DISCS="Halo Universal=$DISC"
 export PERRY_UNIMPLEMENTED=continue PERRY_OBJC_UNRECOGNIZED=continue
 export SDL_APP_ID=com.macsoft.halo
+# Halo sets its VSync choice only when its Video Setup is applied, so a game
+# started with VSync on runs unsynced until then. Mesa's default is synced
+# instead; Halo's own choice still overrides it once applied.
+export vblank_mode=${vblank_mode:-2}
 # Full screen: Halo switches the display to a mode of its own, 800×600 until
 # its Video settings say otherwise. This screen has none, and Perry scales
 # the game's picture to it. HALO_SCREEN=<width>x<height> runs it in gamescope
