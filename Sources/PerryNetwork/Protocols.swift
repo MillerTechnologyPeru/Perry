@@ -515,12 +515,23 @@ public func nw_ip_metadata_get_service_class(_ metadata: UnsafeMutableRawPointer
 @c(_nw_ip_metadata_get_receive_time)
 public func nw_ip_metadata_get_receive_time(_ metadata: UnsafeMutableRawPointer?) -> UInt64 { Metadata.state(metadata, .ip)?.receiveTime ?? 0 }
 
+/// FIONREAD and TIOCOUTQ. glibc's headers give them as numbers on most
+/// machines, which Swift imports, but on PowerPC as _IOR expressions, which
+/// it can't: there they are _IOR('f', 127, int) and _IOR('t', 115, int).
+#if arch(powerpc) || arch(powerpc64) || arch(powerpc64le)
+private let ioctlBytesToRead: UInt = 0x4004_667f
+private let ioctlBytesToSend: UInt = 0x4004_7473
+#else
+private let ioctlBytesToRead = UInt(FIONREAD)
+private let ioctlBytesToSend = UInt(TIOCOUTQ)
+#endif
+
 /// The bytes waiting to be read on the connection's socket.
 @c(_nw_tcp_get_available_receive_buffer)
 public func nw_tcp_get_available_receive_buffer(_ metadata: UnsafeMutableRawPointer?) -> UInt32 {
     guard let socket = Metadata.state(metadata, .tcp)?.socket, socket >= 0 else { return 0 }
     var count: Int32 = 0
-    let status = withUnsafeMutablePointer(to: &count) { ioctl(socket, UInt(FIONREAD), $0) }
+    let status = withUnsafeMutablePointer(to: &count) { ioctl(socket, ioctlBytesToRead, $0) }
     return status == 0 ? UInt32(max(0, count)) : 0
 }
 
@@ -531,7 +542,7 @@ public func nw_tcp_get_available_send_buffer(_ metadata: UnsafeMutableRawPointer
     var queued: Int32 = 0
     var size: Int32 = 0
     var length = socklen_t(MemoryLayout<Int32>.size)
-    let status = withUnsafeMutablePointer(to: &queued) { ioctl(socket, UInt(TIOCOUTQ), $0) }
+    let status = withUnsafeMutablePointer(to: &queued) { ioctl(socket, ioctlBytesToSend, $0) }
     guard status == 0, getsockopt(socket, SOL_SOCKET, SO_SNDBUF, &size, &length) == 0 else { return 0 }
     return UInt32(max(0, size - queued))
 }
