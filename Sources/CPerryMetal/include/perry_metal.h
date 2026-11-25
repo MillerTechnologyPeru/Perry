@@ -428,9 +428,11 @@ typedef struct perry_m2v {
     // Version 11: textures over dma-bufs, which the compositor shows without
     // reading them back. NULL in a library of version 10 or before.
     /// A 2D BGRA8 or RGBA8 texture of private storage, one level and sample,
-    /// whose memory is a dma-buf: `dma_buf` gets its seven values (an fd,
-    /// which the caller closes, width, height, row stride, offset, DRM fourcc
-    /// and DRM format modifier). NULL where the device can't export one.
+    /// or since the fork's 942fba1 an RGB10A2 or BGR10A2 one, whose memory is
+    /// a dma-buf: `dma_buf` gets its seven values (an fd, which the caller
+    /// closes, width, height, row stride, offset, DRM fourcc and DRM format
+    /// modifier). NULL where the device can't export one or the format has
+    /// no dma-buf format; such drawables are read back.
     perry_m2v_handle (* _Nullable device_new_dma_buf_texture)(perry_m2v_handle, const perry_m2v_texture_descriptor *,
                                                               int64_t *_Nonnull dma_buf, perry_m2v_error);
 } perry_m2v;
