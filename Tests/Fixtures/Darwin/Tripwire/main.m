@@ -15,6 +15,9 @@
 // thread, where a lock the exception left locked would keep them waiting.
 // A cache's delegate and a key's -isEqual: raise too, but Darwin's cache
 // can't be used after either.
+// And an element's -hash or -isEqual: while a set, a dictionary, a
+// counted set or an ordered set adds, finds or removes it, followed by
+// more use of the same collection.
 
 #import <Foundation/Foundation.h>
 #include <dispatch/dispatch.h>
@@ -49,7 +52,7 @@ static void say(NSString *line) {
 
 // Raises when the level it observes goes past 1.
 // Raises from -isEqual:, when compared with another of its class.
-@interface Prickly : NSObject
+@interface Prickly : NSObject <NSCopying>
 @end
 
 @implementation Prickly
@@ -59,7 +62,20 @@ static void say(NSString *line) {
     return self == other;
 }
 - (NSUInteger)hash { return 7; }
+- (id)copyWithZone:(NSZone *)zone { return self; }
 - (NSString *)description { return @"prickly"; }
+@end
+
+// Raises from -hash.
+@interface Hasty : NSObject <NSCopying>
+@end
+
+@implementation Hasty
+- (NSUInteger)hash {
+    [NSException raise:@"Hasty" format:@"hashed"];
+    return 0;
+}
+- (id)copyWithZone:(NSZone *)zone { return self; }
 @end
 
 // A notification whose -name raises while `bellRaises` is set.
@@ -386,6 +402,81 @@ static void locks(void) {
     [center removeObserver:observer];
 }
 
+// The descriptions of a collection's members, sorted.
+static NSString *sorted(id<NSFastEnumeration> collection) {
+    NSMutableArray *names = [NSMutableArray array];
+    for (id member in collection) [names addObject:[member description]];
+    return [[names sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@" "];
+}
+
+// Runs a call that should raise, saying what it raised.
+static void attempt(NSString *label, void (^call)(void)) {
+    @try {
+        call();
+        say([NSString stringWithFormat:@"%@: not raised", label]);
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"%@: %@: %@", label, exception.name, exception.reason]);
+    }
+}
+
+static void keyed(void) {
+    Prickly *prickly = [Prickly new];
+
+    NSMutableSet *set = [NSMutableSet setWithArray:[@"a b" componentsSeparatedByString:@" "]];
+    [set addObject:prickly];
+    attempt(@"set add, -hash", ^{ [set addObject:[Hasty new]]; });
+    attempt(@"set add, -isEqual:", ^{ [set addObject:[Prickly new]]; });
+    attempt(@"set member, -hash", ^{ [set containsObject:[Hasty new]]; });
+    attempt(@"set remove, -hash", ^{ [set removeObject:[Hasty new]]; });
+    attempt(@"set remove, -isEqual:", ^{ [set removeObject:[Prickly new]]; });
+    [set addObject:@"c"];
+    [set removeObject:@"a"];
+    say([NSString stringWithFormat:@"set after: %@, count %lu, prickly %d", sorted(set),
+         (unsigned long)set.count, [set containsObject:prickly]]);
+    [set removeObject:prickly];
+    [set addObject:@"d"];
+    say([NSString stringWithFormat:@"set after removing prickly: %@", sorted(set)]);
+
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    dictionary[@"one"] = @1;
+    dictionary[prickly] = @"p";
+    attempt(@"dictionary set, -hash", ^{ dictionary[[Hasty new]] = @2; });
+    attempt(@"dictionary set, -isEqual:", ^{ dictionary[[Prickly new]] = @"q"; });
+    attempt(@"dictionary get, -hash", ^{ [dictionary objectForKey:[Hasty new]]; });
+    attempt(@"dictionary remove, -hash", ^{ [dictionary removeObjectForKey:[Hasty new]]; });
+    attempt(@"dictionary remove, -isEqual:", ^{ [dictionary removeObjectForKey:[Prickly new]]; });
+    dictionary[@"two"] = @2;
+    dictionary[@"one"] = @11;
+    [dictionary removeObjectForKey:@"two"];
+    dictionary[@"three"] = @3;
+    say([NSString stringWithFormat:@"dictionary after: %@, one %@, three %@, prickly %@, count %lu", sorted(dictionary),
+         dictionary[@"one"], dictionary[@"three"], dictionary[prickly], (unsigned long)dictionary.count]);
+
+    NSCountedSet *counted = [[NSCountedSet alloc] initWithArray:[@"a a b" componentsSeparatedByString:@" "]];
+    [counted addObject:prickly];
+    attempt(@"counted add, -hash", ^{ [counted addObject:[Hasty new]]; });
+    attempt(@"counted add, -isEqual:", ^{ [counted addObject:[Prickly new]]; });
+    attempt(@"counted remove, -isEqual:", ^{ [counted removeObject:[Prickly new]]; });
+    [counted addObject:@"a"];
+    [counted addObject:prickly];
+    [counted removeObject:@"b"];
+    say([NSString stringWithFormat:@"counted after: %@, a %lu, b %lu, prickly %lu", sorted(counted),
+         (unsigned long)[counted countForObject:@"a"], (unsigned long)[counted countForObject:@"b"],
+         (unsigned long)[counted countForObject:prickly]]);
+
+    NSMutableOrderedSet *ordered = [NSMutableOrderedSet orderedSetWithArray:[@"a b" componentsSeparatedByString:@" "]];
+    [ordered addObject:prickly];
+    attempt(@"ordered add, -isEqual:", ^{ [ordered addObject:[Prickly new]]; });
+    attempt(@"ordered insert, -hash", ^{ [ordered insertObject:[Hasty new] atIndex:0]; });
+    attempt(@"ordered remove, -isEqual:", ^{ [ordered removeObject:[Prickly new]]; });
+    [ordered insertObject:@"c" atIndex:1];
+    [ordered removeObject:@"a"];
+    [ordered exchangeObjectAtIndex:0 withObjectAtIndex:2];
+    say([NSString stringWithFormat:@"ordered after: %@, prickly at %lu, b at %lu",
+         [[ordered.array valueForKey:@"description"] componentsJoinedByString:@" "],
+         (unsigned long)[ordered indexOfObject:prickly], (unsigned long)[ordered indexOfObject:@"b"]]);
+}
+
 int main(void) {
     @autoreleasepool {
         raised();
@@ -397,6 +488,7 @@ int main(void) {
         runtime();
         callbacks();
         locks();
+        keyed();
         say(@"done");
     }
     return 0;
