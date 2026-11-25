@@ -6,7 +6,7 @@
 // types are the same (UChar is 16 bits, UErrorCode an int), so each
 // function here calls ICU's, found the first time it's needed. What Mac
 // programs use: regular expressions (Xcode's build output parsing), error
-// names and combining classes.
+// names, combining classes and characters' names.
 
 #define _GNU_SOURCE
 #include "PerryICUCore.h"
@@ -149,4 +149,20 @@ uint8_t darwin_u_getCombiningClass(int32_t c) DARWIN_SYMBOL(u_getCombiningClass)
 uint8_t darwin_u_getCombiningClass(int32_t c) {
     RESOLVE(uint8_t (*)(int32_t), u_getCombiningClass);
     return real ? real(c) : 0;
+}
+
+// A code point's Unicode name, as BBEdit's character inspector shows it.
+int32_t darwin_u_charName(int32_t c, int choice, char *buffer, int32_t length, UErrorCode *status) DARWIN_SYMBOL(u_charName);
+int32_t darwin_u_charName(int32_t c, int choice, char *buffer, int32_t length, UErrorCode *status) {
+    RESOLVE(int32_t (*)(int32_t, int, char *, int32_t, UErrorCode *), u_charName);
+    if (real) return real(c, choice, buffer, length, status);
+    if (status) *status = unsupported;
+    if (buffer && length > 0) buffer[0] = 0;
+    return 0;
+}
+
+UBool darwin_u_iscntrl(int32_t c) DARWIN_SYMBOL(u_iscntrl);
+UBool darwin_u_iscntrl(int32_t c) {
+    RESOLVE(UBool (*)(int32_t), u_iscntrl);
+    return real ? real(c) : (c < 0x20 || (c >= 0x7F && c < 0xA0));
 }
