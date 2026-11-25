@@ -1,4 +1,5 @@
-// perry_jsc_call: see CPerryJavaScriptCore.h.
+// perry_jsc_call: see CPerryJavaScriptCore.h. Described to the unwinder, so an
+// exception the function it calls raises unwinds through it.
 
 #if defined(__x86_64__) && defined(__ELF__)
 
@@ -8,8 +9,12 @@
     .type perry_jsc_call, @function
     .p2align 4
 perry_jsc_call:
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     pushq %rcx                      // where d0 goes
     subq $8, %rsp
     movq %rdi, %r11
@@ -36,7 +41,10 @@ perry_jsc_call:
     popq %rcx
     movsd %xmm0, (%rcx)
     popq %rbp
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
     ret
+    .cfi_endproc
     .size perry_jsc_call, . - perry_jsc_call
 
     .section .note.GNU-stack, "", @progbits
@@ -48,8 +56,13 @@ perry_jsc_call:
     .type perry_jsc_call, %function
     .p2align 2
 perry_jsc_call:
+    .cfi_startproc
     stp x29, x30, [sp, #-32]!
+    .cfi_def_cfa_offset 32
+    .cfi_offset x29, -32
+    .cfi_offset x30, -24
     mov x29, sp
+    .cfi_def_cfa x29, 32
     str x3, [sp, #16]
     mov x16, x0
     mov x9, x1
@@ -66,7 +79,11 @@ perry_jsc_call:
     ldr x3, [sp, #16]
     str d0, [x3]
     ldp x29, x30, [sp], #32
+    .cfi_def_cfa sp, 0
+    .cfi_restore x29
+    .cfi_restore x30
     ret
+    .cfi_endproc
     .size perry_jsc_call, . - perry_jsc_call
 
     .section .note.GNU-stack, "", %progbits
