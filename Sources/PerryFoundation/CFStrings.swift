@@ -212,7 +212,13 @@ public func CFStringCreateCopy(_ allocator: UnsafeRawPointer?, _ string: id?) ->
 
 @DarwinC("_CFStringCreateWithSubstring")
 public func CFStringCreateWithSubstring(_ allocator: UnsafeRawPointer?, _ string: id?, _ range: CFRange) -> id? {
-    Strings.make(CFStrings.string(CFStrings.units(string)[CFArrays.range(range)]))
+    // CoreFoundation doesn't check the range in its release builds, and
+    // programs pass ones from searches that found nothing (location -1):
+    // the part of the range inside the string, else an empty string.
+    let units = CFStrings.units(string)
+    let start = min(max(range.location, 0), units.count)
+    let end = min(max(range.location + max(range.length, 0), start), units.count)
+    return Strings.make(CFStrings.string(units[start..<end]))
 }
 
 @c(_CFStringCreateMutable)
