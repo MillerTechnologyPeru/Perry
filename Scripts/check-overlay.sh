@@ -1,8 +1,7 @@
 #!/bin/bash
 # Lists the Swift symbols a reference overlay exports that one of Perry's
 # doesn't, demangled: what programs built against the reference can call
-# that Perry's overlay would leave unresolved. Run on a Mac with Xcode, or in
-# perry-dev (Scripts/docker-darwin.sh).
+# that Perry's overlay would leave unresolved. Run on a Mac with Xcode.
 #
 # Usage: Scripts/check-overlay.sh <Perry's dylib> <reference>...
 #   A reference is a dylib (Xcode's Swift 5.0 overlay) or an SDK's .tbd
