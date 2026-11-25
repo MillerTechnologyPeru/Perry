@@ -93,6 +93,72 @@ extension Tab: TabContent where Value: Hashable, Content: View, Label: View {
     public var body: Tab<Value, Content, Label> { return self }
 }
 
+// MARK: - Titled tabs
+
+/// A tab's role: the search tab, which iOS sets apart at the end of the
+/// bar. Perry draws it as the other tabs.
+@available(OpenSwiftUI_v6_0, *)
+public struct TabRole: Hashable, Sendable {
+    var kind: Int
+
+    /// The tab that searches.
+    public static var search: TabRole { TabRole(kind: 1) }
+}
+
+/// The label of a tab made from a title and a system image.
+@available(OpenSwiftUI_v6_0, *)
+nonisolated public struct DefaultTabLabel: View {
+    var title: Text
+    var systemImage: String
+
+    nonisolated public var body: some View {
+        Label { title } icon: { Image(systemName: systemImage) }
+    }
+}
+
+@available(*, unavailable)
+extension DefaultTabLabel: Sendable {}
+
+@available(OpenSwiftUI_v6_0, *)
+extension Tab where Value: Hashable, Content: View, Label: View {
+    /// A tab with a title and a system image, presented when the tab view's
+    /// selection matches the value.
+    nonisolated public init(_ titleKey: LocalizedStringKey, systemImage: String, value: Value, @ViewBuilder content: () -> Content)
+    where Label == DefaultTabLabel {
+        self.init(value: value, content: content) { DefaultTabLabel(title: Text(titleKey), systemImage: systemImage) }
+    }
+
+    /// A tab with a title, a system image and a role; Perry draws every
+    /// role as a plain tab.
+    nonisolated public init(_ titleKey: LocalizedStringKey, systemImage: String, value: Value, role: TabRole?,
+                            @ViewBuilder content: () -> Content) where Label == DefaultTabLabel {
+        self.init(titleKey, systemImage: systemImage, value: value, content: content)
+    }
+
+    @_disfavoredOverload
+    nonisolated public init<S>(_ title: S, systemImage: String, value: Value, @ViewBuilder content: () -> Content)
+    where Label == DefaultTabLabel, S: StringProtocol {
+        self.init(value: value, content: content) { DefaultTabLabel(title: Text(title), systemImage: systemImage) }
+    }
+
+    @_disfavoredOverload
+    nonisolated public init<S>(_ title: S, systemImage: String, value: Value, role: TabRole?,
+                               @ViewBuilder content: () -> Content) where Label == DefaultTabLabel, S: StringProtocol {
+        self.init(title, systemImage: systemImage, value: value, content: content)
+    }
+}
+
+// MARK: - Badges
+
+@available(OpenSwiftUI_v6_0, *)
+extension TabContent {
+    /// Shows a count on the tab; Perry's tab bar draws no badge.
+    nonisolated public func badge(_ count: Int) -> some TabContent<TabValue> { self }
+
+    /// Shows a label on the tab; Perry's tab bar draws no badge.
+    nonisolated public func badge(_ label: Text?) -> some TabContent<TabValue> { self }
+}
+
 // MARK: - _TupleTabContent
 
 /// Tabs given together: their views, as a tuple.
