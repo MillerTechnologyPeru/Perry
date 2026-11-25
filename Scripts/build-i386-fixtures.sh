@@ -67,7 +67,7 @@ for class in NSView NSColor NSApplication NSWindow; do
     printf 'void c_%s(void) __asm__(".objc_class_name_%s"); void c_%s(void) {}\n' "$class" "$class" "$class"
 done > "$root/.build/perry-fixtures/i386/AppKit/stub.c"
 echo 'void NSRectFill(void) {}' >> "$root/.build/perry-fixtures/i386/AppKit/stub.c"
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURES="$fixtures" -v "$root:/perry" -w /perry --entrypoint sh perry-dev -euc '
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURES="$fixtures" -v "$root:/perry" -w /perry --entrypoint sh "${PERRY_IMAGE:-perry-dev}" -euc '
     ld=/perry/.toolchains/cctools/bin/i386-apple-darwin11-ld out=.build/perry-fixtures/i386
     clang -target i386-apple-macosx$MIN -fno-builtin -w -c $out/libSystem/stub.c -o $out/libSystem/exit-asm.o
     $ld -arch i386 -dylib -install_name /usr/lib/libSystem.B.dylib -macosx_version_min $MIN \
