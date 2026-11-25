@@ -709,39 +709,3 @@ void *carbon_CSCopyMachineName(void) {
     if (dot) *dot = 0;
     return SEND(carbon_string(name), "retain");
 }
-
-// MARK: - Gestalt
-
-#define QUICKTIME "/System/Library/Frameworks/QuickTime.framework/Versions/A/QuickTime"
-
-/// What the libraries Carbon apps check for answer, as they register their
-/// selectors on a Mac: QuickTime's version when QuickTime's provider is
-/// there. The rest are CoreServices' answers (the system's version).
-OSErr carbon_Gestalt(OSType selector, int32_t *response) CARBON_SYMBOL(Gestalt);
-OSErr carbon_Gestalt(OSType selector, int32_t *response) {
-    if (!response) return paramErr;
-    switch (selector) {
-    case 0x7174696d:   // 'qtim': QuickTime 7.6.4
-        if (!carbon_function(QUICKTIME, "_EnterMovies")) return -5551;
-        *response = 0x07648000;
-        return noErr;
-    case 0x71746673:   // 'qtfs': QuickTime's features, with the movie toolbox and image codecs
-        if (!carbon_function(QUICKTIME, "_EnterMovies")) return -5551;
-        *response = 0x3f;
-        return noErr;
-    case 0x72616d20: {  // 'ram ': the physical memory, in bytes (at most 2 GB, which an SInt32 holds)
-        long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGESIZE);
-        int64_t bytes = (int64_t)pages * size;
-        *response = bytes > 0x7fffffff ? 0x7fffffff : (int32_t)bytes;
-        return noErr;
-    }
-    case 0x6c72616d:   // 'lram': the logical memory, the same
-        return carbon_Gestalt(0x72616d20, response);
-    case 0x73797361:   // 'sysa': the architecture, Intel's (gestaltIntel)
-        *response = 10;
-        return noErr;
-    default: break;
-    }
-    OSErr (*services)(OSType, int32_t *) = (OSErr (*)(OSType, int32_t *))carbon_function(CORESERVICES, "_Gestalt");
-    return services ? services(selector, response) : -5551;
-}

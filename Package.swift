@@ -317,7 +317,10 @@ let package = Package(
         .target(name: "CPerryUniformTypeIdentifiers"),
         .target(
             name: "PerryUniformTypeIdentifiers",
-            dependencies: ["CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop"],
+            dependencies: [
+                "CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop",
+                .product(name: "GraphiteBase", package: "Graphite"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // Carbon's provider. CPerryCarbon is its C, which Scripts/build-i386-carbon.sh and
