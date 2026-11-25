@@ -161,7 +161,6 @@ enum DarwinFixtures {
         [
             "Glossary": "NSDecimalNumber's out-of-range integer values are the CPU's, and Perry's are arm64's",
             "Scrivener": "x86_64 has no initWithValidatedFormat:validFormatSpecifiers:locale:error:",
-            "Tripwire": "Objective-C exceptions on x86_64 are never caught",
         ]
         #else
         [:]

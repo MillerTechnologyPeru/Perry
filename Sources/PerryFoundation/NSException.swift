@@ -2,10 +2,10 @@ import CPerryFoundation
 import Glibc
 import PerryObjCInterop
 
-// NSException. Raising one goes to libobjc's objc_exception_throw. Perry
-// cannot unwind Mach-O frames to a @catch, so every exception is uncaught:
-// Foundation reports it as Darwin does, calls the handler the program set
-// with NSSetUncaughtExceptionHandler, and the process ends.
+// NSException. Raising one goes to libobjc's objc_exception_throw, which
+// unwinds to the program's @catch for it. One nothing catches is reported
+// as Darwin reports it: Foundation calls the handler the program set with
+// NSSetUncaughtExceptionHandler, and the process ends.
 
 /// An exception's name, reason and user info.
 final class ExceptionStorage {

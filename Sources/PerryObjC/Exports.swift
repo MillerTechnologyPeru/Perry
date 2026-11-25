@@ -1165,10 +1165,10 @@ public func perry_objc_preprocess_exception(_ exception: UnsafeMutableRawPointer
     exceptionPreprocessor(exception)
 }
 
-#if !arch(arm) && !arch(i386) && !arch(arm64) && !arch(powerpc)
-/// Throws an exception, which on x86_64 nothing catches: every exception
-/// is uncaught. armv7, i386, ppc and arm64 have their own (exceptions_arm.c,
-/// exceptions_i386.c, exceptions_arm64.c).
+#if !arch(arm) && !arch(i386) && !arch(arm64) && !arch(powerpc) && !arch(x86_64)
+/// Throws an exception, which nothing catches: every exception is
+/// uncaught. armv7, i386, ppc, arm64 and x86_64 have their own
+/// (exceptions_arm.c, exceptions_i386.c, exceptions_cxx.c).
 @c(_objc_exception_throw)
 public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
     perry_objc_uncaught_exception(perry_objc_preprocess_exception(exception))
@@ -1185,7 +1185,7 @@ public func objc_terminate() -> Never {
     objcFatal("terminating")
 }
 
-#if !arch(arm) && !arch(arm64)
+#if !arch(arm) && !arch(arm64) && !arch(x86_64)
 /// The personality routine Objective-C code's unwind tables name. Code
 /// that only cleans up (ARC, @autoreleasepool) refers to it without
 /// throwing; where exceptions aren't unwound, reaching it stops.
@@ -1257,11 +1257,11 @@ public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: Unsafe
 
 // MARK: - Catching
 
-#if !arch(arm) && !arch(arm64)
+#if !arch(arm) && !arch(arm64) && !arch(x86_64)
 /// Entering and leaving a @catch. Exceptions are never unwound to one (see
-/// objc_exception_throw), so these are bound but not reached. armv7 and
-/// arm64 unwind to them, and have their own (exceptions_arm.c,
-/// exceptions_arm64.c).
+/// objc_exception_throw), so these are bound but not reached. armv7, arm64
+/// and x86_64 unwind to them, and have their own (exceptions_arm.c,
+/// exceptions_cxx.c).
 @c(_objc_begin_catch)
 public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     objcFatal("an exception reached a @catch, which Perry cannot unwind to")

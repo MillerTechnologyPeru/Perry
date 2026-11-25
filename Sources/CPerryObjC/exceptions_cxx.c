@@ -1,5 +1,5 @@
-// Objective-C exceptions on arm64, where they are C++ exceptions as on
-// Darwin: objc_exception_throw throws the object with a type_info of the
+// Objective-C exceptions on arm64 and x86_64, where they are C++ exceptions
+// as on Darwin: objc_exception_throw throws the object with a type_info of the
 // runtime's own (objc_typeinfo, which a @catch clause names through
 // OBJC_EHTYPE_$_Class), and the C++ runtime's personality routine asks that
 // type_info whether a clause catches it. The frames of Mach-O code are
@@ -10,7 +10,7 @@
 // when the first exception is thrown or caught. Without it an exception
 // ends the process, as every one did before.
 
-#if defined(__aarch64__) && defined(__ELF__)
+#if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
 
 #define _GNU_SOURCE
 #include "CPerryObjC.h"
