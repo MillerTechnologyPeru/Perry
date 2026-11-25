@@ -21,12 +21,13 @@ work=$root/.toolchains/i386-sdk
 mkdir -p "$work/sysroot"
 
 # The C libraries, from Debian's i386 packages, with absolute links made
-# relative so the sysroot can move.
-if [ ! -e "$work/sysroot/usr/include/stdio.h" ]; then
+# relative so the sysroot can move. FreeType is Carbon's, for ATSUI's text:
+# a sysroot made before without it is made again.
+if [ ! -e "$work/sysroot/usr/include/stdio.h" ] || [ ! -e "$work/sysroot/usr/include/freetype2/ft2build.h" ]; then
     docker run --rm --platform linux/386 -e OWNER="$(id -u):$(id -g)" -v "$work/sysroot:/out" debian:trixie sh -euc '
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends libc6-dev libgcc-14-dev libstdc++-14-dev libstdc++6 \
-            linux-libc-dev zlib1g-dev libicu-dev libcurl4-openssl-dev libxml2-dev libsystemd-dev >/dev/null 2>&1
+            linux-libc-dev zlib1g-dev libicu-dev libcurl4-openssl-dev libxml2-dev libsystemd-dev libfreetype-dev >/dev/null 2>&1
         tar -C / -cf - usr/include usr/lib lib 2>/dev/null | tar -C /out -xf -
         find /out -type l | while read -r link; do
             target=$(readlink "$link")
