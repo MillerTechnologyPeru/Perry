@@ -55,9 +55,11 @@ fi
 # Mac Catalyst's frameworks and Swift modules are under the macOS SDK's
 # System/iOSSupport, where its libraries are installed too.
 install=/usr/lib/swift
+c_flags=()
 case $target in *-macabi)
     install=/System/iOSSupport/usr/lib/swift
     support=$sdk/System/iOSSupport
+    c_flags=(-isystem "$support/usr/include" -iframework "$support/System/Library/Frameworks")
     flags+=(-Fsystem "$support/System/Library/Frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift"
             -Xcc -isystem -Xcc "$support/usr/include" -Xcc -iframework -Xcc "$support/System/Library/Frameworks") ;;
 esac
@@ -71,11 +73,20 @@ done
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
+# C in Darwin/<Module>/Sources, for what Swift cannot call itself (a C
+# function's variadic arguments), linked into the same library.
+objects=()
+while IFS= read -r file; do
+    object=$work/$(basename "${file%.c}").o
+    darwin_clang "$platform" -target "$target" -isysroot "$sdk" -O2 -fPIC ${c_flags[@]+"${c_flags[@]}"} -c "$file" -o "$object"
+    objects+=("$object")
+done < <(find "Darwin/$module/Sources" -name '*.c' | sort)
+
 darwin_swiftc "$platform" -target "$target" -sdk "$sdk" \
     -module-name "$swift_module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \
-    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" ${framework[@]+"${framework[@]}"} \
+    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" ${objects[@]+"${objects[@]}"} ${framework[@]+"${framework[@]}"} \
     -Xlinker -install_name -Xlinker "$install/libswift$module.dylib" \
     -o "$out/libswift$module.dylib"
 echo "$out/libswift$module.dylib"
