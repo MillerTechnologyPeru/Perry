@@ -1,7 +1,8 @@
 #!/bin/bash
 # Lists the Swift symbols a reference overlay exports that one of Perry's
 # doesn't, demangled: what programs built against the reference can call
-# that Perry's overlay would leave unresolved. Run on a Mac with Xcode.
+# that Perry's overlay would leave unresolved. Run on a Mac with Xcode, or in
+# perry-dev (Scripts/docker-darwin.sh).
 #
 # Usage: Scripts/check-overlay.sh <Perry's dylib> <reference>...
 #   A reference is a dylib (Xcode's Swift 5.0 overlay) or an SDK's .tbd
@@ -15,6 +16,7 @@
 #     "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/macosx/libswiftDispatch.dylib" \
 #     "$(xcrun --sdk macosx --show-sdk-path)/usr/lib/swift/libswiftDispatch.tbd"
 set -eu
+. "$(dirname "$0")/darwin-toolchain.sh"
 [ $# -ge 2 ] || { echo "usage: $0 <Perry's dylib> <reference>..." >&2; exit 1; }
 perry=$1
 shift
@@ -22,7 +24,7 @@ arch=${PERRY_CHECK_ARCH:-x86_64}
 symbols() {
     case $1 in
     *.tbd) grep -o "'_\$s[^']*'" "$1" | tr -d "'" ;;
-    *) xcrun nm -arch "$arch" -gU "$1" | awk '$3 ~ /^_\$s/ { print $3 }' ;;
+    *) darwin_nm "$arch" -gU "$1" | awk '$3 ~ /^_\$s/ { print $3 }' ;;
     esac
 }
 missing=$(comm -23 <(for reference in "$@"; do symbols "$reference"; done | sort -u) <(symbols "$perry" | sort -u))
@@ -31,9 +33,9 @@ if [ -z "$missing" ]; then
     exit 0
 fi
 if [ "${PERRY_CHECK_MANGLED:-0}" = 1 ]; then
-    echo "$missing" | xcrun swift-demangle
+    echo "$missing" | darwin_demangle
 else
-    echo "$missing" | xcrun swift-demangle --simplified --compact
+    echo "$missing" | darwin_demangle --simplified --compact
 fi
 echo "$(basename "$perry"): $(echo "$missing" | wc -l | tr -d ' ') missing" >&2
 exit 1
