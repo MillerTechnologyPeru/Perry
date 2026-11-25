@@ -28,4 +28,20 @@ reports:
     level: 4
     source: body
     notes: Bundle commands run from submenus, and tabs and syntax colors draw.
+  - pr: 415
+    date: 2026-11-25
+    perry: "01c90075"
+    platform: macos
+    cpu: x86_64
+    app_version: "2.0.23"
+    hardware: HP Notebook
+    os: Debian 13
+    level: 4
+    source: maintainer
+    notes: The x86_64 build runs with no missing functions or selectors logged; its editor, gutter and status bar draw and it takes typing.
 ---
+
+On x86_64 TextMate looks its home folder up with `getpwuid`, and retries
+until it finds it, so it needs a user database entry for the user it runs
+as (a container may not have one). Its bundles are read from
+`~/Library/Application Support/TextMate/Managed`, here a copy of a Mac's.
