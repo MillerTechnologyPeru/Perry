@@ -23,6 +23,128 @@ struct ObjectKey: Hashable {
 // record of accesses after its frame is gone, for the next one to trip on.
 // Code that calls the app (a comparator, a block, -isEqual:) works on a
 // copy, and the result is assigned back once the app has returned.
+
+/// The positions of a collection's members by their -hash, for finding a
+/// member equal to an object as NSSet and NSDictionary do: one with the
+/// same hash, then identical or -isEqual:.
+///
+/// A Swift Set or Dictionary of ObjectKey would call the app's -hash and
+/// -isEqual: from inside its own mutations (an insertion hashes the key, a
+/// removal compares it), with the collection's stored property open for
+/// modifying. This one keeps each member's hash, taken before it is added,
+/// so only `position(of:hash:in:)` calls the app, on a copy of the index
+/// and the members, and the mutations that follow call nothing.
+struct ObjectIndex {
+    /// The positions with one hash: one, nearly always, so there is no
+    /// array to allocate for it.
+    private struct Bucket {
+        var first: Int
+        var others: [Int] = []
+
+        mutating func shift(from start: Int, by offset: Int) {
+            if first >= start { first += offset }
+            for index in others.indices where others[index] >= start {
+                others[index] += offset
+            }
+        }
+
+        /// Takes a position out; false once there is none left.
+        mutating func remove(_ position: Int) -> Bool {
+            if first == position {
+                guard let last = others.popLast() else { return false }
+                first = last
+            } else if let index = others.firstIndex(of: position) {
+                others.remove(at: index)
+            }
+            return true
+        }
+    }
+
+    /// Each member's hash, in the members' order.
+    private(set) var hashes: [UInt] = []
+    private var buckets: [UInt: Bucket] = [:]
+
+    /// The object's -hash, which the app may implement.
+    static func hash(of object: id) -> UInt {
+        ObjC.sendUInt(object, Selectors.hash)
+    }
+
+    /// The position of the member of `members` equal to `object`, whose
+    /// hash is `hash`: identical, or one that says so to -isEqual:. Calls
+    /// the app, so the index and the members must be copies, with no
+    /// access to the properties they came from open.
+    func position(of object: id, hash: UInt, in members: [id]) -> Int? {
+        guard let bucket = buckets[hash] else { return nil }
+        // The app may have changed the collection from its -isEqual:.
+        func equal(_ position: Int) -> Bool {
+            position < members.count && (members[position] == object || ObjC.sendBool(members[position], Selectors.isEqual, object))
+        }
+        if equal(bucket.first) { return bucket.first }
+        return bucket.others.first(where: equal)
+    }
+
+    /// A member with this hash, inserted at `position`; the ones from
+    /// there on move up one.
+    mutating func insert(_ hash: UInt, at position: Int) {
+        if position < hashes.count { shift(from: position, by: 1) }
+        hashes.insert(hash, at: position)
+        add(position, hash)
+    }
+
+    mutating func append(_ hash: UInt) {
+        hashes.append(hash)
+        add(hashes.count - 1, hash)
+    }
+
+    /// The member at `position` taken out; the ones after it move down one.
+    mutating func remove(at position: Int) {
+        take(position, hashes.remove(at: position))
+        if position < hashes.count { shift(from: position + 1, by: -1) }
+    }
+
+    /// A member with another hash at `position`.
+    mutating func replace(at position: Int, with hash: UInt) {
+        take(position, hashes[position])
+        hashes[position] = hash
+        add(position, hash)
+    }
+
+    mutating func swapAt(_ a: Int, _ b: Int) {
+        let (hashA, hashB) = (hashes[a], hashes[b])
+        guard a != b, hashA != hashB else { return }
+        take(a, hashA)
+        take(b, hashB)
+        add(b, hashA)
+        add(a, hashB)
+        hashes.swapAt(a, b)
+    }
+
+    mutating func removeAll() {
+        hashes.removeAll()
+        buckets.removeAll()
+    }
+
+    private mutating func add(_ position: Int, _ hash: UInt) {
+        if buckets[hash] == nil {
+            buckets[hash] = Bucket(first: position)
+        } else {
+            buckets[hash]!.others.append(position)
+        }
+    }
+
+    private mutating func take(_ position: Int, _ hash: UInt) {
+        if buckets[hash]?.remove(position) == false { buckets[hash] = nil }
+    }
+
+    private mutating func shift(from start: Int, by offset: Int) {
+        var index = buckets.values.startIndex
+        while index != buckets.values.endIndex {
+            buckets.values[index].shift(from: start, by: offset)
+            buckets.values.formIndex(after: &index)
+        }
+    }
+}
+
 extension Array {
     /// The elements `matches` keeps, and the ones it takes out, in order.
     /// `matches` runs once for each, with no access to the array open.
