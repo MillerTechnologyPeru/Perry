@@ -754,11 +754,49 @@ open class NSWindow: NSResponder {
     /// mode's size, and zeros once it no longer is).
     private var displayModeSize: (width: Int, height: Int)?
 
+    /// Whether the window is shown in that mode by scaling: the display has
+    /// no such mode, so the SDL window is the screen's size, the program
+    /// goes on drawing at the mode's (OpenGL scales what it drew as the
+    /// buffers swap), and the window's own size and the mouse's place stay
+    /// in the mode's coordinates.
+    private(set) var displayModeScaled = false
+
+    /// The mode's size where the window is scaled to the screen from it,
+    /// for OpenGL.
+    var presentationSize: (width: Int, height: Int)? { displayModeScaled ? displayModeSize : nil }
+
+    /// A place in the SDL window, from its top left, as one in the window
+    /// at the size the program gave it: the same place unless the window
+    /// is scaled to the screen, where the picture is centered and as large
+    /// as fits.
+    func contentPoint(sdlX x: CGFloat, sdlY y: CGFloat) -> CGPoint {
+        guard displayModeScaled, let size = displayModeSize, let sdlWindow else { return CGPoint(x: x, y: y) }
+        let shown = sdlWindow.size
+        let (wide, high) = (CGFloat(shown.width), CGFloat(shown.height))
+        guard wide > 0, high > 0 else { return CGPoint(x: x, y: y) }
+        let scale = min(wide / CGFloat(size.width), high / CGFloat(size.height))
+        let left = (wide - CGFloat(size.width) * scale) / 2, top = (high - CGFloat(size.height) * scale) / 2
+        return CGPoint(x: (x - left) / scale, y: (y - top) / scale)
+    }
+
+    /// The other way: where in the SDL window a place in the window as the
+    /// program sized it is shown.
+    func sdlPoint(contentX x: CGFloat, contentY y: CGFloat) -> CGPoint {
+        guard displayModeScaled, let size = displayModeSize, let sdlWindow else { return CGPoint(x: x, y: y) }
+        let shown = sdlWindow.size
+        let (wide, high) = (CGFloat(shown.width), CGFloat(shown.height))
+        guard wide > 0, high > 0 else { return CGPoint(x: x, y: y) }
+        let scale = min(wide / CGFloat(size.width), high / CGFloat(size.height))
+        let left = (wide - CGFloat(size.width) * scale) / 2, top = (high - CGFloat(size.height) * scale) / 2
+        return CGPoint(x: left + x * scale, y: top + y * scale)
+    }
+
     @ObjCMethod("_perryShowInDisplayModeOfWidth:height:")
     func showInDisplayMode(width: Int, height: Int) {
         guard width > 0, height > 0 else {
             guard displayModeSize != nil else { return }
             displayModeSize = nil
+            displayModeScaled = false
             Dispatch.onMainAndWait {
                 guard let sdlWindow = self.sdlWindow else { return }
                 _ = SDL_SetWindowFullscreen(sdlWindow.unsafePointer, false)
@@ -773,23 +811,22 @@ open class NSWindow: NSResponder {
 
     /// Full screen in SDL's mode of that size, if the display has one: the
     /// screen keeps its own resolution where modes are only emulated, and
-    /// the window is scaled to it. With no such mode the window stays as
-    /// it is, since full screen at the desktop's size would leave the
-    /// program drawing into a corner.
+    /// the window is scaled to it. With no such mode the window is the
+    /// screen's size and the scaling is done here (displayModeScaled).
     private func enterDisplayMode() {
         guard let size = displayModeSize, let sdlWindow else { return }
         let window = sdlWindow.unsafePointer
         var mode = SDL_DisplayMode()
-        guard SDL_GetClosestFullscreenDisplayMode(SDL_GetDisplayForWindow(window), Int32(size.width), Int32(size.height), 0, false, &mode),
-              mode.w == Int32(size.width), mode.h == Int32(size.height) else {
-            appKitWarning("the display has no \(size.width)×\(size.height) mode; window \(windowNumber) stays a window")
-            return
-        }
-        guard SDL_SetWindowFullscreenMode(window, &mode), SDL_SetWindowFullscreen(window, true) else {
+        let exact = SDL_GetClosestFullscreenDisplayMode(SDL_GetDisplayForWindow(window), Int32(size.width), Int32(size.height), 0, false, &mode)
+            && mode.w == Int32(size.width) && mode.h == Int32(size.height)
+        displayModeScaled = !exact
+        guard exact ? SDL_SetWindowFullscreenMode(window, &mode) : SDL_SetWindowFullscreenMode(window, nil),
+              SDL_SetWindowFullscreen(window, true) else {
+            displayModeScaled = false
             appKitWarning("window \(windowNumber) could not be shown full screen at \(size.width)×\(size.height): \(String(cString: SDL_GetError()))")
             return
         }
-        Trace.log("window \(windowNumber) full screen in the display's \(size.width)×\(size.height) mode")
+        Trace.log("window \(windowNumber) full screen at \(size.width)×\(size.height), \(exact ? "in the display's mode" : "scaled to the screen")")
     }
 
     func setFullScreen(_ on: Bool) {
@@ -1021,7 +1058,9 @@ open class NSWindow: NSResponder {
 
     /// The SDL window moved or was resized by the desktop.
     func sdlWindowChanged() {
-        guard let sdlWindow else { return }
+        // Scaled to the screen, the window is still the size and where the
+        // program put it.
+        guard let sdlWindow, !displayModeScaled else { return }
         let size = sdlWindow.size
         let (x, y) = (try? sdlWindow.position) ?? (0, 0)
         let rect = Screens.flip(CGRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(size.width), height: CGFloat(size.height)))
