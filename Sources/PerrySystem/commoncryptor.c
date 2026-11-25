@@ -240,18 +240,26 @@ static size_t output_length(const cryptor *c, size_t length, int final) {
     return total;
 }
 
-/// Twelve arguments, so four are on the stack, where Darwin packs the two
-/// 32-bit ones (numRounds and options) into one 8-byte slot; Linux would
+/// Twelve arguments. On arm64 four are on the stack, where Darwin packs the
+/// two 32-bit ones (numRounds and options) into one 8-byte slot; Linux would
 /// give each its own. They are read as that one slot, so cryptorRef comes
-/// from the slot after it.
+/// from the slot after it. On x86_64 Darwin gives each of the stack ones its
+/// own 8-byte slot, as Linux does.
+#if defined(__aarch64__)
+#define ROUNDS_AND_OPTIONS uint64_t rounds_and_options
+#define UNUSED_ROUNDS_AND_OPTIONS (void)rounds_and_options
+#else
+#define ROUNDS_AND_OPTIONS uint32_t rounds, uint32_t options
+#define UNUSED_ROUNDS_AND_OPTIONS (void)rounds; (void)options
+#endif
 CC_EXPORT int darwin_CCCryptorCreateWithMode(uint32_t operation, uint32_t mode, uint32_t algorithm, uint32_t padding,
                                              const void *iv, const void *key, size_t key_length, const void *tweak,
-                                             size_t tweak_length, uint64_t rounds_and_options, cryptor **out)
+                                             size_t tweak_length, ROUNDS_AND_OPTIONS, cryptor **out)
     __asm__("_CCCryptorCreateWithMode");
 CC_EXPORT int darwin_CCCryptorCreateWithMode(uint32_t operation, uint32_t mode, uint32_t algorithm, uint32_t padding,
                                              const void *iv, const void *key, size_t key_length, const void *tweak,
-                                             size_t tweak_length, uint64_t rounds_and_options, cryptor **out) {
-    (void)tweak; (void)tweak_length; (void)rounds_and_options;
+                                             size_t tweak_length, ROUNDS_AND_OPTIONS, cryptor **out) {
+    (void)tweak; (void)tweak_length; UNUSED_ROUNDS_AND_OPTIONS;
     return create(operation, mode, algorithm, padding == ccPKCS7Padding, iv, key, key_length, out);
 }
 
