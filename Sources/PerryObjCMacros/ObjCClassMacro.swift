@@ -283,7 +283,7 @@ struct ObjCMethodDeclaration {
 /// consume the receiver, so they get a new reference; results of alloc,
 /// new, copy and init methods are owned.
 func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, value: String)],
-                 returning returnType: String?, optionalResult: Bool = false) -> [String] {
+                 returning returnType: String?, optionalResult: Bool = false, cachesSelector: Bool = true) -> [String] {
     let family = SelectorFamily(selector)
     let receiver = toClass ? "self.objCClass.pointer"
         : family == .initializer ? "ObjCRuntime.retain(objcObject)" : "objcObject"
@@ -292,12 +292,16 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
     func cType(_ type: String) -> String { isSelf(type) ? "UnsafeMutableRawPointer?" : "\(type).ObjCType" }
     func cResultType(_ type: String) -> String { isSelf(type) ? "UnsafeMutableRawPointer?" : "\(type).ObjCResultType" }
     let cArguments = ["UnsafeMutableRawPointer?", "UnsafeRawPointer?"] + arguments.map { cType($0.type) }
-    let send = "message(" + ([receiver, "ObjCSelectorCache.selector"]
+    let selectorValue = cachesSelector ? "ObjCSelectorCache.selector" : "ObjCRuntime.selector(\(literal(selector)))"
+    let send = "message(" + ([receiver, selectorValue]
         + arguments.map { "\($0.value).objCArgument()" }).joined(separator: ", ") + ")"
-    var statements = [
+    var statements: [String] = []
+    if cachesSelector {
         // The selector, looked up once for this send: ObjCRuntime.selector
         // takes a lock and hashes the name, which costs more than the send.
-        "enum ObjCSelectorCache { nonisolated(unsafe) static let selector = ObjCRuntime.selector(\(literal(selector))) }",
+        statements.append("enum ObjCSelectorCache { nonisolated(unsafe) static let selector = ObjCRuntime.selector(\(literal(selector))) }")
+    }
+    statements += [
         "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cResultType) ?? "Void")",
         // A structure 32-bit Darwin returns through memory goes through
         // objc_msgSend_stret.
@@ -797,8 +801,10 @@ public struct ObjCProtocolMacro: PeerMacro, ExtensionMacro {
             let arguments = method.parameters.map { parameter in
                 (type: metatype(parameter.type, selfType: nil), value: (parameter.secondName ?? parameter.firstName).text)
             }
+            // No cached selector here: a local type's static in a method of
+            // the class this macro makes is referenced but never defined.
             var body = messageSend(method.selector, toClass: false, arguments: arguments, returning: result,
-                                   optionalResult: requirement.optionalResult != nil)
+                                   optionalResult: requirement.optionalResult != nil, cachesSelector: false)
             if method.isOptional {
                 let fallback = method.returnType == nil ? "return" : "return nil"
                 body.insert("guard responds(to: \(literal(method.selector))) else { \(fallback) }", at: 0)
