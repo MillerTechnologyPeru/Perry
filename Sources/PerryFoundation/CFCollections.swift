@@ -198,8 +198,9 @@ public class NSCFArray: NSArray {
     func cfRemove(_ value: UnsafeMutableRawPointer?) {
         guard let storage = CFCollections.storage(objcObject) else { return }
         let target = UnsafeRawPointer(value)
-        let removed = storage.keys.filter { storage.keyCallbacks.isEqual($0, target) }
-        storage.keys.removeAll { storage.keyCallbacks.isEqual($0, target) }
+        // The app's equal callback runs with no access to the keys open (Array.split).
+        let (kept, removed) = storage.keys.split { storage.keyCallbacks.isEqual($0, target) }
+        storage.keys = kept
         removed.forEach(storage.keyCallbacks.released)
     }
 }

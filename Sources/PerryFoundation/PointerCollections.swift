@@ -96,7 +96,8 @@ final class HashTableState {
     }
 
     func remove(_ object: id) {
-        slots.removeAll { same($0.value, object, options) }
+        // -isEqual: runs with no access to the slots open (Array.split).
+        slots = slots.split { same($0.value, object, options) }.kept
         enumeration.mutated()
     }
 }
