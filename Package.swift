@@ -576,6 +576,12 @@ let package = Package(
             dependencies: [.product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "CacaoWayland", package: "Cacao"),
                            .product(name: "DBus", package: "DBus")]
         ),
+        // A Mac app's icon in the desktop's dock: its badge, progress and
+        // requests for attention, sent as com.canonical.Unity.LauncherEntry.
+        .target(
+            name: "PerryDesktopDock",
+            dependencies: [.product(name: "DBus", package: "DBus")]
+        ),
         // AppKit: variadic entry points.
         .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
@@ -631,6 +637,10 @@ let package = Package(
         .testTarget(
             name: "PerryDesktopMenusTests",
             dependencies: ["PerryDesktopMenus", .product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "DBus", package: "DBus")]
+        ),
+        .testTarget(
+            name: "PerryDesktopDockTests",
+            dependencies: ["PerryDesktopDock", .product(name: "DBus", package: "DBus")]
         ),
     ]
 )
