@@ -110,7 +110,17 @@ static bool load(void) {
     int now = __atomic_load_n(&state, __ATOMIC_ACQUIRE);
     if (now)
         return now == 1;
-    void *library = dlopen("libperry-c++abi.so.1", RTLD_NOW | RTLD_LOCAL);
+    // Its own symbols before the process's: libstdc++, which the Swift
+    // runtime brings in for all to see, has __cxa_init_primary_exception,
+    // __cxa_get_globals and std::get_terminate too, and the C++ runtime's
+    // calls to them would otherwise go to libstdc++'s. __cxa_throw would
+    // then make a libstdc++ exception, which this runtime's personality
+    // routine takes for a foreign one that no @catch clause catches.
+    int own_first = 0;
+#ifdef RTLD_DEEPBIND
+    own_first = RTLD_DEEPBIND;
+#endif
+    void *library = dlopen("libperry-c++abi.so.1", RTLD_NOW | RTLD_LOCAL | own_first);
     if (library) {
         cxx.allocate = dlsym(library, "__cxa_allocate_exception");
         cxx.throw = dlsym(library, "__cxa_throw");
