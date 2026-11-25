@@ -335,6 +335,7 @@ let package = Package(
             dependencies: [
                 "CPerryCarbon", "PerryObjCInterop",
                 .product(name: "GraphiteBase", package: "Graphite"),
+                .product(name: "GraphiteTasks", package: "Graphite"),
             ],
             exclude: ["exports.txt"]
         ),
