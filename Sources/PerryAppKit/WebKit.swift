@@ -1336,6 +1336,11 @@ open class WebView: NSView {
         return view
     }()
 
+    /// Schemes the app says load like local files: kept, as WPE gives pages
+    /// no such distinction.
+    nonisolated(unsafe) static var localSchemes: Set<String> = []
+    @ObjCClassMethod("registerURLSchemeAsLocal:") static func registerURLSchemeAsLocal(_ scheme: String?) { scheme.map { _ = localSchemes.insert($0.lowercased()) } }
+
     @ObjCMethod("initWithFrame:frameName:groupName:")
     public required init(frame: CGRect, frameName: String?, groupName: String?) {
         super.init(frame: frame)

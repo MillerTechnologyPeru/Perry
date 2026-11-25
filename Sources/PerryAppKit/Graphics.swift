@@ -719,6 +719,8 @@ open class NSFont: NSObject {
 @ObjCClass("NSFontManager")
 open class NSFontManager: NSObject {
     nonisolated(unsafe) static var shared: NSFontManager?
+    /// The Font menu the app gave: kept to give back.
+    var fontMenu: NSObject?
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -743,6 +745,8 @@ open class NSFontManager: NSObject {
         guard let font else { return nil }
         return font.with(bold: trait & 2 != 0 ? false : nil, italic: trait & 1 != 0 ? false : nil)
     }
+    @ObjCMethod("fontMenu:") func fontMenu(create: Bool) -> NSObject? { fontMenu }
+    @ObjCMethod("setFontMenu:") func setFontMenu(_ menu: NSObject?) { fontMenu = menu }
     @ObjCMethod("convertFont:toSize:") func convert(_ font: NSFont?, toSize size: CGFloat) -> NSFont? { font?.with(size: size) }
     @ObjCMethod("convertFont:toFamily:") func convert(_ font: NSFont?, toFamily family: String?) -> NSFont? { font }
     @ObjCMethod("convertFont:toFace:")
