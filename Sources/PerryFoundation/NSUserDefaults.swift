@@ -1,5 +1,6 @@
 import CPerryFoundation
 import FoundationEssentials
+import FoundationInternationalization
 import Glibc
 import PerryObjCInterop
 
@@ -76,12 +77,33 @@ final class UserDefaultsStorage {
     }
 
     /// NSGlobalDomain's values that apps read as iOS always has them: the
-    /// languages, most preferred first, and the locale.
+    /// languages, most preferred first, and the locale; and the locale's
+    /// separators, symbols, names and formats under NeXT's keys, which Mac
+    /// OS X still answers and apps of its first years read (iWork's text
+    /// makes its decimal tab of NSDecimalSeparator).
     nonisolated(unsafe) static let global: [String: PropertyValue] = {
         let languages = Locale.preferredLanguages.isEmpty ? ["en"] : Locale.preferredLanguages
+        let locale = Locale.current.identifier.isEmpty ? Locale(identifier: "en_US") : Locale.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        func strings(_ values: [String]) -> PropertyValue { .array(values.map { .string($0) }) }
         return [
-            "AppleLanguages": .array(languages.map { .string($0) }),
-            "AppleLocale": .string(Locale.current.identifier.isEmpty ? "en_US" : Locale.current.identifier),
+            "AppleLanguages": strings(languages),
+            "AppleLocale": .string(locale.identifier),
+            "NSDecimalSeparator": .string(locale.decimalSeparator ?? "."),
+            "NSThousandsSeparator": .string(locale.groupingSeparator ?? ","),
+            "NSCurrencySymbol": .string(locale.currencySymbol ?? "$"),
+            "NSDecimalDigits": strings((0...9).map(String.init)),
+            "NSAMPMDesignation": strings([calendar.amSymbol, calendar.pmSymbol]),
+            "NSMonthNameArray": strings(calendar.monthSymbols),
+            "NSShortMonthNameArray": strings(calendar.shortMonthSymbols),
+            "NSWeekDayNameArray": strings(calendar.weekdaySymbols),
+            "NSShortWeekDayNameArray": strings(calendar.shortWeekdaySymbols),
+            "NSDateFormatString": .string("%A, %B %e, %Y"),
+            "NSShortDateFormatString": .string("%m/%d/%y"),
+            "NSTimeFormatString": .string("%H:%M:%S"),
+            "NSTimeDateFormatString": .string("%A, %B %e, %Y %I:%M:%S %p %Z"),
+            "NSShortTimeDateFormatString": .string("%m/%d/%y %I:%M %p"),
         ]
     }()
 
