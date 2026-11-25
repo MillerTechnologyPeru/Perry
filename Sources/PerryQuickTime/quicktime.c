@@ -260,10 +260,12 @@ static bool movie_open(qt_movie *movie) {
         warn("can't play %s", movie->path);
         return false;
     }
-    movie->sink = gst.bin_get_by_name(movie->pipeline, "frames");
     gst.set_state(movie->pipeline, GST_STATE_PAUSED);
     int state = 0, pending = 0;
     gst.get_state(movie->pipeline, &state, &pending, 5000000000ull);
+    // The frames' sink is playbin's only once it is paused: until then the
+    // video sink is a property, not one of its elements.
+    movie->sink = gst.bin_get_by_name(movie->pipeline, "frames");
     void *sample = movie->sink ? gst.try_pull_preroll(movie->sink, 2000000000ull) : NULL;
     if (sample) {
         void *structure = gst.caps_get_structure(gst.sample_get_caps(sample), 0);
