@@ -145,9 +145,12 @@ open class NSPrintPanel: NSObject {
                     contextInfo: UnsafeMutableRawPointer?) {
         let code = runModal(with: info)
         guard let delegate, let didEndSelector else { return }
-        Dispatch.onMain { [self] in
+        // The objects, not self: Swift 6.4 fails on a [self] capture in an
+        // @ObjCMethod body here.
+        let panel = objcObject, receiver = delegate.objcObject
+        Dispatch.onMain {
             typealias DidEnd = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void
-            unsafeBitCast(ObjCRuntime.msgSend, to: DidEnd.self)(delegate.objcObject, didEndSelector.pointer, objcObject, code, contextInfo)
+            unsafeBitCast(ObjCRuntime.msgSend, to: DidEnd.self)(receiver, didEndSelector.pointer, panel, code, contextInfo)
         }
     }
 
@@ -249,9 +252,10 @@ open class NSSharingServicePicker: NSObject {
     /// dismissed does (-sharingServicePicker:didChooseSharingService: nil).
     @ObjCMethod("showRelativeToRect:ofView:preferredEdge:")
     func show(relativeTo rect: CGRect, of view: NSView?, preferredEdge: UInt) {
-        Dispatch.onMain { [self] in
-            guard Send.responds(delegateObject, "sharingServicePicker:didChooseSharingService:") else { return }
-            Send.void(delegateObject, "sharingServicePicker:didChooseSharingService:", objcObject, nil)
+        let picker = objcObject, delegate = delegateObject
+        Dispatch.onMain {
+            guard Send.responds(delegate, "sharingServicePicker:didChooseSharingService:") else { return }
+            Send.void(delegate, "sharingServicePicker:didChooseSharingService:", picker, nil)
         }
     }
     @ObjCMethod("close") func close() {}
