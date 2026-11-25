@@ -49,6 +49,20 @@ public enum Runtime {
         return realize(cls, registerName: true)
     }
 
+    /// As `info`, without a reference to the result: retain and release ask
+    /// on every call, and a ClassInfo lives as long as the process (its
+    /// class's cache header holds it), so counting it costs two atomic
+    /// operations a call for nothing.
+    @inline(__always)
+    public static func unretainedInfo(_ cls: ClassPointer) -> Unmanaged<ClassInfo>? {
+        guard Int(bitPattern: cls) != 0 else { return nil }
+        if let header = perry_load_acquire(cacheSlot(cls)), header != emptyCache,
+           let info = header.load(fromByteOffset: Layout.headerInfo, as: UnsafeMutableRawPointer?.self) {
+            return Unmanaged<ClassInfo>.fromOpaque(info)
+        }
+        return realize(cls, registerName: true).map { Unmanaged.passUnretained($0) }
+    }
+
     /// Builds the runtime state for a class from its class_ro_t, after its
     /// superclass, then realizes its metaclass.
     static func realize(_ cls: ClassPointer, registerName: Bool) -> ClassInfo? {
