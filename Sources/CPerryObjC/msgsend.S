@@ -18,21 +18,31 @@
 
     .text
 
+// Each function is described to the unwinder, as are the frames the slow
+// paths build: an exception raised in what they call (+initialize, a
+// forwarding target) unwinds through them to the sender's @catch.
 .macro ENTRY name
     .globl \name
     .type \name, %function
     .p2align 4
 \name:
+    .cfi_startproc
 .endm
 
 .macro END name
+    .cfi_endproc
     .size \name, . - \name
 .endm
 
 // Saves x0-x8 and q0-q7 below a frame record. 208 bytes keeps sp 16-aligned.
+// Only at a function's entry, where sp is the caller's.
 .macro SAVE_ARGUMENTS
     stp x29, x30, [sp, #-16]!
+    .cfi_def_cfa_offset 16
+    .cfi_offset x29, -16
+    .cfi_offset x30, -8
     mov x29, sp
+    .cfi_def_cfa x29, 16
     sub sp, sp, #208
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
@@ -57,6 +67,9 @@
     ldp x0, x1, [sp, #0]
     mov sp, x29
     ldp x29, x30, [sp], #16
+    .cfi_def_cfa sp, 0
+    .cfi_restore x29
+    .cfi_restore x30
 .endm
 
 // id objc_msgSend(id self, SEL _cmd, ...)

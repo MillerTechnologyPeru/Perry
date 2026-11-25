@@ -11,21 +11,30 @@
 
     .text
 
+// Each function is described to the unwinder, as are the frames the slow
+// paths build: an exception raised in what they call (+initialize, a
+// forwarding target) unwinds through them to the sender's @catch.
 .macro ENTRY name
     .globl \name
     .type \name, @function
     .p2align 4
 \name:
+    .cfi_startproc
 .endm
 
 .macro END name
+    .cfi_endproc
     .size \name, . - \name
 .endm
 
-// Saves the argument registers: leaves the stack 16-aligned.
+// Saves the argument registers: leaves the stack 16-aligned. Only at a
+// function's entry, where the return address is at the top of the stack.
 .macro SAVE_ARGUMENTS
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     subq $192, %rsp
     movq %rdi, 0(%rsp)
     movq %rsi, 8(%rsp)
@@ -61,6 +70,8 @@
     movq 8(%rsp), %rsi
     movq 0(%rsp), %rdi
     leave
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
 .endm
 
 // Jumps to the IMP in \imp, using \scratch. A send returning through memory

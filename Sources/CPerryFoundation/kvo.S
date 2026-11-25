@@ -1,5 +1,7 @@
 // Key-value observing's setter, and calls to getters returning structures,
-// for arm64 ELF.
+// for x86_64 and arm64 ELF. The functions that build a frame are described
+// to the unwinder: an exception an observer or the setter raises unwinds
+// through them to the sender's @catch.
 //
 // A setter of any argument type, for the classes KVO makes: it keeps every
 // argument register, asks Foundation for the setter it replaces (which
@@ -16,8 +18,12 @@
     .type perry_kvo_setter, @function
     .p2align 4
 perry_kvo_setter:
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     subq $112, %rsp
     movq %rdi, 0(%rsp)
     movq %rsi, 8(%rsp)
@@ -42,7 +48,10 @@ perry_kvo_setter:
     movq 8(%rsp), %rsi
     call perry_foundation_kvo_did@PLT
     leave
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
     ret
+    .cfi_endproc
     .size perry_kvo_setter, . - perry_kvo_setter
 
 // void perry_foundation_call_getter(id self, SEL _cmd, IMP imp, void *indirect,
@@ -54,8 +63,12 @@ perry_kvo_setter:
     .type perry_foundation_call_getter, @function
     .p2align 4
 perry_foundation_call_getter:
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     subq $16, %rsp
     movq %r8, 0(%rsp)
     movq %rdx, %r11
@@ -71,7 +84,10 @@ perry_foundation_call_getter:
     movsd %xmm0, 16(%rcx)
     movsd %xmm1, 24(%rcx)
     leave
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
     ret
+    .cfi_endproc
     .size perry_foundation_call_getter, . - perry_foundation_call_getter
 
 // void perry_foundation_call_setter(id self, SEL _cmd, IMP imp,
@@ -101,8 +117,12 @@ perry_foundation_call_setter:
     .type perry_foundation_call_setter_memory, @function
     .p2align 4
 perry_foundation_call_setter_memory:
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     movq %rdx, %r11
     movq %rdi, %r9
     movq %rsi, %r10
@@ -117,7 +137,10 @@ perry_foundation_call_setter_memory:
     movq %r10, %rsi
     call *%r11
     leave
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
     ret
+    .cfi_endproc
     .size perry_foundation_call_setter_memory, . - perry_foundation_call_setter_memory
 
     .section .note.GNU-stack, "", @progbits
@@ -132,8 +155,13 @@ perry_foundation_call_setter_memory:
     .type perry_kvo_setter, %function
     .p2align 2
 perry_kvo_setter:
+    .cfi_startproc
     stp x29, x30, [sp, #-176]!
+    .cfi_def_cfa_offset 176
+    .cfi_offset x29, -176
+    .cfi_offset x30, -168
     mov x29, sp
+    .cfi_def_cfa x29, 176
     stp x0, x1, [sp, #16]
     stp x2, x3, [sp, #32]
     stp x4, x5, [sp, #48]
@@ -155,7 +183,11 @@ perry_kvo_setter:
     ldp x0, x1, [sp, #16]
     bl perry_foundation_kvo_did
     ldp x29, x30, [sp], #176
+    .cfi_def_cfa sp, 0
+    .cfi_restore x29
+    .cfi_restore x30
     ret
+    .cfi_endproc
     .size perry_kvo_setter, . - perry_kvo_setter
 
 // void perry_foundation_call_getter(id self, SEL _cmd, IMP imp, void *indirect,
@@ -167,8 +199,13 @@ perry_kvo_setter:
     .type perry_foundation_call_getter, %function
     .p2align 2
 perry_foundation_call_getter:
+    .cfi_startproc
     stp x29, x30, [sp, #-32]!
+    .cfi_def_cfa_offset 32
+    .cfi_offset x29, -32
+    .cfi_offset x30, -24
     mov x29, sp
+    .cfi_def_cfa x29, 32
     str x4, [sp, #16]
     mov x8, x3
     blr x2
@@ -177,7 +214,11 @@ perry_foundation_call_getter:
     stp d0, d1, [x9, #16]
     stp d2, d3, [x9, #32]
     ldp x29, x30, [sp], #32
+    .cfi_def_cfa sp, 0
+    .cfi_restore x29
+    .cfi_restore x30
     ret
+    .cfi_endproc
     .size perry_foundation_call_getter, . - perry_foundation_call_getter
 
 // void perry_foundation_call_setter(id self, SEL _cmd, IMP imp,
