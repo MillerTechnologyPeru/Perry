@@ -14,11 +14,12 @@
 #
 # arm64 is iOS's set: those overlays for arm64-apple-ios18.0, without the
 # modules the iPhoneOS SDK lacks or has no Swift library of (AppKit,
-# CreateML, XCTest, IOKit, OpenCL, SafariServices), UIKit's additions,
-# WebKit, the Swift frameworks with DeveloperToolsSupport first,
-# Accessibility, Combine, MarketplaceKit, Foundation, SwiftUI (optimized)
-# and the SwiftUI cross-import overlays, which build against SwiftUI's
-# modules.
+# CreateML, XCTest, IOKit, OpenCL, SafariServices) and with iOS's own
+# (AssetsLibrary, CallKit, CarPlay, DataDetection, HomeKit, MediaPlayer,
+# OSLog), UIKit's additions, WebKit, the Swift frameworks with
+# DeveloperToolsSupport first, Accessibility, Combine, MarketplaceKit,
+# Foundation, SwiftUI (optimized) and the SwiftUI cross-import overlays,
+# which build against SwiftUI's modules.
 #
 # x86_64 is Mac apps': the overlays for macOS (x86_64-apple-macos15.0),
 # AppKit's, CreateML's and XCTest's among them, TabularData, CryptoKit,
@@ -93,6 +94,9 @@ overlays=(AVFoundation Accelerate CloudKit Compression Contacts CoreAudio CoreDa
           MapKit Metal MetalKit ModelIO NaturalLanguage Network ObjectiveC Photos QuartzCore
           SceneKit SpriteKit UniformTypeIdentifiers Vision XPC os simd)
 mac_overlays=(AppKit CreateML XCTest IOKit OpenCL SafariServices)
+# Those for iOS alone, whose libraries the iOS Simulator's runtime has and
+# macOS's doesn't.
+ios_overlays=(AssetsLibrary CallKit CarPlay DataDetection HomeKit MediaPlayer OSLog)
 # The names newer SDKs split Darwin's library into, all of whose symbols
 # Perry's Darwin defines.
 darwin_parts=(_DarwinFoundation1 _DarwinFoundation2 _DarwinFoundation3 _errno _math _signal _stdio _time sys_time unistd)
@@ -111,7 +115,7 @@ link_darwin_parts() {
 
 total=$(date +%s)
 if [ "$arch" = arm64 ]; then
-    for module in "${overlays[@]}"; do
+    for module in "${overlays[@]}" "${ios_overlays[@]}"; do
         step "$module" Scripts/build-overlay.sh "$module" "$out"
     done
     link_darwin_parts
