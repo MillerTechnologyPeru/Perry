@@ -253,21 +253,30 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             """, expands: """
             class Shape: NSObject {
                 func insert(_ object: NSObject?, at index: UInt) {
+                    enum ObjCSelectorCache {
+                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("insertObject:atIndex:")
+                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Optional<NSObject>.ObjCType, UInt.ObjCType) -> Void
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    message(objcObject, ObjCRuntime.selector("insertObject:atIndex:"), object.objCArgument(), index.objCArgument())
+                    message(objcObject, ObjCSelectorCache.selector, object.objCArgument(), index.objCArgument())
                 }
                 func initialize(name: String) -> Self? {
+                    enum ObjCSelectorCache {
+                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("initWithName:")
+                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> UnsafeMutableRawPointer?
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    return message(ObjCRuntime.retain(objcObject), ObjCRuntime.selector("initWithName:"), name.objCArgument()).map {
+                    return message(ObjCRuntime.retain(objcObject), ObjCSelectorCache.selector, name.objCArgument()).map {
                         Self.objCValue(owned: $0)
                     }
                 }
                 static func new() -> Self {
+                    enum ObjCSelectorCache {
+                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("new")
+                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    return Self.objCValue(owned: Self.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCRuntime.selector("new"))))
+                    return Self.objCValue(owned: Self.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCSelectorCache.selector)))
                 }
 
                 override class var objCClassName: String {
@@ -299,9 +308,12 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             """, expands: """
             class NSBundle: NSObject {
                 static func main() -> NSBundle {
+                    enum ObjCSelectorCache {
+                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("mainBundle")
+                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSBundle.ObjCResultType
                     let message = unsafeBitCast(ObjCRuntime.msgSend(returning: NSBundle.self), to: Message.self)
-                    return NSBundle.objCValue(returnValue: NSBundle.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCRuntime.selector("mainBundle"))))
+                    return NSBundle.objCValue(returnValue: NSBundle.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCSelectorCache.selector)))
                 }
                 func path() -> String {
                     ""
@@ -333,28 +345,40 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             extension NSObject {
                 var tag: Int {
                     get {
+                        enum ObjCSelectorCache {
+                            nonisolated(unsafe) static let selector = ObjCRuntime.selector("tag")
+                        }
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Int.ObjCResultType
                         let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Int.self), to: Message.self)
-                        return Int.objCValue(returnValue: Int.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("tag"))))
+                        return Int.objCValue(returnValue: Int.objCArgumentForm(ofResult: message(objcObject, ObjCSelectorCache.selector)))
                     }
                     set {
+                        enum ObjCSelectorCache {
+                            nonisolated(unsafe) static let selector = ObjCRuntime.selector("setTag:")
+                        }
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Int.ObjCType) -> Void
                         let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                        message(objcObject, ObjCRuntime.selector("setTag:"), newValue.objCArgument())
+                        message(objcObject, ObjCSelectorCache.selector, newValue.objCArgument())
                     }
                 }
                 var hidden: Bool {
                     get {
+                        enum ObjCSelectorCache {
+                            nonisolated(unsafe) static let selector = ObjCRuntime.selector("isHidden")
+                        }
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Bool.ObjCResultType
                         let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Bool.self), to: Message.self)
-                        return Bool.objCValue(returnValue: Bool.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("isHidden"))))
+                        return Bool.objCValue(returnValue: Bool.objCArgumentForm(ofResult: message(objcObject, ObjCSelectorCache.selector)))
                     }
                 }
                 static var count: UInt {
                     get {
+                        enum ObjCSelectorCache {
+                            nonisolated(unsafe) static let selector = ObjCRuntime.selector("count")
+                        }
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UInt.ObjCResultType
                         let message = unsafeBitCast(ObjCRuntime.msgSend(returning: UInt.self), to: Message.self)
-                        return UInt.objCValue(returnValue: UInt.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCRuntime.selector("count"))))
+                        return UInt.objCValue(returnValue: UInt.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCSelectorCache.selector)))
                     }
                 }
             }
