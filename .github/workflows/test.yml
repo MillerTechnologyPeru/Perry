@@ -72,9 +72,12 @@ jobs:
           PERRY_FIXTURES_ARCH: x86_64
           PERRY_FIXTURES_UNRECORDED: Cumulus Anvil Forge
 
+      # Almanac as on arm64. This runner's virtual GPU draws nothing for
+      # Anvil, and isn't of the Apple family Foundry asks about, which
+      # Perry's Metal is: the tests leave both out without a reference.
       - name: Pack the fixtures
         run: |
-          rm -f .build/perry-fixtures/darwin-x86_64/Almanac.expected
+          rm -f .build/perry-fixtures/darwin-x86_64/{Almanac,Anvil,Foundry}.expected
           tar -czf perry-fixtures-x86_64.tar.gz -C .build/perry-fixtures darwin-x86_64
 
       - name: Upload the fixtures

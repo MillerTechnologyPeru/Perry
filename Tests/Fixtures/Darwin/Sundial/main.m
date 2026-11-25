@@ -345,7 +345,9 @@ static void threads(void) {
     NSTimer *timer = [NSTimer timerWithTimeInterval:0.01 invocation:timed repeats:NO];
     [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSDefaultRunLoopMode];
     NSDate *limit = [[NSRunLoop currentRunLoop] limitDateForMode:NSDefaultRunLoopMode];
-    print([NSString stringWithFormat:@"limit date is fire date %d", [limit isEqualToDate:timer.fireDate]]);
+    // Within a millisecond: CFRunLoop keeps the date as machine time, whose
+    // scale makes it a few nanoseconds off on some Macs.
+    print([NSString stringWithFormat:@"limit date is fire date %d", fabs([limit timeIntervalSinceDate:timer.fireDate]) < 0.001]);
     [NSTimer scheduledTimerWithTimeInterval:0.02 invocation:timed repeats:NO];
     runLoopBriefly();
     print([NSString stringWithFormat:@"timers: %@", [events componentsJoinedByString:@" "]]);
