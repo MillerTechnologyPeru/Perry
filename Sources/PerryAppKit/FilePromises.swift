@@ -85,8 +85,6 @@ open class NSFilePromiseProvider: NSObject {
             return nil
         }
     }
-
-    private static func string(_ text: String) -> NSObject { NSObject(objCReturnValue: text.objCReturnValue()) }
 }
 
 @ObjCClass("NSDraggingItem")
