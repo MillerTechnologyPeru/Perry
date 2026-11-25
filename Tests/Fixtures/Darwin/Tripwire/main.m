@@ -5,7 +5,11 @@
 // that lets one by, a subclass of the app's caught by its own class and by
 // NSException's, and @catch (id). And ones that unwind through the runtime's
 // and Foundation's own frames: an unrecognized selector, an observer that
-// raises from a KVO setter, and a method -[NSInvocation invoke] calls.
+// raises from a KVO setter, and a method -[NSInvocation invoke] calls. And
+// ones the app's own code raises while Foundation is working on a
+// collection: a sort comparator, -isEqual: during -removeObject:, an
+// enumeration block and a notification observer. Each is followed by more
+// calls on the same objects, which must work as before.
 
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -38,6 +42,20 @@ static void say(NSString *line) {
 @end
 
 // Raises when the level it observes goes past 1.
+// Raises from -isEqual:, when compared with another of its class.
+@interface Prickly : NSObject
+@end
+
+@implementation Prickly
+- (BOOL)isEqual:(id)other {
+    if ([other isKindOfClass:[Prickly class]])
+        [NSException raise:@"Prickly" format:@"compared with %@", NSStringFromClass([other class])];
+    return self == other;
+}
+- (NSUInteger)hash { return 7; }
+- (NSString *)description { return @"prickly"; }
+@end
+
 @interface Watcher : NSObject
 @end
 
@@ -178,6 +196,68 @@ static void runtime(void) {
     }
 }
 
+static void callbacks(void) {
+    NSMutableArray *letters = [[@"d b a c" componentsSeparatedByString:@" "] mutableCopy];
+    @try {
+        [letters sortUsingComparator:^NSComparisonResult(id a, id b) {
+            if ([a isEqual:@"a"] || [b isEqual:@"a"])
+                [NSException raise:@"Comparator" format:@"compared %@ with %@", a, b];
+            return [a compare:b];
+        }];
+        say(@"comparator: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"comparator: %@", exception.name]);
+    }
+    [letters addObject:@"e"];
+    [letters sortUsingSelector:@selector(compare:)];
+    say([NSString stringWithFormat:@"comparator after: %@", [letters componentsJoinedByString:@" "]]);
+
+    Prickly *prickly = [Prickly new];
+    NSMutableArray *mixed = [NSMutableArray arrayWithObjects:@"x", prickly, @"y", nil];
+    @try {
+        [mixed removeObject:[Prickly new]];
+        say(@"isEqual: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"isEqual: %@: %@", exception.name, exception.reason]);
+    }
+    [mixed removeObjectIdenticalTo:prickly];
+    [mixed removeObject:@"x"];
+    [mixed addObject:@"z"];
+    say([NSString stringWithFormat:@"isEqual after: %@", [mixed componentsJoinedByString:@" "]]);
+
+    @try {
+        [letters enumerateObjectsUsingBlock:^(id letter, NSUInteger index, BOOL *stop) {
+            if (index == 2)
+                [NSException raise:@"Enumeration" format:@"stopped at %@", letter];
+        }];
+        say(@"enumeration: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"enumeration: %@: %@", exception.name, exception.reason]);
+    }
+    NSMutableArray *seen = [NSMutableArray array];
+    [letters enumerateObjectsUsingBlock:^(id letter, NSUInteger index, BOOL *stop) { [seen addObject:letter]; }];
+    say([NSString stringWithFormat:@"enumeration after: %@", [seen componentsJoinedByString:@" "]]);
+
+    NSNotificationCenter *center = [NSNotificationCenter new];
+    id raising = [center addObserverForName:@"Ring" object:nil queue:nil usingBlock:^(NSNotification *note) {
+        [NSException raise:@"Observer" format:@"heard %@", note.name];
+    }];
+    __block NSUInteger heard = 0;
+    id counting = [center addObserverForName:@"Knock" object:nil queue:nil usingBlock:^(NSNotification *note) { heard++; }];
+    @try {
+        [center postNotificationName:@"Ring" object:nil];
+        say(@"observer: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"observer: %@: %@", exception.name, exception.reason]);
+    }
+    [center removeObserver:raising];
+    [center postNotificationName:@"Knock" object:nil];
+    [center postNotificationName:@"Ring" object:nil];
+    [center postNotificationName:@"Knock" object:nil];
+    [center removeObserver:counting];
+    say([NSString stringWithFormat:@"observer after: heard %lu", (unsigned long)heard]);
+}
+
 int main(void) {
     @autoreleasepool {
         raised();
@@ -187,6 +267,7 @@ int main(void) {
         rethrown();
         classes();
         runtime();
+        callbacks();
         say(@"done");
     }
     return 0;
