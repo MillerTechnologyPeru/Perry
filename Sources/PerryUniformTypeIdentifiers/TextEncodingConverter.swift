@@ -201,6 +201,25 @@ public func CreateTextEncoding(_ base: UInt32, _ variant: UInt32, _ format: UInt
 @c(_GetTextEncodingVariant) public func GetTextEncodingVariant(_ encoding: UInt32) -> UInt32 { TextEncodings.variant(encoding) }
 @c(_GetTextEncodingFormat) public func GetTextEncodingFormat(_ encoding: UInt32) -> UInt32 { TextEncodings.format(encoding) }
 
+/// OSStatus UpgradeScriptInfoToTextEncoding(ScriptCode, LangCode, RegionCode,
+/// ConstStr255Param fontName, TextEncoding *): a script's encoding is its
+/// Mac OS encoding, whose base is the script code (0 Roman to 32
+/// Uninterpreted). With no script (kTextScriptDontCare, -128) it is the
+/// system script's, Roman. The language, region and font only pick variants,
+/// which are left at their defaults.
+@c(_UpgradeScriptInfoToTextEncoding)
+public func UpgradeScriptInfoToTextEncoding(_ script: Int16, _ language: Int16, _ region: Int16, _ fontName: UnsafeRawPointer?,
+                                            _ encoding: UnsafeMutablePointer<UInt32>?) -> Int32 {
+    guard let encoding else { return TECStatus.paramErr }
+    if script == -128 {
+        encoding.pointee = 0   // kTextEncodingMacRoman
+        return 0
+    }
+    guard (0...32).contains(script) else { return TECStatus.paramErr }
+    encoding.pointee = UInt32(script)
+    return 0
+}
+
 // MARK: - Unicode Converter
 
 /// A TextToUnicodeInfo or UnicodeToTextInfo: the other encoding, and the
