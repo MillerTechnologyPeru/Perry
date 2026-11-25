@@ -122,6 +122,12 @@ jobs:
       - name: Check their provenance
         run: Scripts/check-runtime-provenance.sh .build/swift-source/install/${{ matrix.target }}
 
+      # Plain Armv8.0: no dot product, LSE atomics or the other extensions
+      # a CPU Perry runs on may lack.
+      - name: Check their instructions
+        if: matrix.target == 'iphoneos-arm64'
+        run: Scripts/check-armv8.sh .build/swift-source/install/${{ matrix.target }}
+
       - name: Pack the libraries
         run: tar -czf perry-swift-stdlib-${{ matrix.target }}.tar.gz -C .build/swift-source/install/${{ matrix.target }} .
 
@@ -229,6 +235,12 @@ jobs:
       # Xcode's), in the job's summary. A report until none is left.
       - name: Check the runtime's provenance
         run: Scripts/check-runtime-provenance.sh --report .build/${{ matrix.runtime }}
+
+      # Everything built here, Armv8.0 only (the simulator's libraries are
+      # left out: the provenance report lists them).
+      - name: Check the runtime's instructions
+        if: matrix.arch == 'arm64'
+        run: Scripts/check-armv8.sh .build/${{ matrix.runtime }}
 
       - name: Pack the overlays
         run: tar -czf ${{ matrix.runtime }}.tar.gz -C .build ${{ matrix.runtime }}
