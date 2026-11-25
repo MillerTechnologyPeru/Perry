@@ -161,10 +161,8 @@ static void keyedCoding(void) {
                                                                                     fromData:dictionary error:&error];
     print([NSString stringWithFormat:@"dictionary one=%@ two=%@ count=%lu", decodedDictionary[@"one"], decodedDictionary[@"two"],
            (unsigned long)decodedDictionary.count]);
-    error = nil;
-    decodedDictionary = [NSKeyedUnarchiver unarchivedDictionaryWithKeysOfClass:[NSString class] objectsOfClass:[NSString class]
-                                                                      fromData:dictionary error:&error];
-    print([NSString stringWithFormat:@"dictionary of strings=%@ error=%ld", decodedDictionary ? @"set" : @"nil", (long)error.code]);
+    // Numbers of the wrong class are refused on macOS 27 and accepted on
+    // macOS 26, so no reference can show either.
     NSArray *mixed = [NSKeyedUnarchiver unarchivedArrayOfObjectsOfClasses:[NSSet setWithObjects:[NSString class], [NSNumber class], nil]
                                                                  fromData:[NSKeyedArchiver archivedDataWithRootObject:@[@"s", @4]
                                                                                                 requiringSecureCoding:YES error:NULL]
