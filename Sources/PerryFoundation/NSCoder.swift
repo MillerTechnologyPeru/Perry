@@ -460,8 +460,12 @@ public func perry_foundation_decodeValuesOfObjCTypes(_ coder: id?, _ cmd: SEL?, 
 /// made of the coder's -decodeObjectForKey: and -encodeObject:forKey:: for
 /// NSCoder and the keyed archiver and unarchiver, as C functions, since
 /// this library's methods don't take them.
+/// None on armv7: it runs only iOS apps, whose coders have no such methods
+/// (UIKit's -decodeCGRectForKey: and the like are its own), and which this
+/// library builds without Foundation's NSRect functions (see Geometry.swift).
 enum CoderGeometry {
     static func add(to cls: ObjCClass) {
+        #if !arch(arm)
         let rect: @convention(c) (id?, SEL, id?) -> CGRect = { coder, _, key in
             NSRectFromString(ObjC.send(coder, ObjC.selector("decodeObjectForKey:"), key))
         }
@@ -493,5 +497,6 @@ enum CoderGeometry {
                       isClassMethod: false)
         cls.addMethod("encodeSize:forKey:", types: "v40@0:8\(sizeType)16@32", implementation: unsafeBitCast(encodeSize, to: UnsafeRawPointer.self),
                       isClassMethod: false)
+        #endif
     }
 }
