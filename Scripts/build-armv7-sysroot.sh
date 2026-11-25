@@ -6,12 +6,22 @@
 # armv7 from the sources the Dockerfile pins. The same sysroot is QEMU_LD_PREFIX for armv7
 # programs under qemu, so the libraries providers open at run time (SDL3,
 # Mesa, OpenAL, GStreamer) are installed too.
+#
+# Runs in a Debian trixie container of the host's architecture, with the LLVM
+# under .toolchains, or without one in the perry-dev image (PERRY_IMAGE),
+# with its Swift toolchain's, as CI does.
 # Usage: Scripts/build-armv7-sysroot.sh
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 sdk=$(cd .toolchains && ls -d swift-*-armv7-sdk/*/debian-* | head -1)
-llvm=$(cd .toolchains && ls -d LLVM-*/bin | head -1)
+llvm=$(cd .toolchains && ls -d LLVM-*/bin 2>/dev/null | head -1)
+if [ -n "$llvm" ]; then
+    image=debian:trixie llvm=/perry/.toolchains/$llvm
+else
+    # Swift's toolchain has llvm-ar beside its clang.
+    image=${PERRY_IMAGE:-perry-dev} llvm=/usr/bin
+fi
 
 # The Dockerfile's libraries, for armhf.
 packages="libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev libssl-dev openssl-provider-legacy liblzma-dev
@@ -21,14 +31,14 @@ packages="libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev libssl-dev openssl-pro
   gstreamer1.0-plugins-good gstreamer1.0-libav libsdl3-0 libsdl3-dev libgl1-mesa-dri libegl1 libgles2 libgles1
   libgl1 libglx-mesa0 libegl-mesa0 libgbm1"
 
-docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolchains/$sdk" \
-    -e LLVM="/perry/.toolchains/$llvm" -e PACKAGES="$packages" debian:trixie sh -euc '
+docker run --rm -v "$root:/perry" -e SDK="/perry/.toolchains/$sdk" -e OWNER="$(id -u):$(id -g)" \
+    -e LLVM="$llvm" -e PACKAGES="$packages" --entrypoint sh "$image" -euc '
     dpkg --add-architecture armhf
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils >/dev/null
     debs=/tmp/debs
     mkdir -p $debs/partial
-    # Downloads the packages and every armhf one they need; the arm64
+    # Downloads the packages and every armhf one they need; the host
     # system they are resolved against has none of them.
     apt-get install -y -qq --download-only --no-install-recommends -o Dir::Cache::archives=$debs \
         $(for p in $PACKAGES; do printf "%s:armhf " $p; done) >/dev/null
@@ -36,7 +46,7 @@ docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolcha
         case $(basename $deb) in
         # The SDK has its own C library and compiler runtime.
         libc6_* | libc6-dev_* | libgcc-s1_* | libstdc++6_* | libstdc++-*-dev_* | gcc-*-base_* | \
-        linux-libc-dev_* | libcrypt1_* | libcrypt-dev_* | *_arm64.deb) continue ;;
+        linux-libc-dev_* | libcrypt1_* | libcrypt-dev_* | *_arm64.deb | *_amd64.deb) continue ;;
         esac
         dpkg-deb -x $deb $SDK
     done
@@ -93,4 +103,5 @@ docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolcha
     mkdir -p $SDK/usr/include/perry-cmark-gfm
     cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h $SDK/usr/include/perry-cmark-gfm/
     echo "built libperry-cmark-gfm"
+    chown -R "$OWNER" $SDK
 '
