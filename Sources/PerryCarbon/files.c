@@ -28,7 +28,7 @@ enum {
     dirFulErr = -33, dskFulErr = -34, nsvErr = -35, ioErr = -36, bdNamErr = -37, fnOpnErr = -38, eofErr = -39,
     posErr = -40, tmfoErr = -42, fnfErr = -43, wPrErr = -44, fLckdErr = -45, fBsyErr = -47, dupFNErr = -48,
     opWrErr = -49, rfNumErr = -51, permErr = -54, wrPermErr = -61, dirNFErr = -120, errFSForkNotFound = -1424,
-    afpAccessDenied = -5000, errFSNoMoreItems = -1417,
+    afpAccessDenied = -5000, errFSNoMoreItems = -1417, errFSForkExists = -1421,
 };
 
 #define ROOT_VOLUME (-100)
@@ -277,6 +277,11 @@ static bool spec_path(const FSSpec *spec, char *path, size_t size) {
     if (spec->parID == 1) return snprintf(path, size, "/") > 0;
     const char *folder = folder_of(spec->vRefNum, spec->parID);
     return folder && join(folder, spec->name, path, size);
+}
+
+/// An FSSpec's path, for Carbon's other parts (the Font Manager's).
+__attribute__((visibility("hidden"))) bool carbon_spec_path(const void *spec, char *path, size_t size) {
+    return spec_path((const FSSpec *)spec, path, size);
 }
 
 // MARK: - FSSpecs
@@ -703,6 +708,53 @@ OSErr carbon_FSSetForkSize(int16_t reference, uint16_t mode, int64_t offset) {
     lseek(descriptor, here, SEEK_SET);
     if (size < 0) return posErr;
     return ftruncate(descriptor, size) == 0 ? noErr : error_for(errno);
+}
+
+/// Where FSIterateForks is in an item's forks: initialize is 0 before the
+/// first call.
+typedef struct {
+    int32_t initialize;
+    int16_t priv[6];
+} CatPositionRec;
+
+/// An item's forks: a file's data fork alone, since resource forks are not
+/// kept here; a folder has none.
+OSErr carbon_FSIterateForks(const FSRef *ref, CatPositionRec *position, HFSUniStr255 *name, int64_t *size, uint64_t *physical)
+    CARBON_SYMBOL(FSIterateForks);
+OSErr carbon_FSIterateForks(const FSRef *ref, CatPositionRec *position, HFSUniStr255 *name, int64_t *size, uint64_t *physical) {
+    char path[PATH_MAX];
+    struct stat info;
+    if (!position || !ref_path(ref, path, sizeof path)) return paramErr;
+    if (stat(path, &info) != 0) return fnfErr;
+    if (position->initialize != 0 || S_ISDIR(info.st_mode)) return errFSNoMoreItems;
+    position->initialize = 1;
+    if (name) name->length = 0;
+    if (size) *size = info.st_size;
+    if (physical) *physical = (uint64_t)info.st_blocks * 512;
+    return noErr;
+}
+
+/// A file's data fork is always there; any other fork is taken as made,
+/// as FSOpenFork opens one empty.
+OSErr carbon_FSCreateFork(const FSRef *ref, size_t nameLength, const uint16_t *name) CARBON_SYMBOL(FSCreateFork);
+OSErr carbon_FSCreateFork(const FSRef *ref, size_t nameLength, const uint16_t *name) {
+    (void)name;
+    char path[PATH_MAX];
+    if (!ref_path(ref, path, sizeof path)) return paramErr;
+    if (access(path, F_OK) != 0) return fnfErr;
+    return nameLength == 0 ? errFSForkExists : noErr;
+}
+
+/// Space for a fork to grow into: Linux's file systems give it as it is
+/// written, so all of it is taken as allocated.
+OSErr carbon_FSAllocateFork(int16_t reference, uint16_t flags, uint16_t mode, int64_t offset, uint64_t count, uint64_t *actual)
+    CARBON_SYMBOL(FSAllocateFork);
+OSErr carbon_FSAllocateFork(int16_t reference, uint16_t flags, uint16_t mode, int64_t offset, uint64_t count, uint64_t *actual) {
+    (void)flags; (void)mode; (void)offset;
+    if (actual) *actual = 0;
+    if (file_descriptor(reference) < 0) return rfNumErr;
+    if (actual) *actual = count;
+    return noErr;
 }
 
 OSErr carbon_FSGetForkPosition(int16_t reference, int64_t *position) CARBON_SYMBOL(FSGetForkPosition);
@@ -1278,6 +1330,48 @@ OSErr carbon_PBHGetVolSync(WDPBRec *block) {
 /// removable one. Its device ID is the volume's BSD name ("disk2s1" for the
 /// first disc, as IOKit's media and getmntinfo name it), which a program
 /// matches with the media it found.
+/// A shared folder's access rights: AccessParam's fields after the header.
+#pragma pack(push, 2)
+typedef struct {
+    ParamHeader header;
+    int16_t ioRefNum;
+    int16_t ioDenyModes;
+    int8_t filler4;
+    int8_t ioACUser;
+    int32_t filler5;
+    int32_t ioACOwnerID;
+    int32_t ioACGroupID;
+    int32_t ioACAccess;
+    int32_t ioDirID;
+} AccessParam;
+#pragma pack(pop)
+
+/// A folder's access, as a local volume's: the user owns it, with every
+/// right (a set bit in ioACUser is one the user lacks), and it is not
+/// shared.
+OSErr carbon_PBHGetDirAccessSync(AccessParam *block) CARBON_SYMBOL(PBHGetDirAccessSync);
+OSErr carbon_PBHGetDirAccessSync(AccessParam *block) {
+    if (!block) return paramErr;
+    const char *folder = folder_of(block->header.ioVRefNum, block->ioDirID);
+    char path[PATH_MAX];
+    struct stat info;
+    OSErr error = noErr;
+    if (!folder) error = dirNFErr;
+    else if (block->header.ioNamePtr && block->header.ioNamePtr[0] && !join(folder, block->header.ioNamePtr, path, sizeof path))
+        error = bdNamErr;
+    else if (stat(block->header.ioNamePtr && block->header.ioNamePtr[0] ? path : folder, &info) != 0)
+        error = fnfErr;
+    else if (!S_ISDIR(info.st_mode))
+        error = dirNFErr;
+    if (error == noErr) {
+        block->ioACUser = 0;
+        block->ioACOwnerID = 0;
+        block->ioACGroupID = 0;
+        block->ioACAccess = 0;
+    }
+    return block->header.ioResult = error;
+}
+
 OSErr carbon_PBHGetVolParmsSync(HIOParam *block) CARBON_SYMBOL(PBHGetVolParmsSync);
 OSErr carbon_PBHGetVolParmsSync(HIOParam *block) {
     if (!block) return paramErr;

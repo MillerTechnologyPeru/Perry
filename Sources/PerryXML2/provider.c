@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define DARWIN_SYMBOL(name) __asm__("_" #name) __attribute__((visibility("default"), used))
 #define INTERNAL __attribute__((visibility("hidden")))
@@ -37,6 +38,12 @@ extern void xmlParserValidityError(void *ctx, const char *msg, ...);
 extern void xmlParserValidityWarning(void *ctx, const char *msg, ...);
 extern int xmlStrlen(const unsigned char *string);
 
+extern int xmlRegisterInputCallbacks(int (*match)(const char *), void *(*open)(const char *),
+                                     int (*read)(void *, char *, int), int (*close)(void *));
+extern void xmlRegisterDefaultInputCallbacks(void);
+extern char *xmlURIUnescapeString(const char *string, int length, char *target);
+extern void xmlFree_(void *) __asm__("free");
+
 // thunks.S
 INTERNAL extern void perry_xml_call_darwin_variadic(void *function, void *ctx, const char *format, const char *argument);
 INTERNAL extern void perry_xml_generic_error_darwin(void *ctx, const char *msg, ...);
@@ -48,6 +55,66 @@ static perry_wrapped_library libxml2 = PERRY_WRAPPED_LIBRARY(xmlStrlen);
 __attribute__((visibility("default")))
 void *perry_provider_symbol(const char *name) {
     return perry_wrapped_symbol(&libxml2, name, NULL);
+}
+
+// MARK: - Files in any case
+
+// A Mac's disk takes a file's name in any case, and programs ask for
+// theirs as their makers wrote them: a game's data/StringTable.xml is
+// data/stringtable.xml on its disc. libxml2 opens files with Linux's fopen,
+// so a file it isn't given in the case it has is found here instead, with
+// libSystem's fopen, which looks for it in any case.
+
+static FILE *(*any_case_fopen)(const char *, const char *);
+
+/// The path a file name or file: URL names, unescaped and to be freed;
+/// NULL for another kind of URL.
+static char *file_path(const char *name) {
+    if (!name)
+        return NULL;
+    if (!strncmp(name, "file://localhost/", 17))
+        return xmlURIUnescapeString(name + 16, 0, NULL);
+    if (!strncmp(name, "file:///", 8))
+        return xmlURIUnescapeString(name + 7, 0, NULL);
+    if (strstr(name, "://"))
+        return NULL;
+    return strdup(name);
+}
+
+/// A file that isn't there by its name, which libSystem's fopen may find
+/// in another case.
+static int any_case_match(const char *name) {
+    if (!any_case_fopen) {
+        // libSystem's provider, which the loader opened with its own names.
+        void *system = dlopen("libPerrySystem.so", RTLD_LAZY | RTLD_NOLOAD);
+        any_case_fopen = (FILE *(*)(const char *, const char *))dlsym(system ? system : RTLD_DEFAULT, "perry_fopen");
+    }
+    char *path = file_path(name);
+    int match = path && any_case_fopen && access(path, F_OK) != 0;
+    xmlFree_(path);
+    return match;
+}
+
+static void *any_case_open(const char *name) {
+    char *path = file_path(name);
+    FILE *file = path ? any_case_fopen(path, "rb") : NULL;
+    xmlFree_(path);
+    return file;
+}
+
+static int any_case_read(void *file, char *buffer, int length) {
+    size_t read = fread(buffer, 1, (size_t)length, file);
+    return read == 0 && ferror(file) ? -1 : (int)read;
+}
+
+static int any_case_close(void *file) { return fclose(file); }
+
+/// The handler, tried before libxml2's own, which it takes no file from.
+/// libxml2's own are registered first: it registers them only while it
+/// has none.
+__attribute__((constructor)) static void register_any_case_files(void) {
+    xmlRegisterDefaultInputCallbacks();
+    xmlRegisterInputCallbacks(any_case_match, any_case_open, any_case_read, any_case_close);
 }
 
 // MARK: - Formatting

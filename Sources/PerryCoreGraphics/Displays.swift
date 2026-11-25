@@ -398,11 +398,24 @@ public func CGSetDisplayTransferByFormula(_ display: UInt32, _ redMin: Float, _ 
 
 // MARK: - Capture and the cursor
 
-@c(_CGDisplayCapture) public func CGDisplayCapture(_ display: UInt32) -> Int32 { success }
+/// Whether the program has captured the displays, which it asks before
+/// drawing to them full screen.
+nonisolated(unsafe) private var displaysCaptured = false
+
+@c(_CGDisplayCapture) public func CGDisplayCapture(_ display: UInt32) -> Int32 { displaysCaptured = true; return success }
 // Releasing the displays puts back their modes.
-@c(_CGDisplayRelease) public func CGDisplayRelease(_ display: UInt32) -> Int32 { DictionaryModes.switched = nil; return success }
-@c(_CGCaptureAllDisplays) public func CGCaptureAllDisplays() -> Int32 { success }
-@c(_CGReleaseAllDisplays) public func CGReleaseAllDisplays() -> Int32 { DictionaryModes.switched = nil; return success }
+@c(_CGDisplayRelease) public func CGDisplayRelease(_ display: UInt32) -> Int32 {
+    displaysCaptured = false
+    DictionaryModes.switched = nil
+    return success
+}
+@c(_CGCaptureAllDisplays) public func CGCaptureAllDisplays() -> Int32 { displaysCaptured = true; return success }
+@c(_CGReleaseAllDisplays) public func CGReleaseAllDisplays() -> Int32 {
+    displaysCaptured = false
+    DictionaryModes.switched = nil
+    return success
+}
+@c(_CGDisplayIsCaptured) public func CGDisplayIsCaptured(_ display: UInt32) -> UInt32 { displaysCaptured ? 1 : 0 }
 
 // Fades: the screen isn't faded, and a reservation is always had.
 @DarwinC("_CGAcquireDisplayFadeReservation")

@@ -163,6 +163,10 @@ PASSTHROUGH _listen, listen
 PASSTHROUGH _llabs, llabs
 PASSTHROUGH _localtime, localtime
 PASSTHROUGH _localtime_r, localtime_r
+PASSTHROUGH _asctime, asctime
+PASSTHROUGH _asctime_r, asctime_r
+PASSTHROUGH _ctime, ctime
+PASSTHROUGH _ctime_r, ctime_r
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_init, pthread_attr_init

@@ -148,6 +148,113 @@ void carbon_SecondsToDate(uint32_t seconds, DateTimeRec *date) {
     if (date) date_from(seconds, date);
 }
 
+/// Where the Mac is: its latitude and longitude, not known here, and its
+/// offset from UTC in seconds in gmtDelta's low 24 bits, with daylight
+/// saving's flag (0x80) in its high byte, from the time zone.
+typedef struct {
+    int32_t latitude;
+    int32_t longitude;
+    int32_t gmtDelta;
+} MachineLocation;
+
+void carbon_ReadLocation(MachineLocation *location) CARBON_SYMBOL(ReadLocation);
+void carbon_ReadLocation(MachineLocation *location) {
+    if (!location) return;
+    time_t now = time(NULL);
+    struct tm parts;
+    localtime_r(&now, &parts);
+    location->latitude = 0;
+    location->longitude = 0;
+    location->gmtDelta = (int32_t)((uint32_t)parts.tm_gmtoff & 0x00ffffff) | (parts.tm_isdst > 0 ? (int32_t)0x80000000 : 0);
+}
+
+// MARK: - SANE's decimal records
+
+// A number as decimal digits: decimal is the sign, the exponent and up to
+// 36 digits (sig, a Pascal string), the number being sig × 10^exp; decform
+// asks for a number of significant digits (FLOATDECIMAL) or of digits after
+// the point (FIXEDDECIMAL).
+#pragma pack(push, 2)
+typedef struct {
+    int8_t style;
+    int8_t unused;
+    int16_t digits;
+} decform;
+
+typedef struct {
+    int8_t sgn;
+    int8_t unused;
+    int16_t exp;
+    struct {
+        uint8_t length;
+        uint8_t text[36];
+        uint8_t unused;
+    } sig;
+} decimal;
+#pragma pack(pop)
+
+enum { FLOATDECIMAL = 0, FIXEDDECIMAL = 1, SIGDIGLEN = 36 };
+
+void carbon_num2dec(const decform *form, double x, decimal *d) CARBON_SYMBOL(num2dec);
+void carbon_num2dec(const decform *form, double x, decimal *d) {
+    if (!d) return;
+    memset(d, 0, sizeof *d);
+    d->sgn = signbit(x) ? 1 : 0;
+    double magnitude = fabs(x);
+    if (isnan(magnitude) || isinf(magnitude)) {
+        // SANE writes NaN as "N" and its code in hex, infinity as "I".
+        d->sig.length = 1;
+        d->sig.text[0] = isnan(magnitude) ? 'N' : 'I';
+        return;
+    }
+    char text[512];
+    int digits = form ? form->digits : 1;
+    if (form && form->style == FIXEDDECIMAL) {
+        if (digits < 0) digits = 0;
+        if (digits > 80) digits = 80;
+        snprintf(text, sizeof text, "%.*f", digits, magnitude);
+        char *point = strchr(text, '.');
+        if (point) memmove(point, point + 1, strlen(point));
+        d->exp = (int16_t)-digits;
+    } else {
+        if (digits < 1) digits = 1;
+        if (digits > SIGDIGLEN) digits = SIGDIGLEN;
+        snprintf(text, sizeof text, "%.*e", digits - 1, magnitude);
+        char *e = strchr(text, 'e');
+        int exponent = e ? atoi(e + 1) : 0;
+        if (e) *e = 0;
+        char *point = strchr(text, '.');
+        if (point) memmove(point, point + 1, strlen(point));
+        d->exp = (int16_t)(exponent - (digits - 1));
+    }
+    // Leading zeros go, but a zero keeps its one digit.
+    char *start = text;
+    while (start[0] == '0' && start[1]) start++;
+    size_t length = strlen(start);
+    if (length > SIGDIGLEN) {
+        // More digits than a record holds: the exponent takes the rest.
+        d->exp = (int16_t)(d->exp + (int16_t)(length - SIGDIGLEN));
+        length = SIGDIGLEN;
+    }
+    if (strcmp(start, "0") == 0) d->exp = 0;
+    d->sig.length = (uint8_t)length;
+    memcpy(d->sig.text, start, length);
+}
+
+/// The double a decimal record stands for.
+double carbon_dec2num(const decimal *d) CARBON_SYMBOL(dec2num);
+double carbon_dec2num(const decimal *d) {
+    if (!d || d->sig.length == 0) return 0;
+    if (d->sig.text[0] == 'I') return d->sgn ? -INFINITY : INFINITY;
+    if (d->sig.text[0] == 'N') return NAN;
+    char text[64];
+    size_t length = d->sig.length > SIGDIGLEN ? SIGDIGLEN : d->sig.length;
+    memcpy(text, d->sig.text, length);
+    snprintf(text + length, sizeof text - length, "e%d", d->exp);
+    double value = strtod(text, NULL);
+    return d->sgn ? -value : value;
+}
+
 /// The date and time now, in local time.
 void carbon_GetTime(DateTimeRec *date) CARBON_SYMBOL(GetTime);
 void carbon_GetTime(DateTimeRec *date) {
@@ -518,6 +625,10 @@ OSStatus carbon_QDUnregisterNamedPixMapCursor(const char *name) {
     entry->cursor = NULL;
     return noErr;
 }
+
+/// The name it has in Carbon's own headers and library, misspelled.
+OSStatus carbon_QDUnregisterNamedPixMapCursur(const char *name) CARBON_SYMBOL(QDUnregisterNamedPixMapCursur);
+OSStatus carbon_QDUnregisterNamedPixMapCursur(const char *name) { return carbon_QDUnregisterNamedPixMapCursor(name); }
 
 static uint32_t ui_mode, ui_options;
 

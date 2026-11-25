@@ -12,8 +12,8 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /pe
     # -D_FILE_OFFSET_BITS=64, as the SwiftPM providers are built: stat with
     # 64-bit inodes. The 32-bit one fails on file systems with larger inode
     # numbers, and under box86 gives every file inode 0, by which Carbon
-    # tells folders apart.
-    cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -freg-struct-return -Wall -Wno-unused-function -ISources/PerryCarbon/include -ISources/PerryInterface/include"
+    # tells folders apart. FreeType measures and draws the text of ATSUI.
+    cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -freg-struct-return -Wall -Wno-unused-function -ISources/PerryCarbon/include -ISources/PerryInterface/include -I$sysroot/usr/include/freetype2"
     objects=""
     for source in Sources/PerryCarbon/*.c; do
         name=$(basename "$source")
@@ -23,5 +23,5 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /pe
     done
     [ -z "${failed:-}" ]
     clang --target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -fuse-ld=lld -shared $objects \
-        -o $out/bin/libPerryCarbon.so -lm -lpthread -Wl,-z,defs'
+        -o $out/bin/libPerryCarbon.so -lm -lpthread -lfreetype -Wl,-z,defs'
 echo "$root/.build/i386/bin/libPerryCarbon.so"
