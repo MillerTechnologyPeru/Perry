@@ -145,15 +145,26 @@ final class ConnectionStorage {
     }
 }
 
-/// What a remoteObjectProxy stands for: the connection it was asked of.
+/// What a remoteObjectProxy stands for: the connection it was asked of, and
+/// the error handler it was asked with (retained).
 final class ProxyStorage {
     let connection: ConnectionStorage
+    var errorHandler: id?
 
-    init(_ connection: ConnectionStorage) { self.connection = connection }
+    init(_ connection: ConnectionStorage, errorHandler: id?) {
+        self.connection = connection
+        self.errorHandler = errorHandler.flatMap { ObjC.retainBlock($0) }
+    }
+
+    deinit { if let errorHandler { ObjC.release(errorHandler) } }
 }
 
 /// The object remoteObjectProxy answers: whatever it is sent, the peer's
-/// exported object is given.
+/// exported object is given. With no peer (a service by name, which nothing
+/// runs here), a message is dropped, as Darwin's are when the service can't
+/// be reached: the proxy's error handler gets NSXPCConnectionInvalid and the
+/// connection is invalidated, rather than the message being unrecognized.
+/// The message's signature comes from the remote interface's protocol.
 @ObjCClass("PerryXPCProxy")
 public class PerryXPCProxy: NSObject {
     nonisolated(unsafe) static var proxyClass: Class!
@@ -163,14 +174,62 @@ public class PerryXPCProxy: NSObject {
         proxyClass = cls.storage
     }
 
-    static func make(for connection: ConnectionStorage) -> id? {
+    static func make(for connection: ConnectionStorage, errorHandler: id? = nil) -> id? {
         guard let object = Storage.allocate(UnsafeMutableRawPointer(proxyClass)) else { return nil }
-        Storage.set(object, ProxyStorage(connection))
+        Storage.set(object, ProxyStorage(connection, errorHandler: errorHandler))
         return ObjC.autorelease(object)
     }
 
-    private var target: id? {
-        Storage.get(objcObject, as: ProxyStorage.self)?.connection.peer?.exportedObject
+    private var proxyStorage: ProxyStorage? { Storage.get(objcObject, as: ProxyStorage.self) }
+
+    private var target: id? { proxyStorage?.connection.peer?.exportedObject }
+
+    /// The remote interface's protocol's types for a selector, required or
+    /// optional, as an NSMethodSignature; nil when it doesn't declare it.
+    @ObjCMethod("methodSignatureForSelector:")
+    func methodSignature(_ selector: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let selector else { return nil }
+        if let target { return ObjC.send(target, ObjC.selector("methodSignatureForSelector:"), UnsafeMutableRawPointer(mutating: selector)) }
+        guard let interface = proxyStorage?.connection.remoteInterface,
+              let proto = Storage.get(interface, as: InterfaceStorage.self)?.proto,
+              let copy = ObjC.protocolMethods else { return nil }
+        let wanted = String(cString: selector.assumingMemoryBound(to: CChar.self))
+        for required in [true, false] {
+            var count: UInt32 = 0
+            guard let list = copy(proto, required, true, &count) else { continue }
+            defer { free(list) }
+            let pair = 2 * MemoryLayout<UnsafeRawPointer>.size
+            for index in 0..<Int(count) {
+                guard let name = list.load(fromByteOffset: index * pair, as: UnsafePointer<CChar>?.self),
+                      String(cString: name) == wanted,
+                      let types = list.load(fromByteOffset: index * pair + pair / 2, as: UnsafePointer<CChar>?.self),
+                      let signatureClass = ObjC.getClass("NSMethodSignature") else { continue }
+                return ObjC.send(UnsafeMutableRawPointer(signatureClass), ObjC.selector("signatureWithObjCTypes:"),
+                                 UnsafeMutableRawPointer(mutating: types))
+            }
+        }
+        return nil
+    }
+
+    /// A message forwarding didn't send on: to the exported object if a peer
+    /// came since, else dropped with the connection's failure.
+    @ObjCMethod("forwardInvocation:")
+    func forward(_ invocation: UnsafeMutableRawPointer?) {
+        if let target {
+            _ = ObjC.send(invocation, ObjC.selector("invokeWithTarget:"), target)
+            return
+        }
+        guard let storage = proxyStorage else { return }
+        let errorHandler = storage.errorHandler.flatMap { ObjC.retainBlock($0) }.map { ObjCObject(objCOwned: $0) }
+        let error = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4099,
+                                        description: "Couldn’t communicate with a helper application.").map { ObjCObject($0) }
+        let connection = storage.connection
+        ItemProviderQueue.background {
+            if let errorHandler {
+                Blocks.invoke(errorHandler.id, as: (@convention(c) (id, id?) -> Void).self)(errorHandler.id, error?.id)
+            }
+            NSXPCConnection.invalidate(connection)
+        }
     }
 
     @ObjCMethod("forwardingTargetForSelector:")
@@ -318,10 +377,14 @@ public class NSXPCConnection: NSObject {
     }
 
     @ObjCMethod("remoteObjectProxyWithErrorHandler:")
-    func remoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { remoteObjectProxy() }
+    func remoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        storage.flatMap { PerryXPCProxy.make(for: $0, errorHandler: errorHandler) }
+    }
 
     @ObjCMethod("synchronousRemoteObjectProxyWithErrorHandler:")
-    func synchronousRemoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { remoteObjectProxy() }
+    func synchronousRemoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        remoteObjectProxy(errorHandler: errorHandler)
+    }
 
     /// Connects an endpoint's connection to its listener, once both are resumed.
     @ObjCMethod("resume")
@@ -357,9 +420,15 @@ public class NSXPCConnection: NSObject {
 
     @ObjCMethod("invalidate")
     func invalidate() {
-        guard let storage, !storage.invalidated else { return }
-        storage.invalidated = true
+        guard let storage else { return }
         storage.listener?.pending.removeAll { $0.id == objcObject }
+        NSXPCConnection.invalidate(storage)
+    }
+
+    /// Invalidates a connection once: its invalidation handler runs.
+    static func invalidate(_ storage: ConnectionStorage) {
+        guard !storage.invalidated else { return }
+        storage.invalidated = true
         if let handler = storage.invalidationHandler {
             Blocks.invoke(handler, as: (@convention(c) (id) -> Void).self)(handler)
         }
