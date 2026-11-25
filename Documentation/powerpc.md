@@ -9,9 +9,18 @@ libraries.
 ## Building and running
 
 The loader and the C providers build with a powerpc-linux-gnu cross
-toolchain, such as swift-linux's:
+toolchain, such as swift-linux's, or Debian's and Ubuntu's
+`gcc-powerpc-linux-gnu` (and `g++-powerpc-linux-gnu` for
+build-ppc-sysroot.sh), whose libraries are in `/usr/powerpc-linux-gnu`:
 
     PPC_CC=.../powerpc-swift-linux-gnu-gcc Scripts/build-ppc-loader.sh   # .build/ppc/bin/perry
+    PPC_CC=powerpc-linux-gnu-gcc Scripts/build-ppc-carbon.sh            # .build/ppc/bin/libPerryCarbon.so
+    PPC_CC=powerpc-linux-gnu-gcc Scripts/build-ppc-sysroot.sh           # .toolchains/ppc-sysroot
+
+`Scripts/test-ppc-smoke.sh` runs what they built under qemu-ppc: `perry`
+starts, reads its options and refuses a file that is not a ppc Mach-O, and
+each library resolves its own. CI builds and checks them so (on Ubuntu, with
+`qemu-user`); it has no ppc Mac program to run, since those need Xcode 3.2.6.
 
 The Swift providers build with SwiftPM and a ppc destination, which names the
 cross compiler, the sysroot and the Swift SDK:
