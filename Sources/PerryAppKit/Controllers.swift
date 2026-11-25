@@ -393,6 +393,40 @@ open class NSPrintInfo: NSObject {
     @ObjCMethod("setVerticallyCentered:") func setVerticallyCentered(_ value: Bool) { verticallyCentered = value }
     @ObjCMethod("dictionary") func dictionary() -> NSObject { NSMutableDictionary.empty() }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+
+    // MARK: The Printing Manager's objects
+
+    /// The print info's PMPrintSession, PMPageFormat and PMPrintSettings:
+    /// the CoreGraphics provider's (ApplicationServices' PrintCore here),
+    /// made the first time each is asked for and kept, as AppKit's are.
+    var printingObjects: [String: NSObject] = [:]
+
+    private func printingObject(_ className: String) -> NSObject? {
+        if let made = printingObjects[className] { return made }
+        guard CG.ready, let made = Classes.named(className)?.object.newInstance() else { return nil }
+        printingObjects[className] = made
+        return made
+    }
+
+    @ObjCMethod("PMPrintSession") func pmPrintSession() -> UnsafeMutableRawPointer? { printingObject("PMPrintSession")?.objcObject }
+    @ObjCMethod("PMPrintSettings") func pmPrintSettings() -> UnsafeMutableRawPointer? { printingObject("PMPrintSettings")?.objcObject }
+
+    /// The page format, given the paper as it is now.
+    @ObjCMethod("PMPageFormat")
+    func pmPageFormat() -> UnsafeMutableRawPointer? {
+        guard let format = printingObject("PMPageFormat") else { return nil }
+        typealias SetPaper = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Double, Double, Double, Double, Double, Double) -> Void
+        let bounds = imageablePageBounds()
+        unsafeBitCast(ObjCRuntime.msgSend, to: SetPaper.self)(
+            format.objcObject, ObjCRuntime.selector("_perrySetPaperWidth:height:imageableX:imageableY:imageableWidth:imageableHeight:"),
+            Double(paperSize.width), Double(paperSize.height), Double(bounds.origin.x), Double(bounds.origin.y),
+            Double(bounds.size.width), Double(bounds.size.height))
+        return format.objcObject
+    }
+
+    /// Nothing in them changes here.
+    @ObjCMethod("updateFromPMPageFormat") func updateFromPMPageFormat() {}
+    @ObjCMethod("updateFromPMPrintSettings") func updateFromPMPrintSettings() {}
 }
 
 /// NSPrintOperation: there are no printers; running one answers that it
