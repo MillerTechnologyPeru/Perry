@@ -152,12 +152,37 @@ reports:
       - "BOX86_MMAP_BASE=0x48000000"
     level: 3
     source: body
-    notes: Under box86 its settings window shows its text, and the main menu is full screen, its 800x600 scaled to the screen's height by gamescope. Sound, the controller mapping and play are untested.
+    notes: Under box86 its settings window shows its text. Run in gamescope (HALO_SCREEN=800x600) the main menu is full screen, its 800x600 scaled to the screen's height, but gamescope often aborts as the game starts, so the launcher leaves it out and the game plays in a window. Sound, the controller mapping and play are untested.
     screenshots:
       - url: https://github.com/user-attachments/assets/994d0749-ac77-4775-86e0-cfaf0c3b0882
-        caption: The main menu full screen on the Retroid Pocket 5
+        caption: The main menu full screen on the Retroid Pocket 5, in gamescope
       - url: https://github.com/user-attachments/assets/51b3074b-0404-4b8d-a451-9542bcb9b22b
         caption: The graphics settings window on the Retroid Pocket 5
+  - pr: 406
+    date: 2026-11-24
+    perry: "f5df3494"
+    platform: macos
+    cpu: i386
+    app_version: "2.0"
+    hardware: Retroid Pocket 5
+    os: ROCKNIX 20261101
+    packaging: Packaging/macos/com.macsoft.halo/portmaster
+    resolution: "1920x1080"
+    graphics: OpenGL
+    env:
+      - "PERRY_DISCS=Halo Universal=roms/ports/halo/disc"
+      - "PERRY_CONTAINER=roms/ports/halo/conf"
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "BOX86_MMAP_BASE=0x48000000"
+    level: 4
+    source: maintainer
+    notes: Under box86 it plays full screen without gamescope, Perry scaling the mode it switches to onto the screen. The maintainer played the first level with the pad, through gptokeyb (D-pad and Start in menus, the right stick as the mouse). Touch doesn't place its pointer, and sound wasn't checked here.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1a311782-dab1-473e-b62f-d9e95fed30a1
+        caption: The first level on the Retroid Pocket 5
+      - url: https://github.com/user-attachments/assets/23fc3df2-cf25-4c1e-bba7-b68c72ab8364
+        caption: The main menu full screen on the Retroid Pocket 5
 ---
 
 A Carbon application for PowerPC and Intel, run with the 32-bit Perry. It
@@ -170,5 +195,6 @@ with gptokeyb for the controls. Halo keeps its game state at 0x40000000,
 where box86 would put its own pages, so box86 is built with
 `Packaging/shared/box86/box86-mmap-base.patch` and the launcher sets
 `BOX86_MMAP_BASE=0x48000000`. It plays full screen by switching the
-display to a resolution of its own, so the launcher runs it in gamescope
-with a screen of that size (`HALO_SCREEN`, 800x600 unless set).
+display to a resolution of its own, which the device's screen hasn't got:
+Perry shows the game's window full screen at the screen's size and scales
+what it draws to fit.
