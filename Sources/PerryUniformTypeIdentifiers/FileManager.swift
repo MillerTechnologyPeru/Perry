@@ -461,4 +461,17 @@ public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalo
     }
     return noErr
 }
+
+/// OSStatus FSGetHFSUniStrFromString(CFStringRef, HFSUniStr255 *): the
+/// string's UTF-16, after its length; a name of more than 255 units is
+/// paramErr.
+@c(_FSGetHFSUniStrFromString)
+public func FSGetHFSUniStrFromString(_ string: UnsafeMutableRawPointer?, _ name: UnsafeMutablePointer<UInt16>?) -> Int32 {
+    guard let string, let name else { return -50 }
+    let units = Array(String(objCArgument: string).utf16)
+    guard units.count <= 255 else { return -50 }
+    name.pointee = UInt16(units.count)
+    for (index, unit) in units.enumerated() { name[1 + index] = unit }
+    return 0
+}
 #endif
