@@ -14,6 +14,7 @@
 #include "PerryXML2.h"
 #include "perry_wrapped.h"
 
+#include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -108,11 +109,28 @@ static const xml_generic_error_func slots[HANDLER_SLOTS] = {
 /// perry_xml_generic_error_darwin.
 static __thread xml_generic_error_func shown_native_handler;
 
+/// What Darwin code is given for perry_xml_generic_error_darwin: on ppc the
+/// loader's stub, which sets r2 (Linux's thread pointer, which Darwin's code
+/// may change) before entering it; elsewhere the function.
+static void *generic_error_darwin_entry(void) {
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    static void *entry;
+    if (!entry) {
+        // The loader's, which perry exports: RTLD_DEFAULT finds it.
+        void *(*thread_stub)(void *) = (void *(*)(void *))dlsym(RTLD_DEFAULT, "perry_ppc_thread_stub");
+        entry = thread_stub ? thread_stub((void *)perry_xml_generic_error_darwin) : (void *)perry_xml_generic_error_darwin;
+    }
+    return entry;
+#else
+    return (void *)perry_xml_generic_error_darwin;
+#endif
+}
+
 /// The native handler for a Darwin one: its trampoline.
 static xml_generic_error_func native_handler(void *handler) {
     if (!handler)
         return NULL;
-    if (handler == (void *)perry_xml_generic_error_darwin)
+    if (handler == generic_error_darwin_entry())
         return shown_native_handler;
     pthread_mutex_lock(&slots_lock);
     xml_generic_error_func result = NULL;
@@ -139,7 +157,7 @@ static void *darwin_handler(xml_generic_error_func handler) {
         if (slots[i] == handler)
             return darwin_handlers[i];
     shown_native_handler = handler;
-    return (void *)perry_xml_generic_error_darwin;
+    return generic_error_darwin_entry();
 }
 
 /// What perry_xml_generic_error_darwin runs: the message, formatted, to the
@@ -151,10 +169,24 @@ INTERNAL void perry_xml_generic_error_v(void *ctx, const char *msg, va_list ap) 
     free(text);
 }
 
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__) || (defined(__powerpc__) && !defined(__powerpc64__))
 // Darwin's x86_64 and i386 variadic ABIs are Linux's, so these need no
 // assembly, and libxml2's variadic functions bind to Linux's with no thunks.
+// Darwin's ppc one takes its words in r3-r10 too, as Linux's does, but reads
+// them from its caller's parameter area at 24(r1), and saves its lr at 8(r1),
+// where Linux code keeps its own registers: so a Darwin handler is called
+// from the loader's frame laid out as a Darwin caller's, which also keeps r2.
 INTERNAL void perry_xml_call_darwin_variadic(void *function, void *ctx, const char *format, const char *argument) {
+#if defined(__powerpc__)
+    typedef uint32_t (*call_words)(void *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    static call_words call;
+    if (!call)
+        call = (call_words)dlsym(RTLD_DEFAULT, "perry_ppc_call_darwin_words");
+    if (call) {
+        call(function, (uint32_t)(uintptr_t)ctx, (uint32_t)(uintptr_t)format, (uint32_t)(uintptr_t)argument, 0, 0, 0, 0);
+        return;
+    }
+#endif
     ((void (*)(void *, const char *, ...))function)(ctx, format, argument);
 }
 
