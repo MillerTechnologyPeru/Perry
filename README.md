@@ -21,10 +21,9 @@ everything it calls is ordinary Linux code, mostly written in Swift.
 | ppc macOS | 32-bit PowerPC, G4 or later | `perry` | Mac OS X 10.3 to 10.5 Cocoa and Carbon apps |
  
 `perry` reads a program's architectures and hands 32-bit ones to `perry32`
-(beside it, or at `$PERRY32`). arm64e and FairPlay-encrypted binaries are
-rejected with a clear error, so App Store apps must be decrypted first:
-[Getting iOS apps](https://millertechnologyperu.github.io/Perry/getting-apps/)
-shows how to decrypt arm64 apps you own on an Apple Silicon Mac.
+(beside it, or at `$PERRY32`). arm64e and FairPlay-encrypted (`cryptid != 0`)
+binaries are rejected with a clear error; Perry runs unencrypted Mach-O apps
+and executables only.
 
 The [compatibility database](https://millertechnologyperu.github.io/Perry/compatibility/)
 lists the apps and games tested so far and how far each one gets.
