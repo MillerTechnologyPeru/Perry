@@ -3,7 +3,7 @@ name: Pay Up Sucker
 bundle_id: "com.app.otlwtv"
 platform: ios
 kind: app
-tags: [Swift, SwiftUI]
+tags: [Swift]
 reports:
   - pr: 442
     date: 2026-11-25
