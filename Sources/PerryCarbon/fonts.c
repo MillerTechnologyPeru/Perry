@@ -19,9 +19,18 @@
 
 #include "PerryCarbon.h"
 
+// FreeType, where the build has it (i386's): without it fonts are found
+// and their tables read, but no text is measured or drawn.
+#if __has_include(<ft2build.h>)
+#define PERRY_CARBON_FREETYPE 1
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
+#else
+#define PERRY_CARBON_FREETYPE 0
+typedef void *FT_Face;
+typedef unsigned FT_UInt;
+#endif
 
 #include <dlfcn.h>
 #include <limits.h>
@@ -128,7 +137,9 @@ static font_entry fonts[MAX_FONTS];
 static int font_count;
 static uint32_t container_count;
 static pthread_mutex_t fonts_lock = PTHREAD_MUTEX_INITIALIZER;
+#if PERRY_CARBON_FREETYPE
 static FT_Library freetype;
+#endif
 
 static uint32_t read32(const uint8_t *bytes) { return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | bytes[3]; }
 static uint16_t read16(const uint8_t *bytes) { return (uint16_t)(bytes[0] << 8 | bytes[1]); }
@@ -225,12 +236,17 @@ static font_entry *font_for(uint32_t reference) {
 
 /// FreeType's face for a font, made the first time.
 static FT_Face face_for(font_entry *font) {
+#if PERRY_CARBON_FREETYPE
     if (!font) return NULL;
     if (!font->ft) {
         if (!freetype && FT_Init_FreeType(&freetype) != 0) return NULL;
         if (FT_New_Memory_Face(freetype, font->data, (FT_Long)font->length, font->face, &font->ft) != 0) font->ft = NULL;
     }
     return font->ft;
+#else
+    (void)font;
+    return NULL;
+#endif
 }
 
 static int font_from_file(const char *path);
@@ -524,6 +540,7 @@ typedef struct {
 OSStatus carbon_ATSFontGetHorizontalMetrics(uint32_t reference, uint32_t options, ATSFontMetrics *metrics)
     CARBON_SYMBOL(ATSFontGetHorizontalMetrics);
 OSStatus carbon_ATSFontGetHorizontalMetrics(uint32_t reference, uint32_t options, ATSFontMetrics *metrics) {
+#if PERRY_CARBON_FREETYPE
     (void)options;
     FT_Face face = face_for(font_for(reference));
     if (!face || !metrics) return paramErr;
@@ -552,6 +569,10 @@ OSStatus carbon_ATSFontGetHorizontalMetrics(uint32_t reference, uint32_t options
     TT_Postscript *post = (TT_Postscript *)FT_Get_Sfnt_Table(face, FT_SFNT_POST);
     if (post) metrics->italicAngle = (float)post->italicAngle / 65536.0f;
     return noErr;
+#else
+    (void)reference; (void)options; (void)metrics;
+    return paramErr;
+#endif
 }
 
 /// The current port's font's ascent, descent, widest advance and leading,
@@ -559,6 +580,7 @@ OSStatus carbon_ATSFontGetHorizontalMetrics(uint32_t reference, uint32_t options
 /// serif one.
 void carbon_GetFontInfo(FontInfo *info) CARBON_SYMBOL(GetFontInfo);
 void carbon_GetFontInfo(FontInfo *info) {
+#if PERRY_CARBON_FREETYPE
     if (!info) return;
     CGrafPtr port = carbon_current_port();
     int size = port && port->textSize > 0 ? port->textSize : 12;
@@ -578,6 +600,15 @@ void carbon_GetFontInfo(FontInfo *info) {
     info->widMax = (int16_t)ceil(face->max_advance_width * scale);
     int leading = (int)ceil((face->height - face->ascender + face->descender) * scale);
     info->leading = (int16_t)(leading > 0 ? leading : 0);
+#else
+    if (!info) return;
+    CGrafPtr port = carbon_current_port();
+    int size = port && port->textSize > 0 ? port->textSize : 12;
+    info->ascent = (int16_t)(size * 3 / 4 + 1);
+    info->descent = (int16_t)(size / 4 + 1);
+    info->widMax = (int16_t)size;
+    info->leading = 0;
+#endif
 }
 
 // MARK: - ATSUI styles and layouts
@@ -732,6 +763,7 @@ OSStatus carbon_ATSUSetRunStyle(void *pointer, void *style, uint32_t offset, uin
 /// A style's face, set to its size in pixels; NULL when its font is none
 /// here (a sans serif one stands in for no font).
 static FT_Face sized_face(const atsu_style *style) {
+#if PERRY_CARBON_FREETYPE
     font_entry *font = font_for(style->font);
     if (!font) {
         int index = font_named("sans-serif");
@@ -743,21 +775,31 @@ static FT_Face sized_face(const atsu_style *style) {
     if (size < 64) size = 64;
     if (FT_Set_Char_Size(face, 0, size, 72, 72) != 0) return NULL;
     return face;
+#else
+    (void)style;
+    return NULL;
+#endif
 }
 
 /// The glyph of a character, decoding a surrogate pair from its two units.
 static FT_UInt glyph_of(FT_Face face, const uint16_t *text, uint32_t *index, uint32_t end) {
+#if PERRY_CARBON_FREETYPE
     uint32_t character = text[*index];
     if (character >= 0xd800 && character < 0xdc00 && *index + 1 < end && text[*index + 1] >= 0xdc00 && text[*index + 1] < 0xe000) {
         character = 0x10000 + ((character - 0xd800) << 10) + (text[*index + 1] - 0xdc00);
         (*index)++;
     }
     return FT_Get_Char_Index(face, character);
+#else
+    (void)face; (void)text; (void)index; (void)end;
+    return 0;
+#endif
 }
 
 /// Lays a layout's text from `start` out: its records, the last at the
 /// end of the line, in Fixed pixels from its start; how many there are.
 static size_t lay_out(atsu_layout *layout, uint32_t start, uint32_t length, ATSLayoutRecord **records) {
+#if PERRY_CARBON_FREETYPE
     *records = NULL;
     if (!layout->text || !layout->style) return 0;
     FT_Face face = sized_face(layout->style);
@@ -782,6 +824,11 @@ static size_t lay_out(atsu_layout *layout, uint32_t start, uint32_t length, ATSL
     out[count].realPos = (int32_t)position;
     *records = out;
     return count + 1;
+#else
+    (void)layout; (void)start; (void)length;
+    *records = NULL;
+    return 0;
+#endif
 }
 
 static uint32_t text_start(const atsu_layout *layout, uint32_t offset, uint32_t *length) {
@@ -824,6 +871,7 @@ OSStatus carbon_ATSUDirectReleaseLayoutDataArrayPtr(void *line, uint32_t selecto
 OSStatus carbon_ATSUMeasureTextImage(void *pointer, uint32_t offset, uint32_t length, int32_t x, int32_t y, Rect *box)
     CARBON_SYMBOL(ATSUMeasureTextImage);
 OSStatus carbon_ATSUMeasureTextImage(void *pointer, uint32_t offset, uint32_t length, int32_t x, int32_t y, Rect *box) {
+#if PERRY_CARBON_FREETYPE
     atsu_layout *layout = layout_from(pointer);
     if (!layout) return kATSUInvalidTextLayoutErr;
     if (!box) return paramErr;
@@ -856,6 +904,12 @@ OSStatus carbon_ATSUMeasureTextImage(void *pointer, uint32_t offset, uint32_t le
     int originX = x >> 16, originY = y >> 16;
     *box = (Rect){(int16_t)(top + originY), (int16_t)(left + originX), (int16_t)(bottom + originY), (int16_t)(right + originX)};
     return noErr;
+#else
+    (void)offset; (void)length; (void)x; (void)y;
+    if (!layout_from(pointer)) return kATSUInvalidTextLayoutErr;
+    if (box) *box = (Rect){0, 0, 0, 0};
+    return noErr;
+#endif
 }
 
 typedef struct {
@@ -877,6 +931,7 @@ OSStatus carbon_ATSUGlyphGetScreenMetrics(void *pointer, size_t count, const uin
                                           uint8_t antialiased, ATSGlyphScreenMetrics *metrics) CARBON_SYMBOL(ATSUGlyphGetScreenMetrics);
 OSStatus carbon_ATSUGlyphGetScreenMetrics(void *pointer, size_t count, const uint16_t *glyphs, size_t stride, uint8_t integers,
                                           uint8_t antialiased, ATSGlyphScreenMetrics *metrics) {
+#if PERRY_CARBON_FREETYPE
     (void)antialiased;
     atsu_style *style = style_from(pointer);
     if (!style) return kATSUInvalidStyleErr;
@@ -900,6 +955,12 @@ OSStatus carbon_ATSUGlyphGetScreenMetrics(void *pointer, size_t count, const uin
         out->otherSideBearing.x = advance - (m->horiBearingX + m->width) / 64.0f;
     }
     return noErr;
+#else
+    (void)glyphs; (void)stride; (void)integers; (void)antialiased;
+    if (!style_from(pointer)) return kATSUInvalidStyleErr;
+    if (metrics) memset(metrics, 0, count * sizeof *metrics);
+    return noErr;
+#endif
 }
 
 /// Draws a layout's text into the current port's pixels, from its origin
@@ -907,6 +968,7 @@ OSStatus carbon_ATSUGlyphGetScreenMetrics(void *pointer, size_t count, const uin
 /// with the style's color by the glyph's coverage.
 OSStatus carbon_ATSUDrawText(void *pointer, uint32_t offset, uint32_t length, int32_t x, int32_t y) CARBON_SYMBOL(ATSUDrawText);
 OSStatus carbon_ATSUDrawText(void *pointer, uint32_t offset, uint32_t length, int32_t x, int32_t y) {
+#if PERRY_CARBON_FREETYPE
     atsu_layout *layout = layout_from(pointer);
     if (!layout) return kATSUInvalidTextLayoutErr;
     CGrafPtr port = carbon_current_port();
@@ -966,4 +1028,8 @@ OSStatus carbon_ATSUDrawText(void *pointer, uint32_t offset, uint32_t length, in
     free(records);
     if (port->window) carbon_port_flush(port);
     return noErr;
+#else
+    (void)offset; (void)length; (void)x; (void)y;
+    return layout_from(pointer) ? noErr : kATSUInvalidTextLayoutErr;
+#endif
 }
