@@ -9,9 +9,15 @@
 // ones the app's own code raises while Foundation is working on a
 // collection: a sort comparator, -isEqual: during -removeObject:, an
 // enumeration block and a notification observer. Each is followed by more
-// calls on the same objects, which must work as before.
+// calls on the same objects, which must work as before. And ones the app's
+// code raises while Foundation holds a lock of the object's: a regular
+// expression's enumeration block and a queued notification's -name. The calls after those are made on another
+// thread, where a lock the exception left locked would keep them waiting.
+// A cache's delegate and a key's -isEqual: raise too, but Darwin's cache
+// can't be used after either.
 
 #import <Foundation/Foundation.h>
+#include <dispatch/dispatch.h>
 #include <stdio.h>
 
 static void say(NSString *line) {
@@ -54,6 +60,34 @@ static void say(NSString *line) {
 }
 - (NSUInteger)hash { return 7; }
 - (NSString *)description { return @"prickly"; }
+@end
+
+// A notification whose -name raises while `bellRaises` is set.
+static BOOL bellRaises;
+
+@interface Bell : NSNotification
+- (instancetype)initRinging;
+@end
+
+@implementation Bell
+- (instancetype)initRinging { return self; }
+- (NSNotificationName)name {
+    if (bellRaises)
+        [NSException raise:@"Bell" format:@"asked its name"];
+    return @"Bell";
+}
+- (id)object { return nil; }
+- (NSDictionary *)userInfo { return nil; }
+@end
+
+// Raises as a cache evicts an object.
+@interface Evictor : NSObject <NSCacheDelegate>
+@end
+
+@implementation Evictor
+- (void)cache:(NSCache *)cache willEvictObject:(id)object {
+    [NSException raise:@"Evictor" format:@"evicting"];
+}
 @end
 
 @interface Watcher : NSObject
@@ -258,6 +292,100 @@ static void callbacks(void) {
     say([NSString stringWithFormat:@"observer after: heard %lu", (unsigned long)heard]);
 }
 
+// Caches the app's code raised in, which Darwin's can't be used again.
+static NSMutableArray *abandoned;
+
+// What `work` returns on another thread, or "timed out" if it waits
+// there for more than five seconds.
+static NSString *elsewhere(NSString *(^work)(void)) {
+    __block NSString *result = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        @autoreleasepool {
+            NSString *value = work();
+            result = value;
+        }
+        dispatch_semaphore_signal(done);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0)
+        return @"timed out";
+    return result;
+}
+
+static void locks(void) {
+    NSRegularExpression *digits = [NSRegularExpression regularExpressionWithPattern:@"[0-9]+" options:0 error:NULL];
+    NSString *text = [@[@"a1", @"b22", @"c333"] componentsJoinedByString:@" "];
+    NSRange all = NSMakeRange(0, text.length);
+    @try {
+        [digits enumerateMatchesInString:text options:0 range:all usingBlock:^(NSTextCheckingResult *match, NSMatchingFlags flags, BOOL *stop) {
+            if (match.range.length == 2)
+                [NSException raise:@"Match" format:@"found %@", [text substringWithRange:match.range]];
+        }];
+        say(@"regex: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"regex: %@: %@", exception.name, exception.reason]);
+    }
+    NSMutableArray *found = [NSMutableArray array];
+    [digits enumerateMatchesInString:text options:0 range:all usingBlock:^(NSTextCheckingResult *match, NSMatchingFlags flags, BOOL *stop) {
+        // The same expression, used again inside its own enumeration.
+        [found addObject:[NSString stringWithFormat:@"%@/%lu", [text substringWithRange:match.range],
+                          (unsigned long)[digits numberOfMatchesInString:text options:0 range:all]]];
+    }];
+    say([NSString stringWithFormat:@"regex nested: %@", [found componentsJoinedByString:@" "]]);
+    say([NSString stringWithFormat:@"regex after: %@", elsewhere(^{
+        return [NSString stringWithFormat:@"%lu matches", (unsigned long)[digits numberOfMatchesInString:text options:0 range:all]];
+    })]);
+
+    NSCache *cache = [NSCache new];
+    Evictor *evictor = [Evictor new];
+    cache.delegate = evictor;
+    cache.countLimit = 1;
+    [cache setObject:@"one" forKey:@"1"];
+    @try {
+        [cache setObject:@"two" forKey:@"2"];
+        say(@"cache: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"cache: %@: %@", exception.name, exception.reason]);
+    }
+    // Darwin's cache refuses any further call after its delegate raises
+    // ("invalid re-entrancy") and stays locked after a key's -isEqual:
+    // does, and doesn't survive its -dealloc either: each is kept, and
+    // not used again.
+    abandoned = [NSMutableArray arrayWithObject:cache];
+    cache = [NSCache new];
+    [abandoned addObject:cache];
+    Prickly *prickly = [Prickly new];
+    [cache setObject:@"thorn" forKey:prickly];
+    @try {
+        id object = [cache objectForKey:[Prickly new]];
+        say([NSString stringWithFormat:@"cache isEqual: not raised, %@", object]);
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"cache isEqual: %@: %@", exception.name, exception.reason]);
+    }
+
+    NSNotificationCenter *center = [NSNotificationCenter new];
+    __block NSUInteger chimes = 0;
+    id observer = [center addObserverForName:@"Chime" object:nil queue:nil usingBlock:^(NSNotification *note) { chimes++; }];
+    NSNotificationQueue *queue = [[NSNotificationQueue alloc] initWithNotificationCenter:center];
+    Bell *bell = [[Bell alloc] initRinging];
+    [queue enqueueNotification:bell postingStyle:NSPostWhenIdle coalesceMask:NSNotificationNoCoalescing forModes:nil];
+    bellRaises = YES;
+    @try {
+        [queue dequeueNotificationsMatching:[NSNotification notificationWithName:@"Chime" object:nil]
+                               coalesceMask:NSNotificationCoalescingOnName];
+        say(@"queue: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"queue: %@: %@", exception.name, exception.reason]);
+    }
+    bellRaises = NO;
+    say([NSString stringWithFormat:@"queue after: %@", elsewhere(^{
+        [queue dequeueNotificationsMatching:bell coalesceMask:NSNotificationCoalescingOnName];
+        [queue enqueueNotification:[NSNotification notificationWithName:@"Chime" object:nil] postingStyle:NSPostNow];
+        return [NSString stringWithFormat:@"chimed %lu", (unsigned long)chimes];
+    })]);
+    [center removeObserver:observer];
+}
+
 int main(void) {
     @autoreleasepool {
         raised();
@@ -268,6 +396,7 @@ int main(void) {
         classes();
         runtime();
         callbacks();
+        locks();
         say(@"done");
     }
     return 0;

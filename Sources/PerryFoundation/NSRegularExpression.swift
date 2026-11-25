@@ -59,34 +59,51 @@ final class RegexStorage {
     /// NSMatchingOptions: anchored 4, transparent bounds 8, without
     /// anchoring bounds 16.
     func matches(in text: [UInt16], range: NSRange, options: UInt, _ body: ([NSRange]) -> Bool) {
-        lock.locked {
-            text.withUnsafeBufferPointer { buffer in
-                var status = U_ZERO_ERROR
-                swift_uregex_setText(regex, buffer.baseAddress, Int32(buffer.count), &status)
-                swift_uregex_setRegion(regex, Int32(range.location), Int32(range.location + range.length), &status)
-                swift_uregex_useTransparentBounds(regex, options & 8 != 0 ? 1 : 0, &status)
-                swift_uregex_useAnchoringBounds(regex, options & 16 != 0 ? 0 : 1, &status)
-                guard !ICU.failed(status) else { return }
-                let anchored = options & 4 != 0
-                var first = true
-                while true {
-                    let found = anchored && first ? swift_uregex_lookingAt(regex, -1, &status)
-                                                   : swift_uregex_findNext(regex, &status)
-                    guard found != 0, !ICU.failed(status) else { return }
-                    first = false
-                    let ranges = (0...groups).map { group -> NSRange in
-                        var groupStatus = U_ZERO_ERROR
-                        let start = swift_uregex_start(regex, Int32(group), &groupStatus)
-                        let end = swift_uregex_end(regex, Int32(group), &groupStatus)
-                        guard start >= 0, !ICU.failed(groupStatus) else { return NSRange(location: notFound, length: 0) }
-                        return NSRange(location: UInt(start), length: UInt(end - start))
-                    }
-                    if !body(ranges) || anchored { return }
-                }
-            }
+        lock.locked { RegexStorage.matches(of: regex, groups: groups, in: text, range: range, options: options, body) }
+    }
+
+    /// The same for `body` that runs the app's code, such as the block of
+    /// -enumerateMatchesInString:options:range:usingBlock:, which may raise
+    /// or use this expression again: the matching is on a copy of the
+    /// compiled pattern (uregex_clone) with no lock held, as an exception
+    /// unwinds through Swift without unlocking. A copy an exception leaves
+    /// behind is not closed.
+    func matchesCallingOut(in text: [UInt16], range: NSRange, options: UInt, _ body: ([NSRange]) -> Bool) {
+        var status = U_ZERO_ERROR
+        guard let copy = lock.locked({ swift_uregex_clone(regex, &status) }) else { return }
+        defer { swift_uregex_close(copy) }
+        guard !ICU.failed(status) else { return }
+        RegexStorage.matches(of: copy, groups: groups, in: text, range: range, options: options, body)
+    }
+
+    private static func matches(of regex: OpaquePointer, groups: Int, in text: [UInt16], range: NSRange, options: UInt,
+                                _ body: ([NSRange]) -> Bool) {
+        text.withUnsafeBufferPointer { buffer in
             var status = U_ZERO_ERROR
-            swift_uregex_setText(regex, nil, 0, &status)
+            swift_uregex_setText(regex, buffer.baseAddress, Int32(buffer.count), &status)
+            swift_uregex_setRegion(regex, Int32(range.location), Int32(range.location + range.length), &status)
+            swift_uregex_useTransparentBounds(regex, options & 8 != 0 ? 1 : 0, &status)
+            swift_uregex_useAnchoringBounds(regex, options & 16 != 0 ? 0 : 1, &status)
+            guard !ICU.failed(status) else { return }
+            let anchored = options & 4 != 0
+            var first = true
+            while true {
+                let found = anchored && first ? swift_uregex_lookingAt(regex, -1, &status)
+                                               : swift_uregex_findNext(regex, &status)
+                guard found != 0, !ICU.failed(status) else { return }
+                first = false
+                let ranges = (0...groups).map { group -> NSRange in
+                    var groupStatus = U_ZERO_ERROR
+                    let start = swift_uregex_start(regex, Int32(group), &groupStatus)
+                    let end = swift_uregex_end(regex, Int32(group), &groupStatus)
+                    guard start >= 0, !ICU.failed(groupStatus) else { return NSRange(location: notFound, length: 0) }
+                    return NSRange(location: UInt(start), length: UInt(end - start))
+                }
+                if !body(ranges) || anchored { return }
+            }
         }
+        var status = U_ZERO_ERROR
+        swift_uregex_setText(regex, nil, 0, &status)
     }
 
     /// The template with $n and \x expanded for one match.
@@ -332,6 +349,11 @@ public class NSRegularExpression: NSObject {
         regex?.matches(in: Array(string.utf16), range: range, options: options, body)
     }
 
+    /// each for a body that runs the app's code.
+    private func eachCallingOut(_ string: String, _ options: UInt, _ range: NSRange, _ body: ([NSRange]) -> Bool) {
+        regex?.matchesCallingOut(in: Array(string.utf16), range: range, options: options, body)
+    }
+
     @ObjCMethod("matchesInString:options:range:")
     func matches(in string: String, options: UInt, range: NSRange) -> ObjCObject {
         var results: [id] = []
@@ -377,7 +399,7 @@ public class NSRegularExpression: NSObject {
     func enumerateMatches(in string: String, options: UInt, range: NSRange, using block: ObjCObject) {
         typealias Invoke = @convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void
         let invoke = Blocks.invoke(block.id, as: Invoke.self)
-        each(string, options, range) { ranges in
+        eachCallingOut(string, options, range) { ranges in
             var stop = false
             ObjC.autoreleasepool { invoke(block.id, checkingResult(ranges, string), 0, &stop) }
             return !stop

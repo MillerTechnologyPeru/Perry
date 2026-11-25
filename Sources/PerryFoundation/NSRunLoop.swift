@@ -227,17 +227,20 @@ final class RunLoopState {
                     return .handledSource
                 }
             }
+            // A timer invalidated without the run loop hearing of it would
+            // otherwise come due forever. It is released with the mutex
+            // unlocked: the last release runs its context's release
+            // callback, the app's code.
+            var invalid: [id] = []
             let next: (timer: id?, fire: Double)? = locked {
                 if stopRequested {
                     stopRequested = false
                     return nil
                 }
-                // A timer invalidated without the run loop hearing of it
-                // would otherwise come due forever.
-                let invalid = timers.filter { !Timers.isValid($0) }
-                if !invalid.isEmpty {
-                    timers.removeAll { !Timers.isValid($0) }
-                    invalid.forEach { ObjC.release($0) }
+                let split = timers.split { !Timers.isValid($0) }
+                if !split.removed.isEmpty {
+                    timers = split.kept
+                    invalid = split.removed
                 }
                 // Retained while the loop looks at it: another thread may
                 // invalidate it, taking it from the loop.
@@ -245,6 +248,7 @@ final class RunLoopState {
                 if let due { _ = ObjC.retain(due) }
                 return (due, due.map(Timers.fireDate) ?? .infinity)
             }
+            invalid.forEach { ObjC.release($0) }
             guard let next else { return .stopped }
             let now = absoluteTimeNow()
             guard let timer = next.timer else {
