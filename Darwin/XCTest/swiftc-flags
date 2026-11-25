@@ -1,5 +1,5 @@
 -F
-/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
+$PLATFORM_DIR/Developer/Library/Frameworks
 -framework
 XCTest
 -Xlinker
