@@ -202,6 +202,17 @@ static void serve(int listening, void (*handler)(int)) {
     });
 }
 
+// Leaves out the server's notes of a close the client started: Darwin
+// doesn't always send its close frame before it drops the connection.
+static void forgetClientClose(NSString *reason) {
+    @synchronized (serverNotes) {
+        NSIndexSet *close = [serverNotes indexesOfObjectsPassingTest:^BOOL(NSString *line, NSUInteger index, BOOL *stop) {
+            return [line hasPrefix:@"server: frame fin=1 masked=1 opcode=8 "] || [line isEqual:[@"server: close 1000 " stringByAppendingString:reason]];
+        }];
+        [serverNotes removeObjectsAtIndexes:close];
+    }
+}
+
 // The servers' notes so far, once each connection they accepted is done
 // (for up to five seconds): a server can still be reading a close when the
 // client has finished, which makes its notes late on some systems.
@@ -413,6 +424,8 @@ static void webSockets(NSURLSession *session, Recorder *recorder) {
     }];
     await(done);
     P(@"events: %@", [recorder drain]);
+    for (int i = 0; i < 500 && __sync_fetch_and_add(&serving, 0) > 0; i++) usleep(10000);
+    forgetClientClose(@"bye");
     printNotes();
 
     // The server closes this one.
