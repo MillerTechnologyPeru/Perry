@@ -52,7 +52,7 @@ enum Forwarding {
                        indirect: UInt64?, out: UnsafeMutablePointer<UInt64>) {
         let size = details.sizes[0]
         guard size > 0 else { return }
-        storage.result.withUnsafeBytes { result in
+        storage.withResult { result in
             if let indirect {
                 UnsafeMutableRawPointer(bitPattern: UInt(indirect))?.copyMemory(from: result.baseAddress!, byteCount: min(size, result.count))
                 out[0] = indirect
@@ -168,7 +168,7 @@ enum Forwarding {
                        indirect: UInt64, out: UnsafeMutablePointer<UInt64>) {
         let size = details.sizes[0]
         guard size > 0 else { return }
-        storage.result.withUnsafeBytes { result in
+        storage.withResult { result in
             if let (kind, count) = Structures.floatingMembers(String(cString: details.parts[0])) {
                 let member = kind == "d" ? 8 : 4
                 for position in 0..<count {
@@ -229,6 +229,19 @@ extension NSObject {
         let name = String(cString: selector.assumingMemoryBound(to: CChar.self))
         Exceptions.raise(name: "NSInvalidArgumentException",
                          reason: "-[\(ObjC.className(objcObject)) \(name)]: unrecognized selector sent to instance \(objcObject)")
+    }
+
+    /// Darwin's, which the runtime sends a receiver whose message nothing
+    /// took and that has no signature for it: NSInvalidArgumentException,
+    /// for a class receiver too, in place of the runtime's own, which ends
+    /// the process.
+    @ObjCMethod("doesNotRecognizeSelector:")
+    func doesNotRecognize(_ selector: ObjCSelector?) {
+        let name = selector.map { String(cString: $0.pointer.assumingMemoryBound(to: CChar.self)) } ?? "(null)"
+        let isClass = ObjC.classIsMetaClass?(ObjC.objectGetClass(objcObject)) ?? false
+        let address = "0x" + String(UInt(bitPattern: objcObject), radix: 16)
+        Exceptions.raise(name: "NSInvalidArgumentException",
+                         reason: "\(isClass ? "+" : "-")[\(ObjC.className(objcObject)) \(name)]: unrecognized selector sent to \(isClass ? "class" : "instance") \(address)")
     }
 }
 
