@@ -163,8 +163,8 @@ public enum Objects {
     public static func retain(_ object: ObjectPointer) -> ObjectPointer {
         if Zombies.enabled, Zombies.report(object, "retain") { return object }
         // Objects of classes the runtime cannot read are treated as immortal.
-        guard let info = Runtime.info(classOf(object)) else { return object }
-        if usesDefaultRetainRelease(info) {
+        guard let info = Runtime.unretainedInfo(classOf(object)) else { return object }
+        if info._withUnsafeGuaranteedRef(usesDefaultRetainRelease) {
             RetainCounts.retain(object)
             return object
         }
@@ -173,8 +173,8 @@ public enum Objects {
 
     public static func release(_ object: ObjectPointer) {
         if Zombies.enabled, Zombies.report(object, "release") { return }
-        guard let info = Runtime.info(classOf(object)) else { return }
-        if usesDefaultRetainRelease(info) {
+        guard let info = Runtime.unretainedInfo(classOf(object)) else { return }
+        if info._withUnsafeGuaranteedRef(usesDefaultRetainRelease) {
             if RetainCounts.release(object) {
                 Messages.sendVoid(object, Sel.dealloc)
             }
@@ -192,8 +192,8 @@ public enum Objects {
 
     public static func autorelease(_ object: ObjectPointer) -> ObjectPointer {
         if Zombies.enabled, Zombies.report(object, "autorelease") { return object }
-        guard let info = Runtime.info(classOf(object)) else { return object }
-        if usesDefaultRetainRelease(info) {
+        guard let info = Runtime.unretainedInfo(classOf(object)) else { return object }
+        if info._withUnsafeGuaranteedRef(usesDefaultRetainRelease) {
             AutoreleasePool.add(object)
             return object
         }
@@ -363,6 +363,24 @@ enum RetainCounts {
             set { insert(key, newValue) }
         }
 
+        /// Runs `body` on the entry for `key`, made empty first if there is
+        /// none, in place: one probe, where reading and then storing it
+        /// takes two or more.
+        @inline(__always)
+        mutating func update<Result>(_ key: UInt, _ body: (inout Entry) -> Result) -> Result {
+            var (index, found) = slot(key)
+            if !found {
+                if (count + 1) * 2 > capacity {
+                    grow()
+                    index = slot(key).index
+                }
+                keys[index] = key
+                (values + index).initialize(to: Entry())
+                count += 1
+            }
+            return body(&values[index])
+        }
+
         private mutating func insert(_ key: UInt, _ value: Entry) {
             let (index, found) = slot(key)
             if found {
@@ -422,12 +440,20 @@ enum RetainCounts {
     /// Many, so threads retaining and releasing different objects seldom
     /// wait on each other: with 64, LightBlue's main thread spent a fifth
     /// of its time spinning on shards its Bluetooth queues held.
-    static let shards: [Shard] = (0..<1024).map { _ in Shard() }
+    /// Each kept for the life of the process, and used without a reference:
+    /// counting a shard around every retain and release cost two atomic
+    /// operations each.
+    nonisolated(unsafe) static let shards: UnsafeMutablePointer<Unmanaged<Shard>> = {
+        let shards = UnsafeMutablePointer<Unmanaged<Shard>>.allocate(capacity: 1024)
+        for index in 0..<1024 { (shards + index).initialize(to: .passRetained(Shard())) }
+        return shards
+    }()
 
+    /// Runs `body` on the table of the object's shard, under its lock.
     @inline(__always)
-    static func shard(_ object: ObjectPointer) -> Shard {
+    static func withTable<Result: Sendable>(_ object: ObjectPointer, _ body: (inout sending EntryTable) -> Result) -> Result {
         let address = UInt(bitPattern: object)
-        return shards[Int((address >> 4) ^ (address >> 14)) & 1023]
+        return shards[Int((address >> 4) ^ (address >> 14)) & 1023]._withUnsafeGuaranteedRef { shard in shard.table.withLock { table in body(&table) } }
     }
 
     // MARK: Objects kept
@@ -445,18 +471,18 @@ enum RetainCounts {
 
     static func retain(_ object: ObjectPointer) {
         defer { if Zombies.tracing { Zombies.trace(object, "retain") } }
-        let peerAddress = shard(object).table.withLock { table -> UInt in
-            let key = UInt(bitPattern: object)
-            // A kept object retained has this one reference, its own, which
-            // it kept (a peer's Swift one included).
-            if var entry = table[key], entry.released {
-                entry.released = false
-                table[key] = entry
+        let peerAddress = withTable(object) { table -> UInt in
+            table.update(UInt(bitPattern: object)) { entry -> UInt in
+                // A kept object retained has this one reference, its own,
+                // which it kept (a peer's Swift one included).
+                if entry.released {
+                    entry.released = false
+                    return 0
+                }
+                if entry.peerAddress != 0 { return entry.peerAddress }
+                entry.extra += 1
                 return 0
             }
-            if let address = table[key]?.peerAddress, address != 0 { return address }
-            table[key, default: Entry()].extra += 1
-            return 0
         }
         if let peer = UnsafeMutableRawPointer(bitPattern: peerAddress) { _ = Unmanaged<AnyObject>.fromOpaque(peer).retain() }
     }
@@ -468,37 +494,34 @@ enum RetainCounts {
     static func release(_ object: ObjectPointer) -> Bool {
         if Zombies.tracing { Zombies.trace(object, "release") }
         enum Outcome { case keep, deallocate, releasePeer(UInt) }
-        let outcome = shard(object).table.withLock { table -> Outcome in
-            let key = UInt(bitPattern: object)
-            var entry = table[key] ?? Entry()
-            if entry.deallocating || entry.released {
-                return .keep
-            }
-            if let peer = entry.peer {
-                // The last reference is the object's own.
-                guard swift_retainCount(peer) <= 1 else { return .releasePeer(entry.peerAddress) }
+        let outcome = withTable(object) { table -> Outcome in
+            // An object with no entry gets one, which the paths below that
+            // leave it alone find as an empty entry's defaults.
+            table.update(UInt(bitPattern: object)) { entry -> Outcome in
+                if entry.deallocating || entry.released {
+                    return .keep
+                }
+                if let peer = entry.peer {
+                    // The last reference is the object's own.
+                    guard swift_retainCount(peer) <= 1 else { return .releasePeer(entry.peerAddress) }
+                    if keepsObjects {
+                        entry.released = true
+                        return .keep
+                    }
+                    entry.deallocating = true
+                    return .deallocate
+                }
+                if entry.extra > 0 {
+                    entry.extra -= 1
+                    return .keep
+                }
                 if keepsObjects {
                     entry.released = true
-                    table[key] = entry
                     return .keep
                 }
                 entry.deallocating = true
-                table[key] = entry
                 return .deallocate
             }
-            if entry.extra > 0 {
-                entry.extra -= 1
-                table[key] = entry
-                return .keep
-            }
-            if keepsObjects {
-                entry.released = true
-                table[key] = entry
-                return .keep
-            }
-            entry.deallocating = true
-            table[key] = entry
-            return .deallocate
         }
         switch outcome {
         case .keep: return false
@@ -511,7 +534,7 @@ enum RetainCounts {
 
     /// The object's references; none for a kept one released.
     static func count(_ object: ObjectPointer) -> UInt {
-        let (extra, peerAddress, released) = shard(object).table.withLock { table -> (UInt, UInt, Bool) in
+        let (extra, peerAddress, released) = withTable(object) { table -> (UInt, UInt, Bool) in
             let entry = table[UInt(bitPattern: object)]
             return (entry?.extra ?? 0, entry?.peerAddress ?? 0, entry?.released ?? false)
         }
@@ -527,7 +550,7 @@ enum RetainCounts {
     /// one for the first, which an -init's caller is given; otherwise the
     /// Swift reference that made the object is the first.
     static func bindPeer(_ object: ObjectPointer, _ peer: UnsafeMutableRawPointer, retained: Bool) {
-        let extra = shard(object).table.withLock { table -> UInt in
+        let extra = withTable(object) { table -> UInt in
             let key = UInt(bitPattern: object)
             var entry = table[key] ?? Entry()
             let extra = entry.extra
@@ -541,7 +564,7 @@ enum RetainCounts {
     }
 
     static func peer(_ object: ObjectPointer) -> UnsafeMutableRawPointer? {
-        let address = shard(object).table.withLock { table in table[UInt(bitPattern: object)]?.peerAddress ?? 0 }
+        let address = withTable(object) { table in table[UInt(bitPattern: object)]?.peerAddress ?? 0 }
         return UnsafeMutableRawPointer(bitPattern: address)
     }
 
@@ -549,7 +572,7 @@ enum RetainCounts {
     /// when the object, no longer counted by it, should now be deallocated;
     /// false when it is already being deallocated.
     static func peerWillDeinitialize(_ object: ObjectPointer) -> Bool {
-        shard(object).table.withLock { table in
+        withTable(object) { table in
             let key = UInt(bitPattern: object)
             guard var entry = table[key], entry.peerAddress != 0 else { return false }
             entry.peerAddress = 0
@@ -564,7 +587,7 @@ enum RetainCounts {
     /// A peer is retained only while Swift still holds it.
     static func tryRetain(_ object: ObjectPointer) -> Bool {
         defer { if Zombies.tracing { Zombies.trace(object, "retain") } }
-        return shard(object).table.withLock { table -> Bool in
+        return withTable(object) { table -> Bool in
             let key = UInt(bitPattern: object)
             var entry = table[key] ?? Entry()
             if entry.deallocating { return false }
@@ -582,25 +605,25 @@ enum RetainCounts {
     }
 
     static func isWeaklyReferenced(_ object: ObjectPointer) -> Bool {
-        shard(object).table.withLock { table in
+        withTable(object) { table in
             table[UInt(bitPattern: object)]?.weaklyReferenced ?? false
         }
     }
 
     static func isDeallocating(_ object: ObjectPointer) -> Bool {
-        shard(object).table.withLock { table in
+        withTable(object) { table in
             table[UInt(bitPattern: object)]?.deallocating ?? false
         }
     }
 
     static func update(_ object: ObjectPointer, _ body: (inout Entry) -> Void) {
-        shard(object).table.withLock { table in
+        withTable(object) { table in
             body(&table[UInt(bitPattern: object), default: Entry()])
         }
     }
 
     static func remove(_ object: ObjectPointer) -> Entry {
-        shard(object).table.withLock { table in
+        withTable(object) { table in
             table.removeValue(forKey: UInt(bitPattern: object)) ?? Entry()
         }
     }
