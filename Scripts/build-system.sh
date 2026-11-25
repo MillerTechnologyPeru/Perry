@@ -1,7 +1,6 @@
 #!/bin/bash
-# Builds Perry's System with Xcode's SDKs (on a Mac, or in perry-dev under
-# Scripts/docker-darwin.sh): apple/swift-system at a pinned release,
-# compiled as the module System, as Apple builds libswiftSystem from the
+# Builds Perry's System with Xcode's SDKs on a Mac: apple/swift-system at a
+# pinned release, compiled as the module System, as Apple builds libswiftSystem from the
 # same sources, rather than as the package's SystemPackage. It is built
 # with library evolution, the availability Apple's build gives each release
 # (the package's own table, as SYSTEM_ABI_STABLE has it), and the Swift 6
