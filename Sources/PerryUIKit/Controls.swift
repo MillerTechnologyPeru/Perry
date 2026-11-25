@@ -1766,6 +1766,10 @@ open class UIScreen: NSObject {
     @ObjCMethod("brightness") func brightness() -> CGFloat { 0.5 }
     @ObjCMethod("setBrightness:") func setBrightness(_ brightness: CGFloat) {}
     @ObjCMethod("maximumFramesPerSecond") func maximumFramesPerSecond() -> Int { 60 }
+    /// Extended dynamic range headroom (iOS 16): how far above SDR white
+    /// the screen can go. The display is standard range, so 1.
+    @ObjCMethod("potentialEDRHeadroom") func potentialEDRHeadroom() -> CGFloat { 1 }
+    @ObjCMethod("currentEDRHeadroom") func currentEDRHeadroom() -> CGFloat { 1 }
     @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { Windows.key.map { NSObject($0) } }
     @ObjCMethod("fixedCoordinateSpace") func fixedCoordinateSpace() -> NSObject { UIScreenFixedSpace.shared }
 

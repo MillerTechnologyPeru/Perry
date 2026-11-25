@@ -196,11 +196,14 @@ open class UIWindow: UIView {
     func makeKeyAndVisible() {
         sendSetHidden(false)
         makeKeyWindow()
-        // Its views are laid out now, as UIKit's are when a window is
-        // shown, not at the run loop's next pass: a program may wait in its
-        // launch method for what its view's layoutSubviews sets up (Sonic &
-        // SEGA All-Stars Racing draws there until its game has started).
-        layoutIfNeeded()
+        // Its views are laid out in the next pass, as UIKit lays a shown
+        // window out at the run loop's next commit, not inside this call:
+        // Unity's view layout makes its keyboard delegate, and
+        // +[KeyboardDelegate Initialize], which Unity calls once this
+        // returns, asserts when one exists. A program that waits in its
+        // launch method for what layoutSubviews sets up runs the run loop,
+        // which runs the pass.
+        Updates.schedule()
     }
 
     @ObjCMethod("makeKeyWindow")
