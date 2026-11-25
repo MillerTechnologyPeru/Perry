@@ -8,9 +8,8 @@
 
 #if OPENSWIFTUI_TARGET_OS_DARWIN
 
-// Modified based on macOS 26.2 SDK and iOS 18.5/26.2 SDKs. Keep the
-// declarations aligned with AppKit and UIKit because clients can import both
-// those modules and UIFoundation_Private.
+// Keep declarations aligned with AppKit and UIKit because clients can import
+// both those modules and UIFoundation_Private.
 
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
