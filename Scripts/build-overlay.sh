@@ -43,9 +43,12 @@ includes=()
 [ -d "Darwin/$module/include" ] && includes=(-I "Darwin/$module/include")
 
 # Compiler flags of the module's own, one per line, in Darwin/<Module>/swiftc-flags.
+# $PLATFORM_DIR in one is the SDK's platform directory, the selected
+# Xcode's (XCTest's frameworks are there, not in the SDK).
+platform_dir=$(xcrun --sdk "$platform" --show-sdk-platform-path)
 flags=()
 if [ -f "Darwin/$module/swiftc-flags" ]; then
-    while IFS= read -r flag; do [ -n "$flag" ] && flags+=("$flag"); done < "Darwin/$module/swiftc-flags"
+    while IFS= read -r flag; do [ -n "$flag" ] && flags+=("${flag//\$PLATFORM_DIR/$platform_dir}"); done < "Darwin/$module/swiftc-flags"
 fi
 
 # Mac Catalyst's frameworks and Swift modules are under the macOS SDK's
