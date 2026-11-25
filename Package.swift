@@ -7,6 +7,11 @@ import PackageDescription
 // which every other build would resolve to as well.
 let mistKit = Context.environment["PERRY_CLOUDKIT_MISTKIT"] == "1"
 
+// PERRY_JAVASCRIPTCORE=wpe builds JavaScriptCore's provider over WPE WebKit's JavaScriptCore rather than
+// WebKitGTK's: the same C API, in libWPEWebKit, for a system that has WPE WebKit and no GTK. WPE's own build
+// keeps that API to itself; a WPE WebKit that exports it and installs its headers (as WebKitGTK does) is needed.
+let javaScriptCorePackage = Context.environment["PERRY_JAVASCRIPTCORE"] == "wpe" ? "wpe-webkit-2.0" : "javascriptcoregtk-4.1"
+
 let package = Package(
     name: "Perry",
     products: [
@@ -309,8 +314,8 @@ let package = Package(
             plugins: ["PerryProviderPlugin"]
         ),
         // WebKitGTK's JavaScriptCore, whose C API is Apple's, and the
-        // Objective-C API built on it.
-        .systemLibrary(name: "CJavaScriptCore", pkgConfig: "javascriptcoregtk-4.1"),
+        // Objective-C API built on it; or WPE WebKit's (PERRY_JAVASCRIPTCORE).
+        .systemLibrary(name: "CJavaScriptCore", pkgConfig: javaScriptCorePackage),
         .target(name: "CPerryJavaScriptCore"),
         .target(
             name: "PerryJavaScriptCore",
