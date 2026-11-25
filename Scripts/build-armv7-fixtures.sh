@@ -10,7 +10,7 @@
 #   (default: hello.c)
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-llvm=$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)
+llvm=${PERRY_LLVM_BIN:-$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)}
 ld=$root/.toolchains/cctools/bin/arm-apple-darwin11-ld
 out=$root/.build/perry-fixtures/armv7
 min=${1:-6.0}
