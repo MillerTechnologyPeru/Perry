@@ -754,9 +754,9 @@ public class NSMutableArray: NSArray {
     @ObjCMethod("removeObject:")
     func remove(_ element: ObjCObject?) {
         guard let element else { return }
-        let matches = { (object: id) in ObjectKey(object: object) == ObjectKey(object: element.id) }
-        let removed = storage.objects.filter(matches)
-        storage.objects.removeAll(where: matches)
+        // -isEqual: runs with no access to the elements open (Array.split).
+        let (kept, removed) = storage.objects.split { ObjectKey(object: $0) == ObjectKey(object: element.id) }
+        storage.objects = kept
         storage.enumeration.mutated()
         for item in removed { ObjC.release(item) }
     }
@@ -766,9 +766,8 @@ public class NSMutableArray: NSArray {
     func remove(objectsIn other: NSArray?) {
         let keys = (other?.elements ?? []).map { ObjectKey(object: $0) }
         guard !keys.isEmpty else { return }
-        let matches = { (object: id) in keys.contains(ObjectKey(object: object)) }
-        let removed = storage.objects.filter(matches)
-        storage.objects.removeAll(where: matches)
+        let (kept, removed) = storage.objects.split { keys.contains(ObjectKey(object: $0)) }
+        storage.objects = kept
         storage.enumeration.mutated()
         for item in removed { ObjC.release(item) }
     }
@@ -835,11 +834,12 @@ public class NSMutableArray: NSArray {
     }
 
     /// NSComparisonResult from the block: ascending -1 first. Swift's sort
-    /// is stable, as NSSortStable asks.
+    /// is stable, as NSSortStable asks. The sorts sort a copy, which is
+    /// assigned back once the app's comparisons are done (Array.split).
     @ObjCMethod("sortUsingComparator:")
     func sort(comparator: ObjCBlock) {
         let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
-        storage.objects.sort { compare(comparator.object, $0, $1) < 0 }
+        storage.objects = storage.objects.sorted { compare(comparator.object, $0, $1) < 0 }
         storage.enumeration.mutated()
     }
 
@@ -849,7 +849,7 @@ public class NSMutableArray: NSArray {
     func sort(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) {
         guard let function else { return }
         let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
-        storage.objects.sort { compare($0, $1, context) < 0 }
+        storage.objects = storage.objects.sorted { compare($0, $1, context) < 0 }
         storage.enumeration.mutated()
     }
 
@@ -939,7 +939,7 @@ public class NSMutableArray: NSArray {
     @ObjCMethod("sortUsingSelector:")
     func sort(using selector: ObjCSelector) {
         let sel = selector.pointer.assumingMemoryBound(to: CChar.self)
-        storage.objects.sort { ObjC.sendInt($0, sel, $1) < 0 }
+        storage.objects = storage.objects.sorted { ObjC.sendInt($0, sel, $1) < 0 }
         storage.enumeration.mutated()
     }
 }
