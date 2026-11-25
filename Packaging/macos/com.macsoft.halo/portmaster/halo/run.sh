@@ -6,8 +6,8 @@
 #   GAME        the app (default: Halo.app beside this script)
 #   DISC        the Halo disc's contents (default: disc beside this script),
 #               which the game finds as a mounted disc named "Halo Universal"
-#   HALO_SCREEN=<width>x<height>  the size of the screen the game is given
-#               (800x600), or off; see the end of this file
+#   HALO_SCREEN=<width>x<height>  full screen through gamescope, with a screen
+#               of that size; see the end of this file
 #   PERRY_MANGOHUD=1  the MangoHud overlay: Debian's armhf MangoHud, unpacked by
 #               Packaging/shared/mangohud/fetch.sh armhf $PERRY_ROOT/mangohud
 here=$(cd "$(dirname "$0")" && pwd)
@@ -59,11 +59,12 @@ export PERRY_DISCS="Halo Universal=$DISC"
 export PERRY_UNIMPLEMENTED=continue PERRY_OBJC_UNRECOGNIZED=continue
 export SDL_APP_ID=com.macsoft.halo
 # Full screen: Halo switches the display to a mode of its own, 800×600 until
-# its Video settings say otherwise, and this screen can't be put in one.
-# gamescope gives the game a screen of that size and scales it to the real
-# one. HALO_SCREEN=<width>x<height> gives it another size, and
-# HALO_SCREEN=off runs it on the screen as it is, in a window.
-screen=${HALO_SCREEN:-800x600}
+# its Video settings say otherwise. This screen has none, and Perry scales
+# the game's picture to it. HALO_SCREEN=<width>x<height> runs it in gamescope
+# instead, with a screen of that size scaled to the real one.
+# That is left to ask for: on ROCKNIX's sway gamescope often aborts as the
+# game starts ("IWaitable hung up"), and takes the game with it.
+screen=${HALO_SCREEN:-off}
 if [ "$screen" != off ] && command -v gamescope >/dev/null 2>&1; then
     # gamescope's own window is the compositor's, not Xwayland's: the video
     # driver chosen above is for the game alone.
