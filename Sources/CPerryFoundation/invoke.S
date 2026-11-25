@@ -14,9 +14,14 @@
     .type perry_foundation_invoke, @function
     .p2align 4
 perry_foundation_invoke:
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     pushq %r12
+    .cfi_offset %r12, -24
     subq $8, %rsp
     movq %r9, %r12
     movq %rdi, %r11
@@ -50,8 +55,12 @@ perry_foundation_invoke:
     movsd %xmm0, 16(%r12)
     movsd %xmm1, 24(%r12)
     movq -8(%rbp), %r12
+    .cfi_restore %r12
     leave
+    .cfi_def_cfa %rsp, 8
+    .cfi_restore %rbp
     ret
+    .cfi_endproc
     .size perry_foundation_invoke, . - perry_foundation_invoke
 
 // The forward handlers the runtime jumps to with a message no method took,
