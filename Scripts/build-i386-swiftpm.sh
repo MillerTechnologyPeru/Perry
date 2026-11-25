@@ -35,7 +35,7 @@ pc=$sdk/usr/lib/i386-linux-gnu/pkgconfig:$sdk/usr/share/pkgconfig
 configuration=${PERRY_CONFIGURATION:-release}
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry \
     -e PKG_CONFIG_SYSROOT_DIR="$sdk" -e PKG_CONFIG_LIBDIR="$pc" -e PKG_CONFIG_PATH="$pc" \
-    --entrypoint sh perry-dev -c '
+    --entrypoint sh "${PERRY_IMAGE:-perry-dev}" -c '
         configuration=$1; shift
         for product; do
             swift build --build-system native --destination .build/i386/destination.json \
