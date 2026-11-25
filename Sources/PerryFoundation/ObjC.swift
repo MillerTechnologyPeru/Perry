@@ -56,6 +56,10 @@ enum ObjC {
     /// class_getImageName: for classes the runtime keeps apart from their
     /// image (Objective-C 1's, on i386), which addressInfo can't place.
     nonisolated(unsafe) static var imageName: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<CChar>?)?
+    /// protocol_copyMethodDescriptionList: a protocol's methods (required or
+    /// optional, instance or class), malloc'd pairs of selector and types.
+    nonisolated(unsafe) static var protocolMethods:
+        (@convention(c) (id?, Bool, Bool, UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer?)?
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -96,6 +100,8 @@ enum ObjC {
         instanceVariable = bind("_class_getInstanceVariable", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
         ivarOffset = bind("_ivar_getOffset", (@convention(c) (UnsafeMutableRawPointer?) -> Int).self)
         ivarType = bind("_ivar_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)
+        protocolMethods = bind("_protocol_copyMethodDescriptionList",
+                               (@convention(c) (id?, Bool, Bool, UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer?).self)
         if let vtable = lookup("_objc_ehtype_vtable") {
             perry_foundation_set_exception_type_vtable(vtable + 2 * MemoryLayout<UnsafeRawPointer>.size)
         }

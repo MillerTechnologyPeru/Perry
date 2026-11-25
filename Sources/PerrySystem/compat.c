@@ -218,6 +218,28 @@ void darwin_qsort_b(void *base, size_t count, size_t size, void *block) {
     qsort_r(base, count, size, compare_with_block, block);
 }
 
+// atexit_b: the block, copied, runs at exit as atexit's functions do.
+struct exit_block {
+    void *isa;
+    int flags;
+    int reserved;
+    void (*invoke)(void *block);
+};
+
+void *darwin_Block_copy(const void *block) DARWIN_SYMBOL(_Block_copy);
+int __cxa_atexit(void (*)(void *), void *, void *);
+
+static void run_exit_block(void *context) {
+    struct exit_block *block = context;
+    PERRY_KEEP_R9(PERRY_DARWIN_FUNCTION(block->invoke)(block));
+}
+
+int darwin_atexit_b(void *block) DARWIN_SYMBOL(atexit_b);
+int darwin_atexit_b(void *block) {
+    void *copy = darwin_Block_copy(block);
+    return copy ? __cxa_atexit(run_exit_block, copy, NULL) : -1;
+}
+
 // bsearch_b: the block compares the key, first, with an element.
 void *darwin_bsearch_b(const void *key, const void *base, size_t count, size_t size, void *block) DARWIN_SYMBOL(bsearch_b);
 void *darwin_bsearch_b(const void *key, const void *base, size_t count, size_t size, void *block) {

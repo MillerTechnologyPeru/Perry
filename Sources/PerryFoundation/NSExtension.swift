@@ -145,11 +145,18 @@ final class ConnectionStorage {
     }
 }
 
-/// What a remoteObjectProxy stands for: the connection it was asked of.
+/// What a remoteObjectProxy stands for: the connection it was asked of, and
+/// the error handler it was asked with (retained).
 final class ProxyStorage {
     let connection: ConnectionStorage
+    var errorHandler: id?
 
-    init(_ connection: ConnectionStorage) { self.connection = connection }
+    init(_ connection: ConnectionStorage, errorHandler: id? = nil) {
+        self.connection = connection
+        self.errorHandler = errorHandler.flatMap { ObjC.retainBlock($0) }
+    }
+
+    deinit { if let errorHandler { ObjC.release(errorHandler) } }
 }
 
 /// The object remoteObjectProxy answers: whatever it is sent, the peer's
@@ -163,9 +170,9 @@ public class PerryXPCProxy: NSObject {
         proxyClass = cls.storage
     }
 
-    static func make(for connection: ConnectionStorage) -> id? {
+    static func make(for connection: ConnectionStorage, errorHandler: id? = nil) -> id? {
         guard let object = Storage.allocate(UnsafeMutableRawPointer(proxyClass)) else { return nil }
-        Storage.set(object, ProxyStorage(connection))
+        Storage.set(object, ProxyStorage(connection, errorHandler: errorHandler))
         return ObjC.autorelease(object)
     }
 
@@ -175,6 +182,49 @@ public class PerryXPCProxy: NSObject {
 
     @ObjCMethod("forwardingTargetForSelector:")
     func forwardingTarget(_ selector: UnsafeRawPointer?) -> UnsafeMutableRawPointer? { target }
+
+    /// With no peer (a service by name, which doesn't run here), a message
+    /// in the remote interface's protocol is taken and dropped, as Darwin's
+    /// proxy drops one to a service it can't reach: its signature is the
+    /// protocol's, and the error handler hears NSXPCConnectionInvalid.
+    @ObjCMethod("methodSignatureForSelector:")
+    func methodSignature(_ selector: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let selector, let types = protocolTypes(selector) else { return nil }
+        return MethodSignatures.make(String(cString: types))
+    }
+
+    @ObjCMethod("forwardInvocation:")
+    func forwardInvocation(_ invocation: UnsafeMutableRawPointer?) {
+        guard let storage = Storage.get(objcObject, as: ProxyStorage.self), let handler = storage.errorHandler else { return }
+        storage.errorHandler = nil
+        let error = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4099,
+                                        description: "Couldn’t communicate with a helper application.")
+            .map { ObjCObject($0) }
+        let block = ObjCObject(objCOwned: handler)
+        ItemProviderQueue.background {
+            Blocks.invoke(block.id, as: (@convention(c) (id, id?) -> Void).self)(block.id, error?.id)
+        }
+    }
+
+    /// A selector's type encoding in the remote interface's protocol, or in
+    /// a protocol it adopts.
+    private func protocolTypes(_ selector: UnsafeRawPointer) -> UnsafePointer<CChar>? {
+        guard let connection = Storage.get(objcObject, as: ProxyStorage.self)?.connection,
+              let interface = connection.remoteInterface,
+              let proto = Storage.get(interface, as: InterfaceStorage.self)?.proto,
+              let copy = ObjC.protocolMethods else { return nil }
+        let name = ObjC.registerName(selector.assumingMemoryBound(to: CChar.self))
+        for required in [true, false] {
+            var count: UInt32 = 0
+            guard let list = copy(proto, required, true, &count) else { continue }
+            defer { free(list) }
+            let pair = 2 * MemoryLayout<UnsafeRawPointer>.size
+            for index in 0..<Int(count) where list.load(fromByteOffset: index * pair, as: SEL?.self) == name {
+                return list.load(fromByteOffset: index * pair + pair / 2, as: UnsafePointer<CChar>?.self)
+            }
+        }
+        return nil
+    }
 
     @ObjCMethod("respondsToSelector:")
     func responds(_ selector: UnsafeRawPointer?) -> Bool {
@@ -318,7 +368,9 @@ public class NSXPCConnection: NSObject {
     }
 
     @ObjCMethod("remoteObjectProxyWithErrorHandler:")
-    func remoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { remoteObjectProxy() }
+    func remoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        storage.flatMap { PerryXPCProxy.make(for: $0, errorHandler: errorHandler) }
+    }
 
     @ObjCMethod("synchronousRemoteObjectProxyWithErrorHandler:")
     func synchronousRemoteObjectProxy(errorHandler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { remoteObjectProxy() }
