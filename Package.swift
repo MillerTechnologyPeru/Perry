@@ -600,7 +600,7 @@ let package = Package(
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryDesktopAppearance", "PerryDesktopDock", "PerryDesktopMenus", "PerryInterface",
+            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryDesktopAppearance", "PerryDesktopDock", "PerryDesktopMenus", "PerryDesktopStatusItems", "PerryInterface",
                            "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics", .product(name: "CacaoDBus", package: "Cacao"),
                            .product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
