@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds one of Perry's Swift frameworks on a Mac with Xcode: Darwin/<Module>,
+# Builds one of Perry's Swift frameworks with Xcode's SDKs: Darwin/<Module>,
 # the Swift code of an Apple framework that has no Objective-C part Perry's
 # providers stand in for (Accessibility's attribute scope,
 # DeveloperToolsSupport's resources). It is compiled for iOS arm64 as the
@@ -15,7 +15,7 @@
 #   TARGET overrides the deployment target (default arm64-apple-ios18.0).
 set -eu
 cd "$(dirname "$0")/.."
-[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
+. Scripts/darwin-toolchain.sh
 [ $# -ge 1 ] || { echo "usage: $0 <Module> [output directory]" >&2; exit 1; }
 
 module=$1
@@ -26,7 +26,7 @@ modules=.build/perry-frameworks/$module.swiftmodule
 # x86_64-apple-ios18.0-macabi for a Mac Catalyst app on x86_64. The
 # interfaces are named for the target, as the compiler looks them up.
 platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
-sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+sdk=$(darwin_sdk "$platform")
 target=${PERRY_OVERLAY_TARGET:-${TARGET:-arm64-apple-ios18.0}}
 interface=$(echo "$target" | sed -E 's/(ios|macos)[0-9.]+/\1/')
 mkdir -p "$modules" "$out/$module.framework"
@@ -40,7 +40,7 @@ case $target in *-macabi)
     catalyst="-Fsystem $support/System/Library/Frameworks -I $support/usr/lib/swift -L $support/usr/lib/swift" ;;
 esac
 
-xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" -module-name "$module" -parse-as-library \
+darwin_swiftc "$platform" -target "$target" -sdk "$sdk" -module-name "$module" -parse-as-library \
     -enable-library-evolution -language-mode 5 -O -emit-library $catalyst \
     -emit-module-interface-path "$modules/$interface.swiftinterface" \
     -emit-private-module-interface-path "$modules/$interface.private.swiftinterface" \
