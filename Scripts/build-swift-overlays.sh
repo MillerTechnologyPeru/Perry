@@ -16,14 +16,14 @@
 # modules the iPhoneOS SDK lacks or has no Swift library of (AppKit,
 # CreateML, XCTest, IOKit, OpenCL, SafariServices) and with iOS's own
 # (AssetsLibrary, CallKit, CarPlay, DataDetection, HomeKit, MediaPlayer,
-# OSLog), UIKit's additions, WebKit, the Swift frameworks with
+# OSLog), UIKit's, WebKit, the Swift frameworks with
 # DeveloperToolsSupport first, Accessibility, Combine, MarketplaceKit,
 # Foundation, SwiftUI (optimized) and the SwiftUI cross-import overlays,
 # which build against SwiftUI's modules.
 #
 # x86_64 is Mac apps': the overlays for macOS (x86_64-apple-macos15.0),
 # AppKit's, CreateML's and XCTest's among them, TabularData, CryptoKit,
-# Combine and Foundation for macOS, and UIKit's additions,
+# Combine and Foundation for macOS, and UIKit's,
 # DeveloperToolsSupport, Accessibility and SwiftUI for Mac Catalyst
 # (x86_64-apple-ios18.0-macabi), whose libraries sit beside them, as on a
 # Mac.
@@ -119,7 +119,7 @@ if [ "$arch" = arm64 ]; then
         step "$module" Scripts/build-overlay.sh "$module" "$out"
     done
     link_darwin_parts
-    step UIKitAdditions Scripts/build-overlay.sh UIKitAdditions "$out"
+    step UIKit Scripts/build-overlay.sh UIKit "$out"
     step WebKit Scripts/build-webkit.sh "$out"
     for module in DeveloperToolsSupport "${frameworks[@]}"; do
         step "$module" Scripts/build-framework.sh "$module" "$out"
@@ -142,7 +142,7 @@ else
     done
     macos Combine Scripts/build-combine.sh "$out"
     macos Foundation Scripts/build-foundation.sh "$out"
-    catalyst UIKitAdditions Scripts/build-overlay.sh UIKitAdditions "$out"
+    catalyst UIKit Scripts/build-overlay.sh UIKit "$out"
     catalyst DeveloperToolsSupport Scripts/build-framework.sh DeveloperToolsSupport "$out"
     catalyst Accessibility Scripts/build-accessibility.sh "$out"
     catalyst SwiftUI env CONFIGURATION=release Scripts/build-swiftui.sh "$out"
