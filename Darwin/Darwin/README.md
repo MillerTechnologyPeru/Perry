@@ -36,9 +36,9 @@ symbols, so a runtime directory needs those names to lead here.
 How some of it behaves:
 
 - A variadic C function (`open` with a mode, `fcntl` and `ioctl` with an
-  argument, `sem_open`) is called through a prototype of its own with the
-  extra argument fixed, which the x86_64 calling convention passes as it
-  passes a variadic one. An arm64 build would need these in C.
+  argument, `sem_open`) is called through a C function of the library's
+  own (`Sources/Variadic.c`), which passes the extra argument as a
+  variadic one: arm64 passes it on the stack, not in a register.
 - `fork()` and `vfork()` call the C functions; Swift marks them unavailable
   to programs, so none do.
 - `TIOCGETD` and `TIOCSETD` are `<sys/ttycom.h>`'s requests, not the old
