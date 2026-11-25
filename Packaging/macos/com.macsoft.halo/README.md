@@ -32,10 +32,15 @@ says, as `/storage/perry-i386/box86`. Preferences, profiles and saved games
 are kept in `roms/ports/halo/conf`.
 
 The game plays full screen by switching the display to a resolution of its
-own, 800×600 at first. The launcher runs it in gamescope, where there is
-one, with a screen of that size scaled to the device's; `HALO_SCREEN` gives
-another size (`HALO_SCREEN=1024x768`), which the game's Video settings then
-offer, and `HALO_SCREEN=off` leaves gamescope out.
+own, 800×600 at first. The device's screen has no such mode, so Perry shows
+the game full screen at the screen's size and scales its picture to fit;
+the game's Video settings offer the usual sizes up to the screen's own.
+`HALO_SCREEN=800x600` has the launcher run it in gamescope instead, which
+isn't the default: on ROCKNIX's sway gamescope often aborts as the game
+starts, and the game ends with it.
+
+The right stick moves the mouse at a third of gptokeyb's usual speed
+(`mouse_scale` in `halo.gptk`); Halo's own Mouse Setup changes it further.
 
 | Control | |
 | --- | --- |
@@ -51,7 +56,9 @@ offer, and `HALO_SCREEN=off` leaves gamescope out.
 | R1 | switch grenade |
 | L3 | crouch |
 | R3 | zoom |
-| D-pad up | flashlight |
-| D-pad down | Return |
-| Start | Escape |
+| D-pad up, down | up and down in menus |
+| D-pad left | flashlight |
+| D-pad right | right in menus |
+| Start | Enter: choose in menus |
+| Select | Escape: back in menus, pause in a game |
 | Select + Start | quit |
