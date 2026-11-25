@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 #pragma pack(push, 2)
 typedef struct TMTask {
     void *qLink;
@@ -172,3 +173,4 @@ int16_t carbon_OTAtomicAdd16(int32_t amount, int16_t *value) CARBON_SYMBOL(OTAto
 int16_t carbon_OTAtomicAdd16(int32_t amount, int16_t *value) {
     return __atomic_add_fetch(value, (int16_t)amount, __ATOMIC_SEQ_CST);
 }
+#endif  // PERRY_CARBON_SWIFT
