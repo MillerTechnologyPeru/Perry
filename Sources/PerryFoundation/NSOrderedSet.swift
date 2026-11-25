@@ -754,12 +754,16 @@ public final class NSMutableOrderedSet: NSOrderedSet {
 // MARK: - Counted sets
 
 /// Each counted set's counts, by its object; members not here count once.
+/// A count is kept by the member itself, the object the set holds, which
+/// the set's own storage finds with -hash and -isEqual: before the lock is
+/// taken: the app's methods may raise, and an exception unwinds through
+/// Swift without unlocking a lock every counted set shares.
 enum CountedSets {
     nonisolated(unsafe) static var setClass: Class!
     nonisolated(unsafe) private static let lock = LockStorage(recursive: true)
-    nonisolated(unsafe) private static var counts: [UnsafeMutableRawPointer: [ObjectKey: Int]] = [:]
+    nonisolated(unsafe) private static var counts: [UnsafeMutableRawPointer: [UnsafeMutableRawPointer: Int]] = [:]
 
-    static func withCounts<T>(_ set: id, _ body: (inout [ObjectKey: Int]) -> T) -> T {
+    static func withCounts<T>(_ set: id, _ body: (inout [UnsafeMutableRawPointer: Int]) -> T) -> T {
         pthread_mutex_lock(lock.mutex)
         defer { pthread_mutex_unlock(lock.mutex) }
         var table = counts[set] ?? [:]
@@ -784,9 +788,9 @@ enum CountedSets {
         let storage = Sets.storage(set)
         let present = storage?.member(object)
         storage?.add(object)
+        let member = present ?? object
         withCounts(set) { counts in
-            let key = ObjectKey(object: present ?? object)
-            counts[key] = (counts[key] ?? (present == nil ? 0 : 1)) + 1
+            counts[member] = (counts[member] ?? (present == nil ? 0 : 1)) + 1
         }
     }
 }
@@ -839,9 +843,8 @@ public final class NSCountedSet: NSMutableSet {
     func removeCounted(_ object: ObjCObject?) {
         guard let object, let storage = Sets.storage(objcObject), let member = storage.member(object.id) else { return }
         let remaining = CountedSets.withCounts(objcObject) { counts -> Int in
-            let key = ObjectKey(object: member)
-            let left = (counts[key] ?? 1) - 1
-            counts[key] = left > 0 ? left : nil
+            let left = (counts[member] ?? 1) - 1
+            counts[member] = left > 0 ? left : nil
             return left
         }
         if remaining <= 0 { storage.remove(member) }
@@ -856,12 +859,17 @@ public final class NSCountedSet: NSMutableSet {
     @ObjCMethod("countForObject:")
     func count(for object: ObjCObject?) -> UInt {
         guard let object, let member = Sets.storage(objcObject)?.member(object.id) else { return 0 }
-        return UInt(CountedSets.withCounts(objcObject) { $0[ObjectKey(object: member)] ?? 1 })
+        return UInt(CountedSets.withCounts(objcObject) { $0[member] ?? 1 })
     }
 }
 
 // MARK: - Caches
 
+// A cache's lock is held only over its own state. The app's code runs
+// with it unlocked: keys' -hash and -isEqual:, the delegate's
+// cache:willEvictObject:, and the -dealloc of a key or value the cache
+// lets go. Any of them may raise, and an exception unwinds through Swift
+// without unlocking, leaving every other thread waiting on the cache.
 final class CacheStorage {
     /// An entry, in a list from the least recently used to the most.
     struct Entry {
@@ -904,12 +912,25 @@ final class CacheStorage {
         return body()
     }
 
-    /// The number of the entry for a key equal to `key`.
-    func position(of key: id) -> Int? {
-        guard !entries.isEmpty, let candidates = buckets[ObjC.sendUInt(key, Selectors.hash)] else { return nil }
-        return candidates.first { number in
-            guard let other = entries[number]?.key else { return false }
-            return other == key || ObjC.sendBool(other, Selectors.isEqual, key)
+    /// Runs `body` under the lock with the number of the entry for a key
+    /// equal to `key`, whose -hash is `hash`, or nil. The keys with that
+    /// hash are retained (and autoreleased) under the lock and sent
+    /// -isEqual: with it unlocked; the entry found is checked again under
+    /// the lock, and the search made again if another thread changed the
+    /// keys with that hash meanwhile.
+    func withPosition<T>(of key: id, hash: UInt, _ body: (Int?) -> T) -> T {
+        while true {
+            let candidates: [(number: Int, key: id)] = locked {
+                (buckets[hash] ?? []).compactMap { number in entries[number].map { (number, ObjC.retain($0.key)!) } }
+            }
+            candidates.forEach { _ = ObjC.autorelease($0.key) }
+            let match = candidates.first { $0.key == key } ?? candidates.first { ObjC.sendBool($0.key, Selectors.isEqual, key) }
+            let result: T? = locked {
+                guard (buckets[hash] ?? []) == candidates.map(\.number),
+                      candidates.allSatisfy({ entries[$0.number]?.key == $0.key }) else { return nil }
+                return body(match?.number)
+            }
+            if let result { return result }
         }
     }
 
@@ -935,8 +956,8 @@ final class CacheStorage {
 
     /// Adds an entry as the most recently used. The key and value are
     /// retained.
-    func add(key: id, value: id, cost: Int) {
-        let hash = ObjC.sendUInt(key, Selectors.hash), number = nextNumber
+    func add(key: id, value: id, cost: Int, hash: UInt) {
+        let number = nextNumber
         nextNumber += 1
         entries[number] = Entry(key: ObjC.retain(key)!, value: ObjC.retain(value)!, cost: cost, hash: hash)
         buckets[hash, default: []].append(number)
@@ -957,30 +978,46 @@ final class CacheStorage {
         return entry
     }
 
-    func removeAll() {
-        entries.values.forEach {
-            ObjC.release($0.key)
-            ObjC.release($0.value)
-        }
+    /// Takes every entry out; their keys and values are the caller's to
+    /// release.
+    func removeAll() -> [Entry] {
+        let removed = Array(entries.values)
         entries = [:]
         buckets = [:]
         first = nil
         last = nil
         totalCost = 0
+        return removed
     }
 
-    /// Evicts the least recently used entries over the limits, telling the
-    /// delegate (cache:willEvictObject:).
-    func evict(_ cache: id) {
+    /// Takes the least recently used entries over the limits out, for
+    /// `evicted`, with the delegate to tell.
+    func evict() -> (delegate: id?, entries: [Entry]) {
+        var evicted: [Entry] = []
         while (countLimit > 0 && entries.count > countLimit) || (totalCostLimit > 0 && totalCost > totalCostLimit),
               let first, let entry = remove(first) {
-            if let delegate, ObjC.sendBool(delegate, ObjC.selector("respondsToSelector:"),
-                                           UnsafeMutableRawPointer(mutating: ObjC.selector("cache:willEvictObject:"))) {
+            evicted.append(entry)
+        }
+        return (delegate, evicted)
+    }
+
+    /// Tells the delegate of each evicted entry (cache:willEvictObject:),
+    /// with the lock unlocked, and releases them. One left after a
+    /// delegate raises stays retained.
+    static func evicted(_ eviction: (delegate: id?, entries: [Entry]), from cache: id) {
+        for entry in eviction.entries {
+            if let delegate = eviction.delegate,
+               ObjC.sendBool(delegate, ObjC.selector("respondsToSelector:"),
+                             UnsafeMutableRawPointer(mutating: ObjC.selector("cache:willEvictObject:"))) {
                 _ = ObjC.send(delegate, ObjC.selector("cache:willEvictObject:"), cache, entry.value)
             }
-            ObjC.release(entry.key)
-            ObjC.release(entry.value)
+            release(entry)
         }
+    }
+
+    static func release(_ entry: Entry) {
+        ObjC.release(entry.key)
+        ObjC.release(entry.value)
     }
 }
 
@@ -1018,27 +1055,28 @@ public final class NSCache: NSObject {
     @ObjCMethod("objectForKey:")
     func object(forKey key: ObjCObject) -> UnsafeMutableRawPointer? {
         let storage = self.storage
-        return storage.locked {
-            guard let position = storage.position(of: key.id), let entry = storage.entries[position] else { return nil }
+        let hash = ObjC.sendUInt(key.id, Selectors.hash)
+        let value: id? = storage.withPosition(of: key.id, hash: hash) { position in
+            guard let position, let entry = storage.entries[position] else { return nil }
             storage.touch(position)
-            return ObjC.autorelease(ObjC.retain(entry.value))
+            return ObjC.retain(entry.value)
         }
+        return ObjC.autorelease(value)
     }
 
     @ObjCMethod("setObject:forKey:cost:")
     func set(_ value: ObjCObject, forKey key: ObjCObject, cost: UInt) {
         let storage = self.storage
-        storage.locked {
+        let hash = ObjC.sendUInt(key.id, Selectors.hash)
+        let (old, eviction) = storage.withPosition(of: key.id, hash: hash) { position in
             // The new entry is in before the old one's objects go, which
             // may be the same ones.
-            let old = storage.position(of: key.id).flatMap { storage.remove($0) }
-            storage.add(key: key.id, value: value.id, cost: Int(clamping: cost))
-            if let old {
-                ObjC.release(old.key)
-                ObjC.release(old.value)
-            }
-            storage.evict(objcObject)
+            let old = position.flatMap { storage.remove($0) }
+            storage.add(key: key.id, value: value.id, cost: Int(clamping: cost), hash: hash)
+            return (old, storage.evict())
         }
+        if let old { CacheStorage.release(old) }
+        CacheStorage.evicted(eviction, from: objcObject)
     }
 
     @ObjCMethod("setObject:forKey:")
@@ -1047,17 +1085,15 @@ public final class NSCache: NSObject {
     @ObjCMethod("removeObjectForKey:")
     func removeObject(forKey key: ObjCObject) {
         let storage = self.storage
-        storage.locked {
-            guard let position = storage.position(of: key.id), let old = storage.remove(position) else { return }
-            ObjC.release(old.key)
-            ObjC.release(old.value)
-        }
+        let hash = ObjC.sendUInt(key.id, Selectors.hash)
+        let old = storage.withPosition(of: key.id, hash: hash) { position in position.flatMap { storage.remove($0) } }
+        if let old { CacheStorage.release(old) }
     }
 
     @ObjCMethod("removeAllObjects")
     func removeAllObjects() {
         let storage = self.storage
-        storage.locked { storage.removeAll() }
+        storage.locked { storage.removeAll() }.forEach(CacheStorage.release)
     }
 
     @ObjCMethod("name") func name() -> UnsafeMutableRawPointer? { storage.name ?? Strings.autoreleased("") }
@@ -1076,21 +1112,23 @@ public final class NSCache: NSObject {
 
     @ObjCMethod("setCountLimit:")
     func setCountLimit(_ limit: UInt) {
-        storage.locked {
+        let eviction = storage.locked {
             // NSUIntegerMax, which apps set for no limit, doesn't fit an Int.
             storage.countLimit = Int(clamping: limit)
-            storage.evict(objcObject)
+            return storage.evict()
         }
+        CacheStorage.evicted(eviction, from: objcObject)
     }
 
     @ObjCMethod("totalCostLimit") func totalCostLimit() -> UInt { UInt(storage.totalCostLimit) }
 
     @ObjCMethod("setTotalCostLimit:")
     func setTotalCostLimit(_ limit: UInt) {
-        storage.locked {
+        let eviction = storage.locked {
             storage.totalCostLimit = Int(clamping: limit)
-            storage.evict(objcObject)
+            return storage.evict()
         }
+        CacheStorage.evicted(eviction, from: objcObject)
     }
 
     @ObjCMethod("evictsObjectsWithDiscardedContent") func evictsDiscarded() -> Bool { storage.evictsDiscarded }
