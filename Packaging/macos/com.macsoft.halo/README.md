@@ -58,7 +58,7 @@ The right stick moves the mouse at a third of gptokeyb's usual speed
 | R3 | zoom |
 | D-pad up, down | up and down in menus |
 | D-pad left | flashlight |
-| D-pad right | right in menus |
+| D-pad right | exchange weapon |
 | Start | Enter: choose in menus |
 | Select | Escape: back in menus, pause in a game |
 | Select + Start | quit |
