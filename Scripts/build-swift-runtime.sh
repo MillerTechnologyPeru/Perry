@@ -93,11 +93,17 @@ fi
 mkdir -p "$build"
 # The compilers and Darwin's tools, as CMake and the standard library's
 # build find them.
-cross=()
+platform_cmake=()
 if [ "$(uname)" = Darwin ]; then
     toolchain=$(dirname "$(darwin_find swiftc)")
     cc=$toolchain/clang cxx=$toolchain/clang++ swiftc=$toolchain/swiftc tools=$toolchain
     lipo=$toolchain/lipo host_cc=$cc host_cxx=$cxx
+    # The toolchain's compilers, called by path rather than through xcrun,
+    # find no SDK of their own: CMake gives them the host's, and checks
+    # only its C compilers (the standard library's Swift is compiled by
+    # the build's own rules, with each target's SDK).
+    platform_cmake=(-DCMAKE_OSX_SYSROOT="$(darwin_sdk macosx)" -DCMAKE_OSX_ARCHITECTURES="$host_arch"
+           -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_Swift_COMPILER_WORKS=YES)
 else
     tools=$build/tools
     mkdir -p "$tools"
@@ -135,7 +141,7 @@ EOF
     export PATH=$tools:$PATH
     cc=$tools/clang cxx=$tools/clang++ swiftc=$(command -v swiftc) lipo=$tools/lipo
     host_sdk=$(darwin_sdk macosx)
-    cross=(-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR="$host_arch"
+    platform_cmake=(-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR="$host_arch"
            -DCMAKE_OSX_SYSROOT="$host_sdk" -DCMAKE_OSX_ARCHITECTURES="$host_arch"
            -DCMAKE_C_COMPILER_TARGET="$host_arch-apple-macosx13.0" -DCMAKE_CXX_COMPILER_TARGET="$host_arch-apple-macosx13.0"
            -DCMAKE_Swift_COMPILER_TARGET="$host_arch-apple-macosx13.0" -DCMAKE_Swift_COMPILER_WORKS=YES
@@ -160,7 +166,7 @@ ninja -C "$build/llvm" -j "$jobs" llvm-tblgen clang-resource-headers intrinsics_
 c_flags="-DSWIFT_THREADING_NO_DIRECT_TSD=1"
 [ "$arch" = arm64 ] && c_flags="$c_flags;-DSWIFT_ISA_MASK_OVERRIDE=0x007ffffffffffff8ULL"
 if [ ! -f "$build/swift/build.ninja" ]; then
-    cmake -G Ninja -S "$work/swift" -B "$build/swift" ${cross[@]+"${cross[@]}"} \
+    cmake -G Ninja -S "$work/swift" -B "$build/swift" ${platform_cmake[@]+"${platform_cmake[@]}"} \
         -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_Swift_COMPILER="$swiftc" \
         -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=FALSE -DCMAKE_INSTALL_PREFIX=/usr \
         -DLLVM_DIR="$build/llvm/lib/cmake/llvm" -DClang_DIR="$build/llvm/lib/cmake/clang" \
