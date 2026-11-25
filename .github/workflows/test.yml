@@ -333,6 +333,92 @@ jobs:
           name: benchmarks-${{ matrix.arch }}
           path: benchmarks.json
 
+  # Perry built with optimization, which apps run four to five times faster
+  # in its runtime (Stopwatch on arm64). Optimization drops assert()s and
+  # can change what code that relies on undefined behaviour does, so this
+  # runs the same arm64 tests as the debug job above, then the benchmarks.
+  # The 32-bit targets are the debug job's.
+  linux-release:
+    name: Linux arm64 release
+    needs: [fixtures, swift-overlays]
+    if: ${{ !cancelled() && needs.fixtures.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: perry-dev
+          cache-from: type=gha,scope=perry-dev-arm64
+          cache-to: type=gha,scope=perry-dev-arm64,mode=max
+
+      - name: Download the fixtures
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-fixtures
+
+      - name: Unpack the fixtures
+        run: |
+          mkdir -p .build/perry-fixtures
+          tar -xzf perry-fixtures.tar.gz -C .build/perry-fixtures
+          rm perry-fixtures.tar.gz
+
+      - name: Download the Swift runtime
+        if: needs.swift-overlays.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-swift-runtime
+
+      - name: Unpack the Swift runtime
+        if: needs.swift-overlays.result == 'success'
+        run: |
+          tar -xzf perry-swift-runtime.tar.gz -C .build
+          rm perry-swift-runtime.tar.gz
+
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/perry" perry-dev \
+            swift build -c release --build-tests --scratch-path .build/linux
+
+      - name: Test
+        timeout-minutes: 20
+        run: |
+          docker run --rm -v "$PWD:/perry" --ulimit core=0 \
+            -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+            -e PERRY_REQUIRE_FIXTURES=1 \
+            perry-dev \
+            swift test -c release --skip-build --scratch-path .build/linux
+
+      # Report only, as in the debug job: hosted runners are too noisy to
+      # fail a build on. The baseline is the debug build's, so the table
+      # shows what optimization buys.
+      - name: Benchmark
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          docker run --rm -v "$PWD:/perry" perry-dev \
+            Scripts/perry-bench.sh -c Tests/Benchmarks/baseline.json \
+              .build/linux/release/perry .build/perry-fixtures/darwin/Stopwatch.app > benchmarks.json 2> benchmarks.md
+          cat benchmarks.json
+          { echo "## Release benchmarks (ns per operation)"; echo; cat benchmarks.md; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the benchmarks
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmarks-arm64-release
+          path: benchmarks.json
+
   # PowerPC's loader, Carbon provider and sysroot with a cross gcc, and a
   # smoke run under qemu-ppc. Its fixtures need Xcode 3.2.6, which CI
   # can't have, and it has no Swift.
