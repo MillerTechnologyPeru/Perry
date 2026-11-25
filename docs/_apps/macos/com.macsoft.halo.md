@@ -178,12 +178,10 @@ reports:
     level: 4
     source: maintainer
     fps: 120
-    notes: Under box86 it plays full screen without gamescope. Its Video Setup now offers the screen's own 1920x1080, which it plays at, at about 115 to 125 frames a second in the first level by MangoHud; at its first 800x600 Perry scales the picture to the screen. Its VSync setting doesn't hold it to 60 here. The maintainer played it with the pad through gptokeyb (D-pad and Start in menus, the right stick as the mouse) and found sound and play working. Touch doesn't place its pointer.
+    notes: Under box86 it plays full screen without gamescope. Its Video Setup now offers the screen's own 1920x1080, which it plays at, at about 115 to 127 frames a second in the first level by MangoHud; at its first 800x600 Perry scales the picture to the screen. Its VSync setting doesn't hold it to 60 here. The maintainer played it with the pad through gptokeyb (D-pad and Start in menus, the right stick as the mouse) and found sound and play working. Touch doesn't place its pointer.
     screenshots:
-      - url: https://github.com/user-attachments/assets/b829c93d-4e12-40e9-a77a-bf5354b4d930
+      - url: https://github.com/user-attachments/assets/eb77e3b0-2a43-4880-aa01-6990c0a94786
         caption: The first level at 1920x1080 on the Retroid Pocket 5, with MangoHud's overlay
-      - url: https://github.com/user-attachments/assets/c06f6066-56d7-4c59-9fbf-8128fc20f356
-        caption: Video Setup at 1920x1080 on the Retroid Pocket 5
       - url: https://github.com/user-attachments/assets/1a311782-dab1-473e-b62f-d9e95fed30a1
         caption: The first level on the Retroid Pocket 5
       - url: https://github.com/user-attachments/assets/23fc3df2-cf25-4c1e-bba7-b68c72ab8364
