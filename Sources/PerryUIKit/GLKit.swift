@@ -9,34 +9,42 @@ import PerryObjCInterop
 // CADisplayLink for its target. Frames are timed on the main queue, with
 // or without a display.
 
-/// Callbacks at a frame rate, while there are any.
+/// Callbacks at a frame rate, while there are any: each subscriber on a
+/// schedule of its own that advances by its interval, so a frame that
+/// takes a while does not push the next ones back; the clock sleeps until
+/// the soonest one is due. One that falls a whole interval behind starts
+/// again from now.
 enum Frames {
     final class Subscriber {
         let interval: Double
-        var last = 0.0
+        var next: Double
         let tick: (Double) -> Void
 
-        init(interval: Double, tick: @escaping (Double) -> Void) {
+        init(interval: Double, next: Double, tick: @escaping (Double) -> Void) {
             self.interval = interval
+            self.next = next
             self.tick = tick
         }
     }
 
     nonisolated(unsafe) private static var subscribers: [ObjectIdentifier: Subscriber] = [:]
     nonisolated(unsafe) private static var running = false
+    /// Early by this much is on time: dispatch wakes a little late or
+    /// early, and a tick a hair early is better than one a frame late.
+    private static let slack = 0.001
 
     static func add(_ owner: AnyObject, framesPerSecond: Int, _ tick: @escaping (Double) -> Void) {
-        subscribers[ObjectIdentifier(owner)] = Subscriber(interval: 1 / Double(max(framesPerSecond, 1)), tick: tick)
+        subscribers[ObjectIdentifier(owner)] = Subscriber(interval: 1 / Double(max(framesPerSecond, 1)), next: Clock.now, tick: tick)
         guard !running else { return }
         running = true
-        schedule()
+        schedule(after: 0)
     }
 
     static func remove(_ owner: AnyObject) { subscribers[ObjectIdentifier(owner)] = nil }
 
-    private static func schedule() {
+    private static func schedule(after seconds: Double) {
         guard let after = Display.dispatchAfter, let time = Display.dispatchTime else { return }
-        after(time(0, 1_000_000_000 / 120), Updates.mainQueue, nil) { _ in Frames.step() }
+        after(time(0, Int64(max(seconds, 0) * 1_000_000_000)), Updates.mainQueue, nil) { _ in Frames.step() }
     }
 
     private static func step() {
@@ -44,12 +52,18 @@ enum Frames {
             running = false
             return
         }
-        let now = Clock.now
-        for subscriber in Array(subscribers.values) where now - subscriber.last >= subscriber.interval * 0.98 {
-            subscriber.last = now
+        for subscriber in Array(subscribers.values) {
+            let now = Clock.now
+            guard now >= subscriber.next - slack else { continue }
+            subscriber.next += subscriber.interval
+            if now - subscriber.next > subscriber.interval { subscriber.next = now + subscriber.interval }
             ObjCRuntime.autoreleasepool { subscriber.tick(now) }
         }
-        schedule()
+        guard let soonest = subscribers.values.map(\.next).min() else {
+            running = false
+            return
+        }
+        schedule(after: soonest - Clock.now)
     }
 }
 
