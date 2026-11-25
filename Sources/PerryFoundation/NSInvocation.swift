@@ -11,16 +11,29 @@ final class InvocationStorage {
     let signature: id
     /// The target, the selector, then the arguments, as the signature's types.
     var arguments: [[UInt8]]
-    var result: [UInt8]
+    /// Where the result goes, which -invoke hands the method: memory of its
+    /// own, not a stored array, so no access to a property is open while
+    /// the method runs. An exception it raises unwinds past -invoke without
+    /// ending one, which would leave it in Swift's record of open accesses
+    /// after its frame is gone.
+    private let result: UnsafeMutableRawBufferPointer
     var retained = false
 
     init(signature: id, _ details: MethodSignatureStorage) {
         self.signature = ObjC.retain(signature)!
         arguments = details.sizes.dropFirst().map { [UInt8](repeating: 0, count: max($0, 8)) }
-        result = [UInt8](repeating: 0, count: max(details.sizes[0], 16))
+        result = UnsafeMutableRawBufferPointer.allocate(byteCount: max(details.sizes[0], 16), alignment: 16)
+        result.initializeMemory(as: UInt8.self, repeating: 0)
     }
 
-    deinit { ObjC.release(signature) }
+    deinit {
+        result.deallocate()
+        ObjC.release(signature)
+    }
+
+    func withResult<T>(_ body: (UnsafeMutableRawBufferPointer) throws -> T) rethrows -> T {
+        try body(result)
+    }
 
     func object(at index: Int) -> id? {
         arguments[index].withUnsafeBytes { $0.load(as: id?.self) }
@@ -131,7 +144,7 @@ enum Invocations {
         var out = [UInt64](repeating: 0, count: 6)
         while stack.count % 8 != 0 { stack.append(0) }
         let words = stack.withUnsafeBytes { bytes in (0..<bytes.count / 8).map { bytes.loadUnaligned(fromByteOffset: $0 * 8, as: UInt64.self) } }
-        storage.result.withUnsafeMutableBytes { result in
+        storage.withResult { result in
             general += [UInt64](repeating: 0, count: 8 - general.count)
             // x8: where a result too big for registers goes.
             general.append(UInt64(UInt(bitPattern: result.baseAddress)))
@@ -259,13 +272,13 @@ public final class NSInvocation: NSObject {
     @ObjCMethod("getReturnValue:")
     func getReturnValue(_ buffer: UnsafeMutableRawPointer?) {
         guard let storage, let buffer, let details = MethodSignatures.storage(storage.signature) else { return }
-        storage.result.withUnsafeBytes { buffer.copyMemory(from: $0.baseAddress!, byteCount: details.sizes[0]) }
+        storage.withResult { buffer.copyMemory(from: $0.baseAddress!, byteCount: details.sizes[0]) }
     }
 
     @ObjCMethod("setReturnValue:")
     func setReturnValue(_ buffer: UnsafeRawPointer?) {
         guard let storage, let buffer, let details = MethodSignatures.storage(storage.signature) else { return }
-        storage.result.withUnsafeMutableBytes { $0.baseAddress!.copyMemory(from: buffer, byteCount: details.sizes[0]) }
+        storage.withResult { $0.baseAddress!.copyMemory(from: buffer, byteCount: details.sizes[0]) }
     }
 
     @ObjCMethod("argumentsRetained") func argumentsRetained() -> Bool { storage?.retained ?? false }
@@ -344,7 +357,7 @@ public final class NSInvocation: NSObject {
             }
         }
         var out = [UInt64](repeating: 0, count: 4)
-        storage.result.withUnsafeMutableBytes { result in
+        storage.withResult { result in
             if indirect { general.insert(UInt64(UInt(bitPattern: result.baseAddress)), at: 0) }
             general += [UInt64](repeating: 0, count: 6 - general.count)
             vector += [UInt64](repeating: 0, count: 8 - vector.count)
@@ -373,7 +386,7 @@ public final class NSInvocation: NSObject {
             }
             words += argument
         }
-        storage.result.withUnsafeMutableBytes { result in
+        storage.withResult { result in
             if indirect { words.insert(UInt32(UInt(bitPattern: result.baseAddress)), at: 0) }
             var out = [UInt32](repeating: 0, count: 2)
             var floating = 0.0
@@ -405,7 +418,7 @@ public final class NSInvocation: NSObject {
             }
             words += argument
         }
-        storage.result.withUnsafeMutableBytes { result in
+        storage.withResult { result in
             if indirect { words.insert(UInt32(UInt(bitPattern: result.baseAddress)), at: 0) }
             if words.count < 4 { words += [UInt32](repeating: 0, count: 4 - words.count) }
             var out = [UInt32](repeating: 0, count: 2)
@@ -419,7 +432,7 @@ public final class NSInvocation: NSObject {
         let arguments = storage.arguments.enumerated().map { index, bytes in
             Array(bytes.prefix(details.sizes[index + 1])) + [UInt8](repeating: 0, count: max(0, details.sizes[index + 1] - bytes.count))
         }
-        storage.result.withUnsafeMutableBytes { result in
+        storage.withResult { result in
             DarwinCalls.call(imp, types: types, arguments: arguments, result: result.count > 0 ? result.baseAddress : nil)
         }
         #else
