@@ -1077,9 +1077,19 @@ extension NSString {
         Self.decoded(check(NSRange(location: 0, length: index), "substringToIndex:")[..<Int(index)])
     }
 
+    /// The range's characters, through the string's UTF-16 view, which
+    /// Swift indexes from breadcrumbs: no copy of the whole string, as a
+    /// parser taking a substring at a time from a long one would make.
     @ObjCMethod("substringWithRange:")
     func substring(range: NSRange) -> String {
-        Self.decoded(check(range, "substringWithRange:")[Int(range.location)..<Int(range.location + range.length)])
+        let units = value.utf16
+        let count = units.count
+        if Int(range.location) > count || Int(range.length) > count - Int(range.location) {
+            foundationFatal("-[NSString substringWithRange:]: Range {\(range.location), \(range.length)} out of bounds; string length \(count)")
+        }
+        let start = units.index(units.startIndex, offsetBy: Int(range.location))
+        let end = units.index(start, offsetBy: Int(range.length))
+        return String(decoding: units[start..<end], as: UTF16.self)
     }
 
     @ObjCMethod("caseInsensitiveCompare:")
