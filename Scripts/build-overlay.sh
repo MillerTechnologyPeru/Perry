@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds a Swift overlay of Perry's on a Mac with Xcode: Darwin/<Module>/Sources
+# Builds a Swift overlay of Perry's on a Mac with Xcode, or in perry-dev with
+# its SDKs (Scripts/docker-darwin.sh): Darwin/<Module>/Sources
 # compiled as the Swift module <Module> over the SDK's Objective-C or C
 # headers of the same name, as Apple builds its overlays, for iOS arm64 with
 # library evolution, and linked as libswift<Module>.dylib in the directory
@@ -16,7 +17,7 @@
 #   default output: .build/perry-swift-runtime
 set -eu
 cd "$(dirname "$0")/.."
-[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
+. Scripts/darwin-toolchain.sh
 [ $# -ge 1 ] || { echo "usage: $0 <Module> [output directory]" >&2; exit 1; }
 
 module=$1
@@ -30,7 +31,7 @@ swift_module=$module
 platform=iphoneos
 [ -f "Darwin/$module/platform" ] && platform=$(tr -d '[:space:]' < "Darwin/$module/platform")
 platform=${PERRY_OVERLAY_PLATFORM:-$platform}
-sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+sdk=$(darwin_sdk "$platform")
 target=arm64-apple-ios18.0
 [ "$platform" = macosx ] && target=arm64-apple-macos15.0
 # PERRY_OVERLAY_TARGET names another: x86_64-apple-macos15.0 for a Mac app
@@ -45,7 +46,7 @@ includes=()
 # Compiler flags of the module's own, one per line, in Darwin/<Module>/swiftc-flags.
 # $PLATFORM_DIR in one is the SDK's platform directory, the selected
 # Xcode's (XCTest's frameworks are there, not in the SDK).
-platform_dir=$(xcrun --sdk "$platform" --show-sdk-platform-path)
+platform_dir=$(darwin_platform_path "$platform")
 flags=()
 if [ -f "Darwin/$module/swiftc-flags" ]; then
     while IFS= read -r flag; do [ -n "$flag" ] && flags+=("${flag//\$PLATFORM_DIR/$platform_dir}"); done < "Darwin/$module/swiftc-flags"
@@ -70,7 +71,7 @@ done
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
-xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
+darwin_swiftc "$platform" -target "$target" -sdk "$sdk" \
     -module-name "$swift_module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \
