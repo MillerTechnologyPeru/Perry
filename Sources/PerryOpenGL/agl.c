@@ -292,7 +292,11 @@ void perry_aglSwapBuffers(id context) {
         last_error = AGL_BAD_CONTEXT;
         return;
     }
-    perry_aux_before_swap();
+    // The size the program draws at, where AppKit shows the window scaled
+    // to the screen from a display mode's.
+    long width = ((long (*)(id, SEL))msg_send)(context, SELECTOR("_perryPresentationWidth"));
+    long height = ((long (*)(id, SEL))msg_send)(context, SELECTOR("_perryPresentationHeight"));
+    perry_aux_before_swap((int)width, (int)height);
     msg_send(context, SELECTOR("flushBuffer"));
     perry_aux_after_swap();
 }
