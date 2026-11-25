@@ -64,6 +64,9 @@ let package = Package(
         .library(name: "PerrySecurity", type: .dynamic, targets: ["PerrySecurity"]),
         // UniformTypeIdentifiers, and MobileCoreServices' UTType functions.
         .library(name: "PerryUniformTypeIdentifiers", type: .dynamic, targets: ["PerryUniformTypeIdentifiers"]),
+        // Carbon.framework, for 32-bit Mac programs: HIToolbox, QuickDraw and
+        // the rest of the Toolbox, moving from C to Swift over Graphite.
+        .library(name: "PerryCarbon", type: .dynamic, targets: ["PerryCarbon"]),
         // Accelerate: vDSP, vForce and vImage, with BLAS and LAPACK from OpenBLAS.
         .library(name: "PerryAccelerate", type: .dynamic, targets: ["PerryAccelerate"]),
         // JavaScriptCore over WebKitGTK's.
@@ -314,6 +317,19 @@ let package = Package(
             name: "PerryUniformTypeIdentifiers",
             dependencies: ["CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
+        ),
+        // Carbon's provider. CPerryCarbon is its C, which Scripts/build-i386-carbon.sh and
+        // build-ppc-carbon.sh also build alone; PerryCarbon is the Swift its parts move to.
+        .systemLibrary(name: "CPerryFreeType", pkgConfig: "freetype2"),
+        .target(
+            name: "CPerryCarbon",
+            dependencies: ["CPerryFreeType", "PerryInterface"],
+            linkerSettings: [.linkedLibrary("m"), .linkedLibrary("pthread")]
+        ),
+        .target(
+            name: "PerryCarbon",
+            dependencies: ["CPerryCarbon"],
+            exclude: ["exports.txt"]
         ),
         // WebKitGTK's JavaScriptCore, whose C API is Apple's, and the
         // Objective-C API built on it; or WPE WebKit's (PERRY_JAVASCRIPTCORE).
