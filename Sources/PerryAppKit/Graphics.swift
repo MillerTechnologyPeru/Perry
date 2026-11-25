@@ -284,6 +284,7 @@ open class NSColor: NSObject {
             "selectedContentBackgroundColor": (accent.0, accent.1, accent.2, 1), "selectedControlColor": (0.25, 0.39, 0.55, 1),
             "selectedControlTextColor": (1, 1, 1, 0.85), "alternateSelectedControlColor": (accent.0, accent.1, accent.2, 1),
             "unemphasizedSelectedContentBackgroundColor": (0.27, 0.27, 0.27, 1),
+            "secondarySelectedControlColor": (0.27, 0.27, 0.27, 1),
             "unemphasizedSelectedTextBackgroundColor": (0.27, 0.27, 0.27, 1), "unemphasizedSelectedTextColor": (1, 1, 1, 1),
             "keyboardFocusIndicatorColor": (accent.0, accent.1, accent.2, 0.5), "controlAccentColor": (accent.0, accent.1, accent.2, 1),
             "linkColor": (0.2, 0.6, 1, 1), "scrollBarColor": (0.4, 0.4, 0.4, 1), "knobColor": (1, 1, 1, 0.5),
@@ -327,6 +328,7 @@ open class NSColor: NSObject {
             "selectedContentBackgroundColor": (accent.0, accent.1, accent.2, 1), "selectedControlColor": (0.7, 0.84, 1, 1),
             "selectedControlTextColor": (0, 0, 0, 0.85), "alternateSelectedControlColor": (accent.0, accent.1, accent.2, 1),
             "alternateSelectedControlTextColor": (1, 1, 1, 1), "unemphasizedSelectedContentBackgroundColor": (0.86, 0.86, 0.86, 1),
+            "secondarySelectedControlColor": (0.86, 0.86, 0.86, 1),
             "unemphasizedSelectedTextBackgroundColor": (0.86, 0.86, 0.86, 1), "unemphasizedSelectedTextColor": (0, 0, 0, 1),
             "selectedMenuItemTextColor": (1, 1, 1, 1), "keyboardFocusIndicatorColor": (accent.0, accent.1, accent.2, 0.5),
             "controlAccentColor": (accent.0, accent.1, accent.2, 1), "linkColor": (0, 0.41, 0.85, 1),
@@ -383,6 +385,9 @@ open class NSColor: NSObject {
     @ObjCClassMethod("unemphasizedSelectedContentBackgroundColor")
     static func unemphasizedSelectedContentBackgroundColor() -> NSColor { system("unemphasizedSelectedContentBackgroundColor")! }
     @ObjCClassMethod("selectedControlColor") static func selectedControlColor() -> NSColor { system("selectedControlColor")! }
+    /// A selection's background where it doesn't have the keyboard.
+    @ObjCClassMethod("secondarySelectedControlColor")
+    static func secondarySelectedControlColor() -> NSColor { system("secondarySelectedControlColor")! }
     @ObjCClassMethod("selectedControlTextColor") static func selectedControlTextColor() -> NSColor { system("selectedControlTextColor")! }
     @ObjCClassMethod("alternateSelectedControlColor") static func alternateSelectedControlColor() -> NSColor { system("alternateSelectedControlColor")! }
     @ObjCClassMethod("alternateSelectedControlTextColor")
