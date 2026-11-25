@@ -169,6 +169,9 @@ struct perry_tls {
     int state;
     int verify_host;
     int break_on_server_auth;
+    int skip_verify;
+    int allow_expired;
+    int allow_any_root;
     int auth_reported;
     int min_version;
     int max_version;
@@ -277,6 +280,26 @@ int perry_tls_set_break_on_server_auth(perry_tls *tls, int value) {
 
 int perry_tls_break_on_server_auth(perry_tls *tls) { return tls->break_on_server_auth; }
 
+// SSLSetEnableCertVerify, SSLSetAllowsExpiredCerts and SSLSetAllowsAnyRoot.
+int perry_tls_set_verify_option(perry_tls *tls, int option, int value) {
+    if (tls->state != kSSLIdle) return errSSLProtocol;
+    switch (option) {
+    case PERRY_TLS_VERIFY: tls->skip_verify = !value; return 0;
+    case PERRY_TLS_ALLOW_EXPIRED: tls->allow_expired = value != 0; return 0;
+    case PERRY_TLS_ALLOW_ANY_ROOT: tls->allow_any_root = value != 0; return 0;
+    default: return paramErr;
+    }
+}
+
+int perry_tls_verify_option(perry_tls *tls, int option) {
+    switch (option) {
+    case PERRY_TLS_VERIFY: return !tls->skip_verify;
+    case PERRY_TLS_ALLOW_EXPIRED: return tls->allow_expired;
+    case PERRY_TLS_ALLOW_ANY_ROOT: return tls->allow_any_root;
+    default: return 0;
+    }
+}
+
 int perry_tls_set_alpn(perry_tls *tls, const unsigned char *wire, unsigned length) {
     if (tls->state != kSSLIdle) return errSSLProtocol;
     return ossl.set_alpn(tls->ssl, wire, length) == 0 ? 0 : errSSLInternal;
@@ -353,17 +376,21 @@ static int resume(perry_tls *tls, int result) {
     return errSSLProtocol;
 }
 
+// OpenSSL stops checking a chain at its first failure, which is the one
+// reported: a chain allowed past it (an expired certificate, an unknown
+// root) isn't checked for later ones, as Secure Transport would.
 static int chain_status(perry_tls *tls) {
+    if (tls->skip_verify) return 0;
     long result = ossl.get_verify_result(tls->ssl);
     switch (result) {
     case 0: return 0;
     case X509_V_ERR_HOSTNAME_MISMATCH: return tls->verify_host ? errSSLHostNameMismatch : 0;
-    case X509_V_ERR_CERT_HAS_EXPIRED: return errSSLCertExpired;
-    case X509_V_ERR_CERT_NOT_YET_VALID: return errSSLCertNotYetValid;
+    case X509_V_ERR_CERT_HAS_EXPIRED: return tls->allow_expired ? 0 : errSSLCertExpired;
+    case X509_V_ERR_CERT_NOT_YET_VALID: return tls->allow_expired ? 0 : errSSLCertNotYetValid;
     case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
-    case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN: return errSSLUnknownRootCert;
+    case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN: return tls->allow_any_root ? 0 : errSSLUnknownRootCert;
     case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
-    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY: return errSSLNoRootCert;
+    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY: return tls->allow_any_root ? 0 : errSSLNoRootCert;
     default: return errSSLXCertChainInvalid;
     }
 }

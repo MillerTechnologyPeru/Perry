@@ -58,6 +58,16 @@ public func GetCurrentProcess(_ psn: UnsafeMutableRawPointer?) -> Int16 {
 @c(_GetFrontProcess)
 public func GetFrontProcess(_ psn: UnsafeMutableRawPointer?) -> Int16 { GetCurrentProcess(psn) }
 
+/// OSStatus GetProcessForPID(pid_t, ProcessSerialNumber *): this process's
+/// serial number for its own pid; any other is no process here.
+@c(_GetProcessForPID)
+public func GetProcessForPID(_ pid: Int32, _ psn: UnsafeMutableRawPointer?) -> Int32 {
+    guard psn != nil else { return Int32(paramErr) }
+    guard pid == getpid() else { return Int32(procNotFound) }
+    Processes.store(psn)
+    return Int32(noErr)
+}
+
 /// OSErr GetNextProcess(ProcessSerialNumber *): from kNoProcess ({ 0, 0 })
 /// this process, then procNotFound.
 @c(_GetNextProcess)

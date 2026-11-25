@@ -137,6 +137,17 @@
 
 #if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
 
+// The long double functions: long double is double on Darwin arm64, and on
+// x86_64 the x87's 80 bits on both Darwin and Linux, passed the same way, so
+// they go to glibc's double functions on arm64 and its own l ones on x86_64.
+.macro LONG_DOUBLE name, double, long
+#if defined(__x86_64__)
+    PASSTHROUGH \name, \long
+#else
+    PASSTHROUGH \name, \double
+#endif
+.endm
+
 .text
 
 // MARK: - stdio
@@ -313,13 +324,15 @@ PASSTHROUGH _strtol, strtol
 PASSTHROUGH _strtoul, strtoul
 PASSTHROUGH _strtoll, strtoll
 PASSTHROUGH _strtoull, strtoull
+// BSD's name for strtoull (u_quad_t is unsigned long long).
+PASSTHROUGH _strtouq, strtoull
 PASSTHROUGH _strtod, strtod
 PASSTHROUGH _strtof, strtof
 // The C locale's; the locale argument is ignored. long double is double on
 // Darwin arm64.
 PASSTHROUGH _strtod_l, strtod
 PASSTHROUGH _strtof_l, strtof
-PASSTHROUGH _strtold_l, strtod
+LONG_DOUBLE _strtold_l, strtod, strtold
 PASSTHROUGH _abs, abs
 PASSTHROUGH _labs, labs
 PASSTHROUGH _llabs, llabs
@@ -360,6 +373,9 @@ PASSTHROUGH _mktemp, mktemp
 PASSTHROUGH _memccpy, memccpy
 PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
+// struct servent is glibc's layout; both read /etc/services.
+PASSTHROUGH _getservbyname, getservbyname
+PASSTHROUGH _getservbyport, getservbyport
 PASSTHROUGH _fork, fork
 // vfork as fork: the child gets its own copy, which is safe for what a
 // vfork child may do (exec or _exit), where vfork itself shares the stack.
@@ -519,18 +535,24 @@ PASSTHROUGH _logbf, logbf
 PASSTHROUGH _fdimf, fdimf
 PASSTHROUGH _hypotf, hypotf
 PASSTHROUGH _nanf, nanf
+PASSTHROUGH _nan, nan
 PASSTHROUGH _nextafterf, nextafterf
 PASSTHROUGH _remainderf, remainderf
 PASSTHROUGH _remquof, remquof
 PASSTHROUGH _lgammaf_r, lgammaf_r
 PASSTHROUGH _tgammaf, tgammaf
 PASSTHROUGH _nextafter, nextafter
-// long double is double on Darwin arm64.
-PASSTHROUGH _fmodl, fmod
+LONG_DOUBLE _fmodl, fmod, fmodl
 PASSTHROUGH _lgammal_r, lgamma_r
 PASSTHROUGH _llround, llround
 PASSTHROUGH _llroundf, llroundf
-PASSTHROUGH _llroundl, llround
+LONG_DOUBLE _llroundl, llround, llroundl
+#if defined(__x86_64__)
+// x86_64's long double is the x87's 80 bits on both, passed the same way.
+PASSTHROUGH _fmal, fmal
+#else
+PASSTHROUGH _fmal, fma
+#endif
 
 // MARK: - compiler runtime
 // 128-bit division, which Darwin's libSystem exports (compiler-rt's).
@@ -752,79 +774,79 @@ PASSTHROUGH _ctan, ctan
 PASSTHROUGH _ctanf, ctanf
 PASSTHROUGH _ctanh, ctanh
 PASSTHROUGH _ctanhf, ctanhf
-PASSTHROUGH _acoshl, acosh
-PASSTHROUGH _asinhl, asinh
-PASSTHROUGH _atanhl, atanh
-PASSTHROUGH _cbrtl, cbrt
-PASSTHROUGH _erfl, erf
-PASSTHROUGH _erfcl, erfc
-PASSTHROUGH _expm1l, expm1
-PASSTHROUGH _fdiml, fdim
-PASSTHROUGH _lgammal, lgamma
-PASSTHROUGH _log1pl, log1p
-PASSTHROUGH _nanl, nan
-PASSTHROUGH _tgammal, tgamma
-PASSTHROUGH _logbl, logb
-PASSTHROUGH _nextafterl, nextafter
-PASSTHROUGH _remainderl, remainder
-PASSTHROUGH _remquol, remquo
-PASSTHROUGH _scalbnl, scalbn
-PASSTHROUGH _scalblnl, scalbln
-PASSTHROUGH _ilogbl, ilogb
-PASSTHROUGH _cabsl, cabs
-PASSTHROUGH _cacosl, cacos
-PASSTHROUGH _cacoshl, cacosh
-PASSTHROUGH _cargl, carg
-PASSTHROUGH _casinl, casin
-PASSTHROUGH _casinhl, casinh
-PASSTHROUGH _catanl, catan
-PASSTHROUGH _catanhl, catanh
-PASSTHROUGH _ccosl, ccos
-PASSTHROUGH _ccoshl, ccosh
-PASSTHROUGH _cexpl, cexp
-PASSTHROUGH _clogl, clog
-PASSTHROUGH _cpowl, cpow
-PASSTHROUGH _cprojl, cproj
-PASSTHROUGH _csinl, csin
-PASSTHROUGH _csinhl, csinh
-PASSTHROUGH _csqrtl, csqrt
-PASSTHROUGH _ctanl, ctan
-PASSTHROUGH _ctanhl, ctanh
-PASSTHROUGH _nexttoward, nextafter
-PASSTHROUGH _roundl, round
-PASSTHROUGH _floorl, floor
-PASSTHROUGH _ceill, ceil
-PASSTHROUGH _truncl, trunc
-PASSTHROUGH _rintl, rint
-PASSTHROUGH _nearbyintl, nearbyint
-PASSTHROUGH _fabsl, fabs
-PASSTHROUGH _sqrtl, sqrt
-PASSTHROUGH _sinl, sin
-PASSTHROUGH _cosl, cos
-PASSTHROUGH _tanl, tan
-PASSTHROUGH _asinl, asin
-PASSTHROUGH _acosl, acos
-PASSTHROUGH _atanl, atan
-PASSTHROUGH _atan2l, atan2
-PASSTHROUGH _sinhl, sinh
-PASSTHROUGH _coshl, cosh
-PASSTHROUGH _tanhl, tanh
-PASSTHROUGH _expl, exp
-PASSTHROUGH _exp2l, exp2
-PASSTHROUGH _logl, log
-PASSTHROUGH _log2l, log2
-PASSTHROUGH _log10l, log10
-PASSTHROUGH _powl, pow
-PASSTHROUGH _hypotl, hypot
-PASSTHROUGH _fmaxl, fmax
-PASSTHROUGH _fminl, fmin
-PASSTHROUGH _copysignl, copysign
-PASSTHROUGH _ldexpl, ldexp
-PASSTHROUGH _frexpl, frexp
-PASSTHROUGH _modfl, modf
-PASSTHROUGH _lroundl, lround
-PASSTHROUGH _lrintl, lrint
-PASSTHROUGH _llrintl, llrint
+LONG_DOUBLE _acoshl, acosh, acoshl
+LONG_DOUBLE _asinhl, asinh, asinhl
+LONG_DOUBLE _atanhl, atanh, atanhl
+LONG_DOUBLE _cbrtl, cbrt, cbrtl
+LONG_DOUBLE _erfl, erf, erfl
+LONG_DOUBLE _erfcl, erfc, erfcl
+LONG_DOUBLE _expm1l, expm1, expm1l
+LONG_DOUBLE _fdiml, fdim, fdiml
+LONG_DOUBLE _lgammal, lgamma, lgammal
+LONG_DOUBLE _log1pl, log1p, log1pl
+LONG_DOUBLE _nanl, nan, nanl
+LONG_DOUBLE _tgammal, tgamma, tgammal
+LONG_DOUBLE _logbl, logb, logbl
+LONG_DOUBLE _nextafterl, nextafter, nextafterl
+LONG_DOUBLE _remainderl, remainder, remainderl
+LONG_DOUBLE _remquol, remquo, remquol
+LONG_DOUBLE _scalbnl, scalbn, scalbnl
+LONG_DOUBLE _scalblnl, scalbln, scalblnl
+LONG_DOUBLE _ilogbl, ilogb, ilogbl
+LONG_DOUBLE _cabsl, cabs, cabsl
+LONG_DOUBLE _cacosl, cacos, cacosl
+LONG_DOUBLE _cacoshl, cacosh, cacoshl
+LONG_DOUBLE _cargl, carg, cargl
+LONG_DOUBLE _casinl, casin, casinl
+LONG_DOUBLE _casinhl, casinh, casinhl
+LONG_DOUBLE _catanl, catan, catanl
+LONG_DOUBLE _catanhl, catanh, catanhl
+LONG_DOUBLE _ccosl, ccos, ccosl
+LONG_DOUBLE _ccoshl, ccosh, ccoshl
+LONG_DOUBLE _cexpl, cexp, cexpl
+LONG_DOUBLE _clogl, clog, clogl
+LONG_DOUBLE _cpowl, cpow, cpowl
+LONG_DOUBLE _cprojl, cproj, cprojl
+LONG_DOUBLE _csinl, csin, csinl
+LONG_DOUBLE _csinhl, csinh, csinhl
+LONG_DOUBLE _csqrtl, csqrt, csqrtl
+LONG_DOUBLE _ctanl, ctan, ctanl
+LONG_DOUBLE _ctanhl, ctanh, ctanhl
+LONG_DOUBLE _nexttoward, nextafter, nexttoward
+LONG_DOUBLE _roundl, round, roundl
+LONG_DOUBLE _floorl, floor, floorl
+LONG_DOUBLE _ceill, ceil, ceill
+LONG_DOUBLE _truncl, trunc, truncl
+LONG_DOUBLE _rintl, rint, rintl
+LONG_DOUBLE _nearbyintl, nearbyint, nearbyintl
+LONG_DOUBLE _fabsl, fabs, fabsl
+LONG_DOUBLE _sqrtl, sqrt, sqrtl
+LONG_DOUBLE _sinl, sin, sinl
+LONG_DOUBLE _cosl, cos, cosl
+LONG_DOUBLE _tanl, tan, tanl
+LONG_DOUBLE _asinl, asin, asinl
+LONG_DOUBLE _acosl, acos, acosl
+LONG_DOUBLE _atanl, atan, atanl
+LONG_DOUBLE _atan2l, atan2, atan2l
+LONG_DOUBLE _sinhl, sinh, sinhl
+LONG_DOUBLE _coshl, cosh, coshl
+LONG_DOUBLE _tanhl, tanh, tanhl
+LONG_DOUBLE _expl, exp, expl
+LONG_DOUBLE _exp2l, exp2, exp2l
+LONG_DOUBLE _logl, log, logl
+LONG_DOUBLE _log2l, log2, log2l
+LONG_DOUBLE _log10l, log10, log10l
+LONG_DOUBLE _powl, pow, powl
+LONG_DOUBLE _hypotl, hypot, hypotl
+LONG_DOUBLE _fmaxl, fmax, fmaxl
+LONG_DOUBLE _fminl, fmin, fminl
+LONG_DOUBLE _copysignl, copysign, copysignl
+LONG_DOUBLE _ldexpl, ldexp, ldexpl
+LONG_DOUBLE _frexpl, frexp, frexpl
+LONG_DOUBLE _modfl, modf, modfl
+LONG_DOUBLE _lroundl, lround, lroundl
+LONG_DOUBLE _lrintl, lrint, lrintl
+LONG_DOUBLE _llrintl, llrint, llrintl
 
 #endif
 

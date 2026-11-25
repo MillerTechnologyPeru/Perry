@@ -540,6 +540,12 @@ public func CGEventSourceCreate(_ state: Int32) -> Ref? {
 @DarwinC("_CGEventSourceSetLocalEventsSuppressionInterval")
 public func CGEventSourceSetLocalEventsSuppressionInterval(_ source: Ref?, _ seconds: Double) {}
 
+/// CFTimeInterval CGEventSourceSecondsSinceLastEventType(stateID, type):
+/// since the last event of the type, or of any input (kCGAnyInputEventType,
+/// ~0), that AppKit's application handled, as InputEvents saw it.
+@DarwinC("_CGEventSourceSecondsSinceLastEventType")
+public func CGEventSourceSecondsSinceLastEventType(_ state: Int32, _ type: UInt32) -> Double { InputEvents.secondsSince(type) }
+
 /// A null event, where the mouse is now.
 @c(_CGEventCreate) public func CGEventCreate(_ source: Ref?) -> Ref? { event(at: Displays.mouse) }
 

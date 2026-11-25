@@ -31,6 +31,7 @@
 #include <sys/ioctl.h>
 #include <stdatomic.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -254,7 +255,145 @@ void *darwin_bsearch_b(const void *key, const void *base, size_t count, size_t s
     return NULL;
 }
 
+// MARK: - Merge sort
+
+// mergesort: a stable sort, merging halves through a buffer the size of
+// half the array. As BSD's, which Darwin's is, an element smaller than half
+// a pointer is EINVAL; a buffer that can't be had is ENOMEM.
+typedef int (*darwin_comparator)(const void *, const void *);
+
+static void merge_sorted(char *base, char *scratch, size_t count, size_t size, darwin_comparator compare) {
+    if (count < 2)
+        return;
+    size_t half = count / 2;
+    merge_sorted(base, scratch, half, size, compare);
+    merge_sorted(base + half * size, scratch, count - half, size, compare);
+    // Halves already in order need no merge.
+    if (compare(base + (half - 1) * size, base + half * size) <= 0)
+        return;
+    memcpy(scratch, base, half * size);
+    char *left = scratch, *left_end = scratch + half * size;
+    char *right = base + half * size, *right_end = base + count * size, *out = base;
+    // An element of the right half goes first only when it is smaller, so
+    // equal elements keep their order. `out` stays behind `right`.
+    while (left < left_end && right < right_end) {
+        if (compare(right, left) < 0) {
+            memcpy(out, right, size);
+            right += size;
+        } else {
+            memcpy(out, left, size);
+            left += size;
+        }
+        out += size;
+    }
+    memcpy(out, left, (size_t)(left_end - left));
+}
+
+int darwin_mergesort(void *base, size_t count, size_t size, darwin_comparator compare) DARWIN_SYMBOL(mergesort);
+int darwin_mergesort(void *base, size_t count, size_t size, darwin_comparator compare) {
+    if (size < sizeof(void *) / 2) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (count < 2)
+        return 0;
+    if (count / 2 > SIZE_MAX / size) {
+        errno = ENOMEM;
+        return -1;
+    }
+    char *scratch = malloc(count / 2 * size);
+    if (!scratch) {
+        errno = ENOMEM;
+        return -1;
+    }
+    merge_sorted(base, scratch, count, size, PERRY_DARWIN_FUNCTION(compare));
+    free(scratch);
+    return 0;
+}
+
+// MARK: - Hash tables of strings (<strhash.h>)
+
+// The old BSD table that <strhash.h> lays out: a size and that many buckets,
+// each a chain of nodes { key, data, next }. A key is copied in; the data is
+// the caller's. Only how a key picks its bucket is Perry's own.
+struct darwin_hash_node {
+    char *key;
+    void *data;
+    struct darwin_hash_node *next;
+};
+
+struct darwin_hash_table {
+    int size;
+    struct darwin_hash_node **buckets;
+};
+
+// A table of `size` buckets, or HASH_SZ's 97 for none.
+struct darwin_hash_table *darwin_hash_create(int size) DARWIN_SYMBOL(hash_create);
+struct darwin_hash_table *darwin_hash_create(int size) {
+    if (size <= 0)
+        size = 97;
+    struct darwin_hash_table *table = malloc(sizeof(*table));
+    if (!table)
+        return NULL;
+    table->buckets = calloc((size_t)size, sizeof(*table->buckets));
+    if (!table->buckets) {
+        free(table);
+        return NULL;
+    }
+    table->size = size;
+    return table;
+}
+
+// FNV-1a over the key's bytes.
+static struct darwin_hash_node **hash_bucket(struct darwin_hash_table *table, const char *key) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char *c = (const unsigned char *)key; *c; c++)
+        hash = (hash ^ *c) * 16777619u;
+    return &table->buckets[hash % (uint32_t)table->size];
+}
+
+// Looks a key up. A key in the table keeps its data unless there is a
+// replace function, which is given the old data before `datum` takes its
+// place; the result is the key's data then. A key not in the table is added
+// with `datum`, unless that is NULL; the result is `datum` (NULL when the
+// node could not be made).
+void *darwin_hash_search(struct darwin_hash_table *table, char *key, void *datum, void (*replace)(void *))
+    DARWIN_SYMBOL(hash_search);
+void *darwin_hash_search(struct darwin_hash_table *table, char *key, void *datum, void (*replace)(void *)) {
+    if (!table || !key)
+        return NULL;
+    struct darwin_hash_node **bucket = hash_bucket(table, key);
+    for (struct darwin_hash_node *node = *bucket; node; node = node->next) {
+        if (strcmp(node->key, key) != 0)
+            continue;
+        if (replace) {
+            PERRY_DARWIN_FUNCTION(replace)(node->data);
+            node->data = datum;
+        }
+        return node->data;
+    }
+    if (!datum)
+        return NULL;
+    struct darwin_hash_node *node = malloc(sizeof(*node));
+    char *copy = strdup(key);
+    if (!node || !copy) {
+        free(node);
+        free(copy);
+        return NULL;
+    }
+    *node = (struct darwin_hash_node){ copy, datum, *bucket };
+    *bucket = node;
+    return datum;
+}
+
 // MARK: - Locale
+
+// __mb_cur_max: the longest character of the global locale's encoding, a
+// variable that MB_CUR_MAX read before Mac OS X 10.4's ___mb_cur_max().
+// Darwin keeps it up to date as setlocale changes LC_CTYPE; so does
+// setlocale here. A program starts in the C locale, whose characters are
+// single bytes.
+int darwin_mb_cur_max_variable DARWIN_SYMBOL(__mb_cur_max) = 1;
 
 // Darwin: LC_ALL 0, LC_COLLATE 1, LC_CTYPE 2, LC_MONETARY 3, LC_NUMERIC 4, LC_TIME 5, LC_MESSAGES 6.
 char *darwin_setlocale(int category, const char *locale) DARWIN_SYMBOL(setlocale);
@@ -266,7 +405,15 @@ char *darwin_setlocale(int category, const char *locale) {
     }
     char *result = setlocale(categories[category], locale);
     // A locale this system lacks is the C locale's, as on a device without it.
-    return result ? result : (locale && *locale ? setlocale(categories[category], "C") : NULL);
+    if (!result && locale && *locale)
+        result = setlocale(categories[category], "C");
+    if (result && locale) {
+        // The global locale's, whatever locale this thread has taken.
+        locale_t previous = uselocale(LC_GLOBAL_LOCALE);
+        darwin_mb_cur_max_variable = (int)MB_CUR_MAX;
+        uselocale(previous);
+    }
+    return result;
 }
 
 // MARK: - Resources
@@ -370,6 +517,20 @@ struct group *darwin_getgrgid(gid_t gid) { return getgrgid(gid); }
 struct group *darwin_getgrnam(const char *name) DARWIN_SYMBOL(getgrnam);
 struct group *darwin_getgrnam(const char *name) { return getgrnam(name); }
 
+// The reentrant forms return an error number, which is Darwin's here (ERANGE
+// for a buffer too small); a group not found is 0 and no result, on both.
+int darwin_getgrgid_r(gid_t gid, struct group *out, char *buffer, size_t size, struct group **result)
+    DARWIN_SYMBOL(getgrgid_r);
+int darwin_getgrgid_r(gid_t gid, struct group *out, char *buffer, size_t size, struct group **result) {
+    return perry_darwin_errno_from_linux(getgrgid_r(gid, out, buffer, size, result));
+}
+
+int darwin_getgrnam_r(const char *name, struct group *out, char *buffer, size_t size, struct group **result)
+    DARWIN_SYMBOL(getgrnam_r);
+int darwin_getgrnam_r(const char *name, struct group *out, char *buffer, size_t size, struct group **result) {
+    return perry_darwin_errno_from_linux(getgrnam_r(name, out, buffer, size, result));
+}
+
 long darwin_gethostid(void) DARWIN_SYMBOL(gethostid);
 long darwin_gethostid(void) { return gethostid(); }
 
@@ -446,6 +607,11 @@ static locale_t c_locale(void) {
 
 int darwin_mb_cur_max_l(locale_t locale) DARWIN_SYMBOL(___mb_cur_max_l);
 int darwin_mb_cur_max_l(locale_t locale) { return IN_LOCALE(locale, (int)MB_CUR_MAX); }
+
+// What MB_CUR_MAX calls: the thread's locale's, as uselocale set it, or
+// the global one's.
+int darwin_mb_cur_max_function(void) DARWIN_SYMBOL(___mb_cur_max);
+int darwin_mb_cur_max_function(void) { return (int)MB_CUR_MAX; }
 
 struct darwin_lconv *darwin_localeconv_l(locale_t locale) DARWIN_SYMBOL(localeconv_l);
 struct darwin_lconv *darwin_localeconv_l(locale_t locale) { return IN_LOCALE(locale, darwin_localeconv()); }
@@ -547,6 +713,38 @@ int darwin_openpty(int *master, int *slave, char *name, const void *attributes, 
 
 // MARK: - Strings
 
+// dirname_r: the directory part of a path, as dirname gives it, into the
+// caller's buffer of Darwin's PATH_MAX (1024) bytes; the path is left as it
+// is. "." for a path without a slash, "/" for the root's. ENAMETOOLONG for
+// a result too long for the buffer.
+char *darwin_dirname_r(const char *path, char *buffer) DARWIN_SYMBOL(dirname_r);
+char *darwin_dirname_r(const char *path, char *buffer) {
+    const char *result = ".";
+    size_t length = 1;
+    if (path && *path) {
+        const char *end = path + strlen(path) - 1;
+        // Past slashes at the end, then the last name.
+        while (end > path && *end == '/')
+            end--;
+        while (end > path && *end != '/')
+            end--;
+        if (*end == '/') {
+            // Past the slashes before the last name; the root keeps one.
+            while (end > path && *end == '/')
+                end--;
+            result = path;
+            length = (size_t)(end - path) + 1;
+        }
+    }
+    if (length >= 1024) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    memcpy(buffer, result, length);
+    buffer[length] = '\0';
+    return buffer;
+}
+
 // The XSI form, returning an error number.
 int darwin_strerror_r(int error, char *buffer, size_t length) DARWIN_SYMBOL(strerror_r);
 int darwin_strerror_r(int error, char *buffer, size_t length) {
@@ -638,6 +836,11 @@ size_t darwin_confstr(int name, char *buffer, size_t length) {
 
 void darwin_srandomdev(void) DARWIN_SYMBOL(srandomdev);
 void darwin_srandomdev(void) { srandom(arc4random()); }
+
+// arc4random_stir: glibc's arc4random takes the kernel's randomness for
+// itself as it needs it, so there is nothing to stir in.
+void darwin_arc4random_stir(void) DARWIN_SYMBOL(arc4random_stir);
+void darwin_arc4random_stir(void) {}
 
 // MARK: - sysctl
 
@@ -1088,6 +1291,48 @@ void darwin_uuid_generate_random(uint8_t *uuid) {
 void darwin_uuid_generate(uint8_t *uuid) DARWIN_SYMBOL(uuid_generate);
 void darwin_uuid_generate(uint8_t *uuid) { darwin_uuid_generate_random(uuid); }
 
+// uuid_generate_time: a version 1 UUID, of the time in 100 ns intervals
+// since the Gregorian calendar began (15 October 1582), a clock sequence and
+// a node. Darwin's node is the Mac's network address; here it is a random
+// one with the multicast bit set, which RFC 4122 gives for a host that
+// doesn't use its own, chosen once per process with the clock sequence. The
+// time only rises from one UUID to the next, so none repeats.
+void darwin_uuid_generate_time(uint8_t *uuid) DARWIN_SYMBOL(uuid_generate_time);
+void darwin_uuid_generate_time(uint8_t *uuid) {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static bool started;
+    static uint64_t last;
+    static uint16_t sequence;
+    static uint8_t node[6];
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    uint64_t stamp = (uint64_t)now.tv_sec * 10000000u + (uint64_t)now.tv_nsec / 100 + 0x01B21DD213814000ull;
+    pthread_mutex_lock(&lock);
+    if (!started) {
+        arc4random_buf(node, sizeof(node));
+        node[0] |= 0x01;
+        sequence = (uint16_t)arc4random();
+        started = true;
+    }
+    if (stamp <= last)
+        stamp = last + 1;
+    last = stamp;
+    pthread_mutex_unlock(&lock);
+    uint32_t low = (uint32_t)stamp;
+    uint16_t middle = (uint16_t)(stamp >> 32), high = (uint16_t)((stamp >> 48) & 0x0fff) | 0x1000;    // version 1
+    uuid[0] = (uint8_t)(low >> 24);
+    uuid[1] = (uint8_t)(low >> 16);
+    uuid[2] = (uint8_t)(low >> 8);
+    uuid[3] = (uint8_t)low;
+    uuid[4] = (uint8_t)(middle >> 8);
+    uuid[5] = (uint8_t)middle;
+    uuid[6] = (uint8_t)(high >> 8);
+    uuid[7] = (uint8_t)high;
+    uuid[8] = (uint8_t)(((sequence >> 8) & 0x3f) | 0x80);    // RFC 4122 variant
+    uuid[9] = (uint8_t)sequence;
+    memcpy(uuid + 10, node, sizeof(node));
+}
+
 static void uuid_format(const uint8_t *uuid, char *out, const char *digits) {
     for (int i = 0, j = 0; i < 16; i++) {
         if (i == 4 || i == 6 || i == 8 || i == 10)
@@ -1415,6 +1660,13 @@ void darwin_asl_release(void *object) { free(object); }
 // notify(3): a registration gets a token, and no notification comes.
 static _Atomic int notify_tokens;
 
+// The notify(3) name whose state is the Mac's thermal pressure level
+// (OSThermalNotification.h). Linux has no such level: nothing posts to the
+// name and its state reads 0, kOSThermalPressureLevelNominal, as on a Mac
+// that is not under thermal pressure.
+const char *const darwin_kOSThermalNotificationPressureLevelName DARWIN_SYMBOL(kOSThermalNotificationPressureLevelName) =
+    "com.apple.system.thermalpressurelevel";
+
 uint32_t darwin_notify_register_dispatch(const char *name, int *token, void *queue, void *handler)
     DARWIN_SYMBOL(notify_register_dispatch);
 uint32_t darwin_notify_register_dispatch(const char *name, int *token, void *queue, void *handler) {
@@ -1527,6 +1779,157 @@ int darwin_fremovexattr(int fd, const char *name, int options) {
     if (result < 0 && errno == ENODATA)
         perry_set_darwin_errno(ENODATA, 93);    // ENOATTR
     return result;
+}
+
+// Linux's list of a file's attribute names, in a buffer to free; its length,
+// or -1. The list can grow between asking its size and reading it: then
+// again.
+static ssize_t linux_xattr_names(const char *path, int fd, bool follow, char **names) {
+    *names = NULL;
+    for (int attempt = 0; attempt < 8; attempt++) {
+        ssize_t size = path ? (follow ? listxattr(path, NULL, 0) : llistxattr(path, NULL, 0)) : flistxattr(fd, NULL, 0);
+        if (size <= 0)
+            return size;
+        char *buffer = malloc((size_t)size);
+        if (!buffer) {
+            errno = ENOMEM;
+            return -1;
+        }
+        ssize_t length = path ? (follow ? listxattr(path, buffer, (size_t)size) : llistxattr(path, buffer, (size_t)size))
+                              : flistxattr(fd, buffer, (size_t)size);
+        if (length >= 0) {
+            *names = buffer;
+            return length;
+        }
+        free(buffer);
+        if (errno != ERANGE)
+            return -1;
+    }
+    errno = ERANGE;
+    return -1;
+}
+
+// listxattr: the names setxattr gave, each ending in a NUL, which Linux
+// keeps in its user namespace: without "user.". Linux's own namespaces
+// (security., system., trusted.) aren't the program's and aren't listed. A
+// file system that keeps no attributes has none, as a Mac's do through
+// AppleDouble files, where Linux says ENOTSUP. With no buffer or a size of 0,
+// the size the names take; ERANGE for a buffer too small. XATTR_NOFOLLOW (1)
+// lists a link's own; XATTR_NOSECURITY (8) and XATTR_NODEFAULT (0x10) are
+// EINVAL, as on Darwin.
+static ssize_t xattr_list_to_darwin(const char *path, int fd, char *out, size_t size, int options) {
+    if (options & (0x8 | 0x10)) {
+        errno = EINVAL;
+        return -1;
+    }
+    char *names;
+    ssize_t length = linux_xattr_names(path, fd, !(options & (0x1 | 0x40)), &names);
+    if (length < 0)
+        return errno == ENOTSUP ? 0 : -1;
+    size_t needed = 0;
+    for (ssize_t at = 0; at < length; at += (ssize_t)strlen(names + at) + 1) {
+        const char *name = names + at;
+        if (strncmp(name, "user.", 5) != 0 || name[5] == '\0')
+            continue;
+        size_t name_size = strlen(name + 5) + 1;
+        if (out && size) {
+            if (needed + name_size > size) {
+                free(names);
+                errno = ERANGE;
+                return -1;
+            }
+            memcpy(out + needed, name + 5, name_size);
+        }
+        needed += name_size;
+    }
+    free(names);
+    return (ssize_t)needed;
+}
+
+ssize_t darwin_listxattr(const char *path, char *names, size_t size, int options) DARWIN_SYMBOL(listxattr);
+ssize_t darwin_listxattr(const char *path, char *names, size_t size, int options) {
+    return xattr_list_to_darwin(path, -1, names, size, options);
+}
+
+ssize_t darwin_flistxattr(int fd, char *names, size_t size, int options) DARWIN_SYMBOL(flistxattr);
+ssize_t darwin_flistxattr(int fd, char *names, size_t size, int options) {
+    return xattr_list_to_darwin(NULL, fd, names, size, options & ~0x41);
+}
+
+// MARK: - Access control lists
+
+// Darwin's ACLs are its own extended kind (ACL_TYPE_EXTENDED, 0x100), the
+// only kind it supports, kept by the file system beside a file's mode. Linux
+// has no such ACLs (its POSIX ACLs are another model, and libacl isn't
+// linked), so every file here has none: acl_get_file says ENOENT, as Darwin
+// does for a file without one, and acl_set_file can give a file an empty ACL,
+// which it has already, but not one with entries (ENOTSUP). An ACL object
+// holds no entries; nothing here adds any.
+enum { DARWIN_ACL_TYPE_EXTENDED = 0x100, DARWIN_ACL_MAX_ENTRIES = 128, DARWIN_ACL_MAGIC = 0x50414331 };
+
+struct darwin_acl {
+    uint32_t magic;
+    int capacity;
+    int count;
+};
+
+void *darwin_acl_init(int count) DARWIN_SYMBOL(acl_init);
+void *darwin_acl_init(int count) {
+    if (count < 0) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (count > DARWIN_ACL_MAX_ENTRIES) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    struct darwin_acl *acl = calloc(1, sizeof(*acl));
+    if (!acl) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    *acl = (struct darwin_acl){ DARWIN_ACL_MAGIC, count, 0 };
+    return acl;
+}
+
+// Frees an ACL, or anything else the ACL functions handed out (text).
+int darwin_acl_free(void *object) DARWIN_SYMBOL(acl_free);
+int darwin_acl_free(void *object) {
+    struct darwin_acl *acl = object;
+    if (acl && acl->magic == DARWIN_ACL_MAGIC)
+        acl->magic = 0;
+    free(object);
+    return 0;
+}
+
+void *darwin_acl_get_file(const char *path, int type) DARWIN_SYMBOL(acl_get_file);
+void *darwin_acl_get_file(const char *path, int type) {
+    struct stat64 info;
+    if (type != DARWIN_ACL_TYPE_EXTENDED) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (stat64(path, &info) != 0)
+        return NULL;
+    errno = ENOENT;
+    return NULL;
+}
+
+int darwin_acl_set_file(const char *path, int type, void *object) DARWIN_SYMBOL(acl_set_file);
+int darwin_acl_set_file(const char *path, int type, void *object) {
+    const struct darwin_acl *acl = object;
+    struct stat64 info;
+    if (type != DARWIN_ACL_TYPE_EXTENDED || !acl || acl->magic != DARWIN_ACL_MAGIC) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (stat64(path, &info) != 0)
+        return -1;
+    if (acl->count != 0) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    return 0;
 }
 
 // MARK: - Signal stacks and the rest

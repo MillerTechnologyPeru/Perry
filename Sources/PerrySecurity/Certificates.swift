@@ -251,6 +251,8 @@ final class TrustState {
     var anchors: [UnsafeMutableRawPointer]?
     var anchorsOnly = false
     var verifyDate: Date?
+    /// SecTrustOptionFlags (SecTrustSetOptions).
+    var options: UInt32 = 0
     /// After evaluation: SecTrustResultType, the failure and the chain.
     var result: UInt32 = 0
     var status: Int32 = 0
@@ -287,8 +289,12 @@ final class TrustState {
         // turned back off; anchors-only without any trusts nothing.
         let useSystem = !anchorsOnly
         let ssl = policies.first { $0.ssl }
-        let outcome = TrustEvaluation.run(leaves: leaves, anchors: anchorStates, useSystem: useSystem, date: date,
-                                          hostname: ssl?.server == true ? ssl?.hostname : nil)
+        let hostname = ssl?.server == true ? ssl?.hostname : nil
+        var outcome = TrustEvaluation.run(leaves: leaves, anchors: anchorStates, useSystem: useSystem, date: date, hostname: hostname)
+        if outcome.status != 0, options & TrustOptions.allowExpired != 0 {
+            outcome = TrustOptions.runAllowingExpired(leaves: leaves, anchors: anchorStates, useSystem: useSystem, date: date,
+                                                      hostname: hostname) ?? outcome
+        }
         status = outcome.status
         result = outcome.status == 0 ? 4 : 5   // unspecified, recoverable trust failure
         let all = certificates + (anchors ?? [])

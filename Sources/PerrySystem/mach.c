@@ -38,6 +38,7 @@ typedef int kern_return_t;
 enum {
     KERN_SUCCESS = 0,
     KERN_INVALID_ADDRESS = 1,
+    KERN_NO_SPACE = 3,
     KERN_INVALID_ARGUMENT = 4,
     KERN_FAILURE = 5,
     KERN_RESOURCE_SHORTAGE = 6,
@@ -157,6 +158,125 @@ kern_return_t darwin_mach_vm_allocate(mach_port_t task, uintptr_t *address, size
 kern_return_t darwin_mach_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) DARWIN_SYMBOL(mach_vm_deallocate);
 kern_return_t darwin_mach_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) {
     return darwin_vm_deallocate(task, address, size);
+}
+
+// vm_map and mach_vm_map, for anonymous memory (no memory object): at
+// *address, or anywhere with VM_FLAGS_ANYWHERE (1), there at an address
+// whose bits in `mask` are zero. A fixed address must be free, unless
+// VM_FLAGS_OVERWRITE (0x4000) replaces what is there; KERN_NO_SPACE when it
+// isn't. The current protection is the mapping's (VM_PROT_* are PROT_*);
+// the maximum, inheritance, copy and the VM tag in the flags' top byte have
+// nothing to change here. No memory objects can be made
+// (mach_make_memory_entry_64 fails), so mapping one is KERN_INVALID_ARGUMENT.
+static kern_return_t map_anonymous(uint64_t *address, uint64_t size, uint64_t mask, int flags, mach_port_t object,
+                                   int protection) {
+    if (!address || size == 0 || object != 0 || size > SIZE_MAX)
+        return KERN_INVALID_ARGUMENT;
+    int linux_protection = protection & (PROT_READ | PROT_WRITE | PROT_EXEC);
+    if (!(flags & 1)) {
+        if (*address > UINTPTR_MAX - size)
+            return KERN_INVALID_ADDRESS;
+        void *hint = (void *)(uintptr_t)*address;
+        int fixed = (flags & 0x4000) ? MAP_FIXED : MAP_FIXED_NOREPLACE;
+        void *memory = mmap(hint, (size_t)size, linux_protection, MAP_PRIVATE | MAP_ANONYMOUS | fixed, -1, 0);
+        if (memory == MAP_FAILED)
+            return errno == EEXIST ? KERN_NO_SPACE : errno == EINVAL ? KERN_INVALID_ARGUMENT : KERN_RESOURCE_SHORTAGE;
+        // A kernel before MAP_FIXED_NOREPLACE takes the address as a hint.
+        if (memory != hint) {
+            munmap(memory, (size_t)size);
+            return KERN_NO_SPACE;
+        }
+        return KERN_SUCCESS;
+    }
+    // An alignment: the mask's bits, and every bit below its highest.
+    for (int shift = 1; shift < 64; shift *= 2)
+        mask |= mask >> shift;
+    if (mask <= PERRY_PAGE_SIZE - 1) {
+        void *memory = perry_map_pages((size_t)size, linux_protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (memory == MAP_FAILED)
+            return KERN_NO_SPACE;
+        *address = (uintptr_t)memory;
+        return KERN_SUCCESS;
+    }
+    // Mapped with the alignment to spare, then cut to start on it.
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t length = ((uintptr_t)size + page - 1) & ~(page - 1);
+    if (mask > UINTPTR_MAX - length)
+        return KERN_NO_SPACE;
+    uintptr_t whole = length + (uintptr_t)mask;
+    uint8_t *start = mmap(NULL, whole, linux_protection, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (start == MAP_FAILED)
+        return KERN_NO_SPACE;
+    uintptr_t aligned = ((uintptr_t)start + (uintptr_t)mask) & ~(uintptr_t)mask;
+    if (aligned > (uintptr_t)start)
+        munmap(start, aligned - (uintptr_t)start);
+    if ((uintptr_t)start + whole > aligned + length)
+        munmap((void *)(aligned + length), (uintptr_t)start + whole - (aligned + length));
+    *address = aligned;
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_mach_vm_map(mach_port_t task, uint64_t *address, uint64_t size, uint64_t mask, int flags,
+                                 mach_port_t object, uint64_t offset, int copy, int current, int maximum,
+                                 unsigned inheritance) DARWIN_SYMBOL(mach_vm_map);
+kern_return_t darwin_mach_vm_map(mach_port_t task, uint64_t *address, uint64_t size, uint64_t mask, int flags,
+                                 mach_port_t object, uint64_t offset, int copy, int current, int maximum,
+                                 unsigned inheritance) {
+    (void)task, (void)offset, (void)copy, (void)maximum, (void)inheritance;
+    return map_anonymous(address, size, mask, flags, object, current);
+}
+
+// vm_map: the same with addresses, sizes and offsets of the task's word size.
+kern_return_t darwin_vm_map(mach_port_t task, uintptr_t *address, uintptr_t size, uintptr_t mask, int flags,
+                            mach_port_t object, uintptr_t offset, int copy, int current, int maximum, unsigned inheritance)
+    DARWIN_SYMBOL(vm_map);
+kern_return_t darwin_vm_map(mach_port_t task, uintptr_t *address, uintptr_t size, uintptr_t mask, int flags,
+                            mach_port_t object, uintptr_t offset, int copy, int current, int maximum, unsigned inheritance) {
+    (void)task, (void)offset, (void)copy, (void)maximum, (void)inheritance;
+    if (!address)
+        return KERN_INVALID_ARGUMENT;
+    uint64_t where = *address;
+    kern_return_t result = map_anonymous(&where, size, mask, flags, object, current);
+    if (result == KERN_SUCCESS)
+        *address = (uintptr_t)where;
+    return result;
+}
+
+// vm_copy: copies `size` bytes from one address of the task to another, as
+// if through a buffer (the ranges may overlap). Where either isn't mapped,
+// or the destination isn't writable, it fails (KERN_INVALID_ADDRESS) where
+// a plain copy would fault: process_vm_readv and process_vm_writev check.
+static bool copy_within(uintptr_t to, uintptr_t from, uintptr_t size, bool write_side) {
+    while (size > 0) {
+        struct iovec local = { (void *)(write_side ? from : to), size }, remote = { (void *)(write_side ? to : from), size };
+        ssize_t copied = syscall(write_side ? SYS_process_vm_writev : SYS_process_vm_readv, getpid(), &local, 1UL,
+                                 &remote, 1UL, 0UL);
+        if (copied <= 0)
+            return false;
+        to += (uintptr_t)copied;
+        from += (uintptr_t)copied;
+        size -= (uintptr_t)copied;
+    }
+    return true;
+}
+
+kern_return_t darwin_vm_copy(mach_port_t task, uintptr_t source, uintptr_t size, uintptr_t destination) DARWIN_SYMBOL(vm_copy);
+kern_return_t darwin_vm_copy(mach_port_t task, uintptr_t source, uintptr_t size, uintptr_t destination) {
+    (void)task;
+    if (size == 0)
+        return KERN_SUCCESS;
+    if (source > UINTPTR_MAX - size || destination > UINTPTR_MAX - size)
+        return KERN_INVALID_ADDRESS;
+    if (destination + size <= source || source + size <= destination)
+        return copy_within(destination, source, size, false) ? KERN_SUCCESS : KERN_INVALID_ADDRESS;
+    // Overlapping: through a buffer of the source's bytes.
+    uint8_t *buffer = malloc(size);
+    if (!buffer)
+        return KERN_RESOURCE_SHORTAGE;
+    bool copied = copy_within((uintptr_t)buffer, source, size, false) &&
+                  copy_within(destination, (uintptr_t)buffer, size, true);
+    free(buffer);
+    return copied ? KERN_SUCCESS : KERN_INVALID_ADDRESS;
 }
 
 // VM_PROT_READ 1, VM_PROT_WRITE 2, VM_PROT_EXECUTE 4, as Linux's PROT_*.
@@ -1414,8 +1534,6 @@ MACH_FAILS(exception_raise_state_identity, mach_port_t port, mach_port_t thread,
            void *code, uint32_t count, int *flavor, void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
 MACH_FAILS(mach_make_memory_entry_64, mach_port_t task, uint64_t *size, uint64_t offset, int permission,
            mach_port_t *entry, mach_port_t parent)
-MACH_FAILS(vm_map, mach_port_t task, uintptr_t *address, uintptr_t size, uintptr_t mask, int flags, mach_port_t object,
-           uintptr_t offset, int copy, int current, int maximum, int inheritance)
 
 // No ports can be made: there is no Mach IPC.
 // Ports within the process: mach_port_allocate (or mach_port_construct)
@@ -1700,6 +1818,99 @@ kern_return_t darwin_mach_port_mod_refs(mach_port_t task, mach_port_t name, int 
         destroy_port(name);
     return KERN_SUCCESS;
 }
+
+// mach_msg_destroy: gives up what a message holds. Messages here carry no
+// rights or memory (port names and out-of-line addresses arrive as the sender
+// wrote them, and its memory stays its own), except that a receive right
+// moved in one (MACH_MSG_TYPE_MOVE_RECEIVE, 16) is the port's only one: the
+// header's ports, and port descriptors and arrays of ports in a complex
+// message, that were given that way end, as Darwin's do when the message
+// holding their receive right is destroyed. A descriptor is 12 bytes, or 16
+// for out-of-line memory and ports and guarded ports in a 64-bit task; each
+// has its type and disposition in the word at its 8th byte.
+void darwin_mach_msg_destroy(void *message) DARWIN_SYMBOL(mach_msg_destroy);
+void darwin_mach_msg_destroy(void *message) {
+    const uint32_t *header = message;
+    if (!header)
+        return;
+    uint32_t bits = header[0], size = header[1];
+    if ((bits & 0x1f) == 16)
+        destroy_port(header[2]);
+    if (((bits >> 8) & 0x1f) == 16)
+        destroy_port(header[3]);
+    if (!(bits & 0x80000000u) || size < 28)
+        return;
+    const uint8_t *bytes = message, *end = bytes + size;
+    uint32_t count = header[6];
+    const uint8_t *descriptor = bytes + 28;
+    for (uint32_t i = 0; i < count && descriptor + 12 <= end; i++) {
+        uint32_t word;
+        memcpy(&word, descriptor + 8, sizeof(word));
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        uint32_t type = word & 0xff, disposition = (word >> 8) & 0xff;
+#else
+        uint32_t type = word >> 24, disposition = (word >> 16) & 0xff;
+#endif
+        size_t length = type == 0 ? 12 : sizeof(void *) == 8 ? 16 : 12;
+        if (descriptor + length > end)
+            break;
+        if (disposition == 16) {
+            mach_port_t name;
+            if (type == 0) {
+                // MACH_MSG_PORT_DESCRIPTOR: the name first.
+                memcpy(&name, descriptor, sizeof(name));
+                destroy_port(name);
+            } else if (type == 4) {
+                // MACH_MSG_GUARDED_PORT_DESCRIPTOR: the name after the context.
+                memcpy(&name, descriptor + (sizeof(void *) == 8 ? 12 : 4), sizeof(name));
+                destroy_port(name);
+            } else if (type == 2) {
+                // MACH_MSG_OOL_PORTS_DESCRIPTOR: an array of names and its count.
+                const mach_port_t *names;
+                uint32_t names_count;
+                memcpy(&names, descriptor, sizeof(names));
+                memcpy(&names_count, descriptor + (sizeof(void *) == 8 ? 12 : 4), sizeof(names_count));
+                for (uint32_t j = 0; names && j < names_count; j++)
+                    destroy_port(names[j]);
+            }
+        }
+        descriptor += length;
+    }
+}
+
+// MIG's reply port: one per thread, made when a MIG call first asks for it,
+// which the call receives its reply on, and which ends with the thread.
+// mig_dealloc_reply_port ends it after a call that went wrong, so the next
+// has a new one; mig_put_reply_port has nothing to do, as on Darwin, where
+// the thread keeps its port.
+static pthread_key_t reply_port_key;
+static pthread_once_t reply_port_once = PTHREAD_ONCE_INIT;
+
+static void end_reply_port(void *value) { destroy_port((mach_port_t)(uintptr_t)value); }
+
+static void make_reply_port_key(void) { pthread_key_create(&reply_port_key, end_reply_port); }
+
+mach_port_t darwin_mig_get_reply_port(void) DARWIN_SYMBOL(mig_get_reply_port);
+mach_port_t darwin_mig_get_reply_port(void) {
+    pthread_once(&reply_port_once, make_reply_port_key);
+    mach_port_t port = (mach_port_t)(uintptr_t)pthread_getspecific(reply_port_key);
+    if (!port && make_port(0, false, &port) == KERN_SUCCESS)
+        pthread_setspecific(reply_port_key, (void *)(uintptr_t)port);
+    return port;
+}
+
+void darwin_mig_dealloc_reply_port(mach_port_t port) DARWIN_SYMBOL(mig_dealloc_reply_port);
+void darwin_mig_dealloc_reply_port(mach_port_t port) {
+    (void)port;
+    pthread_once(&reply_port_once, make_reply_port_key);
+    mach_port_t own = (mach_port_t)(uintptr_t)pthread_getspecific(reply_port_key);
+    pthread_setspecific(reply_port_key, NULL);
+    if (own)
+        destroy_port(own);
+}
+
+void darwin_mig_put_reply_port(mach_port_t port) DARWIN_SYMBOL(mig_put_reply_port);
+void darwin_mig_put_reply_port(mach_port_t port) { (void)port; }
 
 // Exception ports are taken and never raised; the previous ones are none.
 #define EXCEPTION_PORTS_SET(name, target) \

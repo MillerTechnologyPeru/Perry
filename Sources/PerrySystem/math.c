@@ -128,6 +128,10 @@ F_ARG(modff, float, float *) F_ARG(lgammaf_r, float, int *)
 // long double is double on both (on ppc it is 128 bits: not yet).
 F2(fmodl, double) F_ARG(lgammal_r, double, int *)
 #endif
+#if defined(__arm__)
+DARWIN_FLOAT_ABI double darwin_fmal(double x, double y, double z) DARWIN_SYMBOL(fmal);
+DARWIN_FLOAT_ABI double darwin_fmal(double x, double y, double z) { return fma(x, y, z); }
+#endif
 
 DARWIN_FLOAT_ABI double darwin___exp10(double x) DARWIN_SYMBOL(__exp10);
 DARWIN_FLOAT_ABI double darwin___exp10(double x) { return exp10(x); }

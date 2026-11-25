@@ -24,9 +24,20 @@ final class PixelBufferState {
     var format: UInt32 = PixelBuffer.bgra
     var bytes: UnsafeMutableRawPointer?
     var count = 0
+    /// The rows' stride, when it isn't four bytes a pixel: a buffer made
+    /// over the program's own memory (CVPixelBufferCreateWithBytes).
+    var bytesPerRow = 0
+    /// Hands the program's memory back, in place of keeping it.
+    var release: (() -> Void)?
+
+    var rowBytes: Int { bytesPerRow > 0 ? bytesPerRow : width * 4 }
 
     deinit {
-        if let bytes { PixelBuffer.recycle(bytes, count: count) }
+        if let release {
+            release()
+        } else if let bytes {
+            PixelBuffer.recycle(bytes, count: count)
+        }
     }
 }
 
@@ -100,7 +111,7 @@ public func CVPixelBufferCreate(_ allocator: UnsafeRawPointer?, _ width: Int, _ 
 @c(_CVPixelBufferGetWidth) public func CVPixelBufferGetWidth(_ buffer: UnsafeMutableRawPointer?) -> Int { PixelBuffer.states[buffer]?.width ?? 0 }
 @c(_CVPixelBufferGetHeight) public func CVPixelBufferGetHeight(_ buffer: UnsafeMutableRawPointer?) -> Int { PixelBuffer.states[buffer]?.height ?? 0 }
 @c(_CVPixelBufferGetBytesPerRow) public func CVPixelBufferGetBytesPerRow(_ buffer: UnsafeMutableRawPointer?) -> Int {
-    (PixelBuffer.states[buffer]?.width ?? 0) * 4
+    PixelBuffer.states[buffer]?.rowBytes ?? 0
 }
 @c(_CVPixelBufferGetDataSize) public func CVPixelBufferGetDataSize(_ buffer: UnsafeMutableRawPointer?) -> Int { PixelBuffer.states[buffer]?.count ?? 0 }
 @c(_CVPixelBufferGetPixelFormatType) public func CVPixelBufferGetPixelFormatType(_ buffer: UnsafeMutableRawPointer?) -> UInt32 {
@@ -117,7 +128,7 @@ public func CVPixelBufferCreate(_ allocator: UnsafeRawPointer?, _ width: Int, _ 
     PixelBuffer.states[buffer]?.height ?? 0
 }
 @c(_CVPixelBufferGetBytesPerRowOfPlane) public func CVPixelBufferGetBytesPerRowOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> Int {
-    (PixelBuffer.states[buffer]?.width ?? 0) * 4
+    PixelBuffer.states[buffer]?.rowBytes ?? 0
 }
 @c(_CVPixelBufferGetBaseAddressOfPlane)
 public func CVPixelBufferGetBaseAddressOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> UnsafeMutableRawPointer? {
@@ -268,7 +279,7 @@ public func CVOpenGLESTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawP
     guard let out else { return cvInvalidArgument }
     out.pointee = nil
     guard let buffer = PixelBuffer.states[image], let bytes = buffer.bytes, Int(width) <= buffer.width, Int(height) <= buffer.height,
-          width > 0, height > 0 else { return cvInvalidArgument }
+          width > 0, height > 0, buffer.rowBytes >= Int(width) * 4 else { return cvInvalidArgument }
     guard VideoGL.load(), let genTextures = VideoGL.genTextures, let bindTexture = VideoGL.bindTexture,
           let texParameteri = VideoGL.texParameteri, let texImage2D = VideoGL.texImage2D, let getIntegerv = VideoGL.getIntegerv else {
         return cvError
@@ -289,7 +300,21 @@ public func CVOpenGLESTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawP
     // Apple's OpenGL ES takes GL_RGBA as the internal format of GL_BGRA
     // pixels; others want GL_BGRA for both.
     let internalFormat = formatAndType.format == 0x80E1 && internalFormat == 0x1908 ? Int32(0x80E1) : internalFormat
-    texImage2D(target, 0, internalFormat, width, height, 0, formatAndType.format, formatAndType.type, UnsafeRawPointer(bytes))
+    // Rows that are longer than the texture's (a buffer over the program's
+    // own memory, or a texture of part of the buffer) are packed first:
+    // OpenGL ES 2 has no row length to unpack with.
+    let rowLength = Int(width) * 4
+    if buffer.rowBytes == rowLength {
+        texImage2D(target, 0, internalFormat, width, height, 0, formatAndType.format, formatAndType.type, UnsafeRawPointer(bytes))
+    } else {
+        var packed = [UInt8](repeating: 0, count: rowLength * Int(height))
+        packed.withUnsafeMutableBytes { rows in
+            for row in 0..<Int(height) {
+                (rows.baseAddress! + row * rowLength).copyMemory(from: bytes + row * buffer.rowBytes, byteCount: rowLength)
+            }
+            texImage2D(target, 0, internalFormat, width, height, 0, formatAndType.format, formatAndType.type, UnsafeRawPointer(rows.baseAddress))
+        }
+    }
     bindTexture(target, UInt32(bitPattern: bound))
     let texture = NSObject(VideoTexture.objCClass.pointer).newInstance()
     let state = TextureState()
@@ -466,8 +491,8 @@ public func CVMetalTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawPoin
     let descriptor = MetalTextureDescriptor.texture2D(pixelFormat: format, width: UInt(width), height: UInt(height), mipmapped: false)
     guard let texture = device.sendNewTexture(descriptor: descriptor) else { return cvAllocationFailed }
     if let pixels = PixelBuffer.states[image], let bytes = pixels.bytes, planeIndex == 0, pixels.width == width, pixels.height == height,
-       [70, 71, 80, 81].contains(format) {
-        replaceTexture(texture, width: width, height: height, bytes: bytes, bytesPerRow: width * 4)
+       pixels.rowBytes >= width * 4, [70, 71, 80, 81].contains(format) {
+        replaceTexture(texture, width: width, height: height, bytes: bytes, bytesPerRow: pixels.rowBytes)
     }
     let made = NSObject(MetalTexture.objCClass.pointer).newInstance()
     let state = MetalTextureState()

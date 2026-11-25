@@ -307,10 +307,12 @@ let package = Package(
             ],
             plugins: ["PerryProviderPlugin"]
         ),
-        // UTType and the type database.
+        // UTType and the type database, and the rest of CoreServices; its
+        // variadic functions' entry points are CPerryUniformTypeIdentifiers'.
+        .target(name: "CPerryUniformTypeIdentifiers"),
         .target(
             name: "PerryUniformTypeIdentifiers",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // WebKitGTK's JavaScriptCore, whose C API is Apple's, and the

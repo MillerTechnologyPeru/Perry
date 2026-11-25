@@ -237,6 +237,8 @@ PASSTHROUGH _inet_aton, inet_aton
 PASSTHROUGH _remove, remove
 PASSTHROUGH _getppid, getppid
 PASSTHROUGH _getprotobyname, getprotobyname
+PASSTHROUGH _getservbyname, getservbyname
+PASSTHROUGH _getservbyport, getservbyport
 PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _getuid, getuid
 PASSTHROUGH _inet_addr, inet_addr
@@ -272,6 +274,7 @@ PASSTHROUGH _strtol, strtol
 PASSTHROUGH _strtoll, strtoll
 PASSTHROUGH _strtoul, strtoul
 PASSTHROUGH _strtoull, strtoull
+PASSTHROUGH _strtouq, strtoull
 PASSTHROUGH _usleep, usleep
 PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes

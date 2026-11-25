@@ -134,6 +134,31 @@ int darwin_csops(int pid, unsigned int ops, void *buffer, size_t size) {
     return -1;
 }
 
+// csr_get_active_config(&config): which of System Integrity Protection's
+// restrictions are lifted, as CSR_ALLOW_* bits. The answer is a Mac's as it
+// ships, with SIP on and none lifted, so programs see the system as they
+// would on a Mac.
+int darwin_csr_get_active_config(uint32_t *config) DARWIN_SYMBOL(csr_get_active_config);
+int darwin_csr_get_active_config(uint32_t *config) {
+    if (!config) {
+        errno = EINVAL;
+        return -1;
+    }
+    *config = 0;
+    return 0;
+}
+
+// pthread_getugid_np: the user and group a thread took on for itself with
+// pthread_setugid_np, which no thread can here (Linux's credentials are
+// the process's as glibc keeps them): ESRCH, as Darwin's system call says
+// for a thread without its own.
+int darwin_pthread_getugid_np(uid_t *uid, gid_t *gid) DARWIN_SYMBOL(pthread_getugid_np);
+int darwin_pthread_getugid_np(uid_t *uid, gid_t *gid) {
+    (void)uid, (void)gid;
+    errno = ESRCH;
+    return -1;
+}
+
 // MARK: - Signals
 
 typedef struct darwin_sigaction {

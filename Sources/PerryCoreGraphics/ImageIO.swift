@@ -103,6 +103,7 @@ enum ImagePropertyKeys {
     static let kCGImagePropertyPNGChromaticities = "Chromaticities"
     static let kCGImagePropertyIPTCImageOrientation = "ImageOrientation"
     static let kCGImagePropertyIPTCOriginatingProgram = "OriginatingProgram"
+    static let kCGImagePropertyIPTCObjectName = "ObjectName"
     static let kCGImagePropertyPNGAuthor = "Author"
     static let kCGImagePropertyPNGCopyright = "Copyright"
     static let kCGImagePropertyPNGCreationTime = "CreationTime"

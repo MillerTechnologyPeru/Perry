@@ -652,6 +652,13 @@ public func CFNetServiceRegister(_ service: UnsafeMutableRawPointer?, _ error: U
     CFNetServiceRegisterWithOptions(service, 0, error)
 }
 
+/// The resolve of Mac OS X 10.2 and 10.3, which has no time limit: as
+/// CFNetServiceResolveWithTimeout with none.
+@c(_CFNetServiceResolve)
+public func CFNetServiceResolve(_ service: UnsafeMutableRawPointer?, _ error: UnsafeMutableRawPointer?) -> Bool {
+    CFNetServiceResolveWithTimeout(service, 0, error)
+}
+
 /// Starts resolving. With a client, asynchronous; without one, blocks
 /// until resolved, failed or out of time.
 @c(_CFNetServiceResolveWithTimeout)

@@ -692,7 +692,7 @@ open class NSFont: NSObject {
     static func userFixedPitchFont(ofSize size: CGFloat) -> NSFont { NSFont(name: "Menlo-Regular", size: size > 0 ? size : 11) }
     @ObjCClassMethod("fontWithName:size:") static func font(name: String?, size: CGFloat) -> NSFont? { NSFont(name: name ?? "Helvetica", size: size) }
     @ObjCClassMethod("fontWithDescriptor:size:")
-    static func font(descriptor: NSObject?, size: CGFloat) -> NSFont? { system(size: size) }
+    static func font(descriptor: NSObject?, size: CGFloat) -> NSFont? { descriptor?.as(NSFontDescriptor.self)?.font(size: size) ?? system(size: size) }
     @ObjCClassMethod("preferredFontForTextStyle:options:")
     static func preferredFont(forTextStyle style: String?, options: NSObject?) -> NSFont {
         let sizes = ["NSCTFontUIFontTextStyleLargeTitle": 26.0, "NSCTFontUIFontTextStyleTitle1": 22, "NSCTFontUIFontTextStyleTitle2": 17,
@@ -729,7 +729,7 @@ open class NSFont: NSObject {
     func boundingRectForFont() -> CGRect { CGRect(x: 0, y: descender(), width: size, height: ascender() - descender()) }
     @ObjCMethod("maximumAdvancement") func maximumAdvancement() -> CGSize { CGSize(width: size, height: 0) }
     @ObjCMethod("fontWithSize:") func withSize(_ size: CGFloat) -> NSFont { with(size: size) }
-    @ObjCMethod("fontDescriptor") func fontDescriptor() -> NSObject? { nil }
+    @ObjCMethod("fontDescriptor") func fontDescriptor() -> NSObject? { NSFontDescriptor.describing(self) }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
     @ObjCMethod("isEqual:")
     func isEqual(_ other: NSObject?) -> Bool {
@@ -1433,7 +1433,9 @@ public func NSRectFill(_ rect: CGRect) {
 }
 
 @DarwinC("_NSRectFillUsingOperation")
-public func NSRectFillUsingOperation(_ rect: CGRect, _ operation: UInt) { NSRectFill(rect) }
+public func NSRectFillUsingOperation(_ rect: CGRect, _ operation: UInt) {
+    Compositing.drawing(operation) { CG.fillRect($0, rect) }
+}
 
 @c(_NSRectFillList)
 public func NSRectFillList(_ rects: UnsafePointer<CGRect>?, _ count: Int) {

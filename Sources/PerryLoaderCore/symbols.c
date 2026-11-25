@@ -438,6 +438,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
+//   …/DiskArbitration.framework/DiskArbitration         -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
 //   …/CoreImage.framework/CoreImage                       -> QuartzCore
@@ -512,6 +513,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // PackageKit, the installer's private framework, which Mac apps read
     // packages and receipts with, is beside them.
     if (strstr(install_name, "/PackageKit.framework/")) {
+        snprintf(out, out_size, "UniformTypeIdentifiers");
+        return true;
+    }
+    // DiskArbitration's disks are the volumes CoreServices' File Manager
+    // describes (FSGetVolumeInfo), so it is beside it.
+    if (strstr(install_name, "/DiskArbitration.framework/")) {
         snprintf(out, out_size, "UniformTypeIdentifiers");
         return true;
     }
