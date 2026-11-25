@@ -476,8 +476,9 @@ open class NSApplication: NSResponder {
     @ObjCMethod("currentSystemPresentationOptions") func currentSystemPresentationOptions() -> UInt { presentationOptions }
     /// NSApplicationOcclusionState: visible 2.
     @ObjCMethod("occlusionState") func occlusionState() -> UInt { hidden ? 0 : 2 }
-    @ObjCMethod("requestUserAttention:") func requestUserAttention(_ type: UInt) -> Int { 0 }
-    @ObjCMethod("cancelUserAttentionRequest:") func cancelUserAttentionRequest(_ request: Int) {}
+    /// The desktop's dock marks the app's icon until it's cancelled.
+    @ObjCMethod("requestUserAttention:") func requestUserAttention(_ type: UInt) -> Int { DockTile.requestAttention() }
+    @ObjCMethod("cancelUserAttentionRequest:") func cancelUserAttentionRequest(_ request: Int) { DockTile.cancelAttention(request) }
 
     // MARK: Windows
 
@@ -575,7 +576,7 @@ open class NSApplication: NSResponder {
     @ObjCMethod("setAppleMenu:") func setAppleMenu(_ menu: NSObject?) {}
     @ObjCMethod("applicationIconImage") func appApplicationIconImage() -> NSObject? { applicationIconImage }
     @ObjCMethod("setApplicationIconImage:") func setApplicationIconImage(_ image: NSObject?) { applicationIconImage = image }
-    @ObjCMethod("dockTile") func dockTile() -> NSObject? { nil }
+    @ObjCMethod("dockTile") func dockTile() -> NSObject? { DockTile.tile }
     @ObjCMethod("appearance") func appAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
     /// The app's appearance, or the desktop's.
