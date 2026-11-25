@@ -467,8 +467,11 @@ final class DisplayListCompositor {
                 let source = (pixels + row * pitch).assumingMemoryBound(to: UInt32.self)
                 for column in 0..<width {
                     // B, G, R, A bytes to R, G, B, A: red and blue exchanged.
-                    let pixel = source[column]
-                    out[row * width + column] = (pixel & 0xff00_ff00) | ((pixel & 0x00ff_0000) >> 16) | ((pixel & 0x0000_00ff) << 16)
+                    // The bytes are read as a little-endian word whatever the
+                    // machine's byte order (0xAARRGGBB), and written back so.
+                    let pixel = UInt32(littleEndian: source[column])
+                    let swapped = (pixel & 0xff00_ff00) | ((pixel & 0x00ff_0000) >> 16) | ((pixel & 0x0000_00ff) << 16)
+                    out[row * width + column] = swapped.littleEndian
                 }
             }
         }
