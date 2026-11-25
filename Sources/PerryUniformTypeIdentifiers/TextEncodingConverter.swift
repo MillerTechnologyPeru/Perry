@@ -125,9 +125,16 @@ enum TextEncodings {
 private enum CoreFoundation {
     static let library = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
+    /// Each function, found once: programs convert text a piece at a time,
+    /// many thousands of times, and a lookup by name is slow.
+    private static let lock = Lock()
+    nonisolated(unsafe) private static var found: [String: UnsafeMutableRawPointer] = [:]
+
     static func function<T>(_ name: String, as type: T.Type) -> T? {
+        if let symbol = lock.withLock({ found[name] }) { return unsafeBitCast(symbol, to: type) }
         guard let lookup = providerSymbolLookup,
               let symbol = library.withCString({ library in name.withCString { lookup(library, $0) } }) else { return nil }
+        lock.withLock { found[name] = symbol }
         return unsafeBitCast(symbol, to: type)
     }
 
@@ -200,6 +207,25 @@ public func CreateTextEncoding(_ base: UInt32, _ variant: UInt32, _ format: UInt
 @c(_GetTextEncodingBase) public func GetTextEncodingBase(_ encoding: UInt32) -> UInt32 { TextEncodings.base(encoding) }
 @c(_GetTextEncodingVariant) public func GetTextEncodingVariant(_ encoding: UInt32) -> UInt32 { TextEncodings.variant(encoding) }
 @c(_GetTextEncodingFormat) public func GetTextEncodingFormat(_ encoding: UInt32) -> UInt32 { TextEncodings.format(encoding) }
+
+/// OSStatus UpgradeScriptInfoToTextEncoding(ScriptCode, LangCode, RegionCode,
+/// ConstStr255Param fontName, TextEncoding *): a script's encoding is its
+/// Mac OS encoding, whose base is the script code (0 Roman to 32
+/// Uninterpreted). With no script (kTextScriptDontCare, -128) it is the
+/// system script's, Roman. The language, region and font only pick variants,
+/// which are left at their defaults.
+@c(_UpgradeScriptInfoToTextEncoding)
+public func UpgradeScriptInfoToTextEncoding(_ script: Int16, _ language: Int16, _ region: Int16, _ fontName: UnsafeRawPointer?,
+                                            _ encoding: UnsafeMutablePointer<UInt32>?) -> Int32 {
+    guard let encoding else { return TECStatus.paramErr }
+    if script == -128 {
+        encoding.pointee = 0   // kTextEncodingMacRoman
+        return 0
+    }
+    guard (0...32).contains(script) else { return TECStatus.paramErr }
+    encoding.pointee = UInt32(script)
+    return 0
+}
 
 // MARK: - Unicode Converter
 
