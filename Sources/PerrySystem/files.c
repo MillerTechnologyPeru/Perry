@@ -19,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -1183,6 +1184,29 @@ int darwin_getmntinfo(struct darwin_statfs **out, int flags) {
     return count;
 }
 
+// getmntinfo_r_np: the same list in an array of the caller's, which it
+// frees. On failure, 0 and errno.
+int darwin_getmntinfo_r_np(struct darwin_statfs **out, int flags) INODE64_SYMBOL(getmntinfo_r_np);
+int darwin_getmntinfo_r_np(struct darwin_statfs **out, int flags) {
+    (void)flags;
+    if (!out) {
+        errno = EINVAL;
+        return 0;
+    }
+    struct darwin_statfs *volumes = calloc(1 + PERRY_MAX_DISCS, sizeof(*volumes));
+    if (!volumes) {
+        errno = ENOMEM;
+        return 0;
+    }
+    int count = mounted(volumes);
+    if (count == 0) {
+        free(volumes);
+        return 0;
+    }
+    *out = volumes;
+    return count;
+}
+
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) INODE64_SYMBOL(statfs);
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     struct statfs info;
@@ -1250,6 +1274,78 @@ int darwin_fsetattrlist(int fd, void *list, void *buffer, size_t size, unsigned 
     (void)list; (void)buffer; (void)size; (void)options;
     struct stat info;
     return fstat(fd, &info);
+}
+
+// File flags (chflags). Of Darwin's, Linux's inode flags (FS_IOC_SETFLAGS,
+// chattr's) have three: UF_NODUMP is FS_NODUMP_FL, UF_IMMUTABLE and
+// SF_IMMUTABLE are FS_IMMUTABLE_FL, UF_APPEND and SF_APPEND are FS_APPEND_FL
+// (Linux has one of each, which only a process with CAP_LINUX_IMMUTABLE may
+// set or clear: EPERM otherwise). The rest (UF_HIDDEN, SF_ARCHIVED and the
+// like) have no place on a Linux file: asking for one is ENOTSUP and changes
+// nothing. A file system without inode flags holds none, so there taking
+// them all away succeeds and giving any is ENOTSUP. The file is opened to
+// reach its flags, so one its owner can't read is EACCES.
+#ifndef FS_IOC_GETFLAGS
+#define FS_IOC_GETFLAGS _IOR('f', 1, long)
+#define FS_IOC_SETFLAGS _IOW('f', 2, long)
+#endif
+enum {
+    DARWIN_UF_NODUMP = 0x1, DARWIN_UF_IMMUTABLE = 0x2, DARWIN_UF_APPEND = 0x4,
+    DARWIN_SF_IMMUTABLE = 0x20000, DARWIN_SF_APPEND = 0x40000,
+    LINUX_FS_IMMUTABLE_FL = 0x10, LINUX_FS_APPEND_FL = 0x20, LINUX_FS_NODUMP_FL = 0x40,
+};
+
+static int set_file_flags(int fd, uint32_t flags) {
+    const uint32_t immutable = DARWIN_UF_IMMUTABLE | DARWIN_SF_IMMUTABLE, append = DARWIN_UF_APPEND | DARWIN_SF_APPEND;
+    if (flags & ~(DARWIN_UF_NODUMP | immutable | append)) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    const int kept = LINUX_FS_NODUMP_FL | LINUX_FS_IMMUTABLE_FL | LINUX_FS_APPEND_FL;
+    int wanted = ((flags & DARWIN_UF_NODUMP) ? LINUX_FS_NODUMP_FL : 0) | ((flags & immutable) ? LINUX_FS_IMMUTABLE_FL : 0) |
+                 ((flags & append) ? LINUX_FS_APPEND_FL : 0);
+    int current = 0;
+    if (ioctl(fd, FS_IOC_GETFLAGS, &current) != 0) {
+        if (errno != ENOTTY && errno != ENOTSUP && errno != EINVAL)
+            return -1;
+        if (wanted) {
+            errno = ENOTSUP;
+            return -1;
+        }
+        return 0;
+    }
+    int changed = (current & ~kept) | wanted;
+    return changed == current ? 0 : ioctl(fd, FS_IOC_SETFLAGS, &changed);
+}
+
+int darwin_chflags(const char *path, uint32_t flags) DARWIN_SYMBOL(chflags);
+int darwin_chflags(const char *path, uint32_t flags) {
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    int result = set_file_flags(fd, flags);
+    int error = errno;
+    close(fd);
+    errno = error;
+    return result;
+}
+
+int darwin_fchflags(int fd, uint32_t flags) DARWIN_SYMBOL(fchflags);
+int darwin_fchflags(int fd, uint32_t flags) { return set_file_flags(fd, flags); }
+
+// quotactl(path, command, id, data): disk quotas, which Darwin keeps on a
+// volume that has them turned on. Linux's name a block device and number
+// their commands otherwise, and the volumes here have none for a program to
+// use: ENOTSUP, as Darwin says for a volume without quotas, once the path
+// is found.
+int darwin_quotactl(const char *path, int command, int id, char *data) DARWIN_SYMBOL(quotactl);
+int darwin_quotactl(const char *path, int command, int id, char *data) {
+    (void)command, (void)id, (void)data;
+    struct statfs64 info;
+    if (statfs64(path, &info) != 0)
+        return -1;
+    errno = ENOTSUP;
+    return -1;
 }
 
 // File system controls are HFS's and APFS's, which no Linux file system has.
