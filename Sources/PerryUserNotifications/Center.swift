@@ -1,13 +1,14 @@
 import PerryObjCInterop
 
-// UNUserNotificationCenter. Linux has no notification service, so the
-// center does what one would for a user who allows notifications: requests
-// for authorization are granted, pending requests fire when their triggers
-// say, and each delivered notification goes to the delegate's
+// UNUserNotificationCenter. The center does what one would for a user who
+// allows notifications: requests for authorization are granted, pending
+// requests fire when their triggers say, and each delivered notification
+// goes to the delegate's
 // -userNotificationCenter:willPresentNotification:withCompletionHandler:
-// on the main queue, as for an app in the foreground, and is kept with the
-// delivered notifications. Completion handlers run on a background queue,
-// as on Darwin.
+// on the main queue, as for an app in the foreground, is kept with the
+// delivered notifications, and is shown on the desktop through its
+// notification server where there is one (Desktop.swift). Completion
+// handlers run on a background queue, as on Darwin.
 
 final class CenterState: @unchecked Sendable {
     let lock = Lock()
@@ -65,6 +66,7 @@ enum Center {
                 state.delivered.append((identifier, notification))
             }
             present(notification)
+            Desktop.show(notification)
         }
     }
 
@@ -170,10 +172,17 @@ open class UNUserNotificationCenter: NSObject {
     func removeDeliveredNotifications(identifiers: NSObject) {
         let removed = Set(identifiers.arrayElements.map { String(objCArgument: $0.objcObject) })
         Center.state.lock.withLock { Center.state.delivered.removeAll { removed.contains($0.identifier) } }
+        Desktop.remove(Array(removed))
     }
 
     @ObjCMethod("removeAllDeliveredNotifications")
-    func removeAllDeliveredNotifications() { Center.state.lock.withLock { Center.state.delivered.removeAll() } }
+    func removeAllDeliveredNotifications() {
+        let removed = Center.state.lock.withLock { () -> [String] in
+            defer { Center.state.delivered.removeAll() }
+            return Center.state.delivered.map(\.identifier)
+        }
+        Desktop.remove(removed)
+    }
 
     @ObjCMethod("setNotificationCategories:")
     func setNotificationCategories(_ categories: NSObject) { Center.state.lock.withLock { Center.state.categories = categories.copyObject() } }

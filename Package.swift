@@ -328,7 +328,7 @@ let package = Package(
         // delivers them to its delegate.
         .target(
             name: "PerryUserNotifications",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["PerryDesktopNotifications", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // CloudKit, with no iCloud account unless MistKit is built in and given a token.
