@@ -53,8 +53,9 @@ enum TestEnvironment {
         }
     }()
 
-    /// Whether this machine runs the arm64 programs the fixtures are: `perry`
-    /// on x86_64 runs x86_64 ones only.
+    /// Whether this machine runs the arm64 programs FixtureBuilder makes:
+    /// `perry` on x86_64 runs x86_64 ones only, and has Darwin fixtures of
+    /// its own (DarwinFixtures.directory).
     static var runsARM64: Bool {
         #if arch(arm64)
         true
