@@ -333,7 +333,30 @@ open class NSTextStorage: NSObject {
     }
 
     @ObjCMethod("string") func storageString() -> String { Send.object(contents.objcObject, "string").map { String(objCArgument: $0) } ?? "" }
-    @ObjCMethod("length") func length() -> UInt { UInt(Send.integer(contents.objcObject, "length")) }
+    /// NSAttributedString's word boundaries, which reach a storage only
+    /// here: it's an NSObject, forwarding the rest to its contents, which a
+    /// subclass keeping its own text leaves empty.
+    @ObjCMethod("nextWordFromIndex:forward:")
+    func nextWord(from index: UInt, forward: Bool) -> UInt {
+        let units = Array(string.utf16)
+        let start = index > UInt(units.count) ? units.count : Int(index)
+        return UInt(forward ? Words.next(units, from: start) : Words.previous(units, from: start))
+    }
+
+    @ObjCMethod("doubleClickAtIndex:")
+    func doubleClick(at index: UInt) -> NSRange {
+        let units = Array(string.utf16)
+        return Words.around(units, index > UInt(units.count) ? units.count : Int(index))
+    }
+
+    /// The text's length: a subclass that keeps its own text (overrides
+    /// -string, as Bean's word-counting storage does) has its string's, as
+    /// NSAttributedString's -length is; Perry's own, the contents'.
+    @ObjCMethod("length")
+    func length() -> UInt {
+        guard keepsOwnText else { return UInt(Send.integer(Send.object(objcObject, "string"), "length")) }
+        return UInt(Send.integer(contents.objcObject, "length"))
+    }
     @ObjCMethod("mutableString") func mutableString() -> NSObject? { Send.object(contents.objcObject, "mutableString").map(NSObject.init) }
     @ObjCMethod("delegate") func storageDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ value: NSObject?) { delegateObject = value?.objcObject }
@@ -540,8 +563,21 @@ open class NSLayoutManager: NSObject {
     @ObjCMethod("addTextContainer:")
     func addTextContainer(_ container: NSTextContainer?) {
         guard let container else { return }
-        containers.append(container)
+        insertTextContainer(container, at: containers.count)
+    }
+
+    /// The container in the manager's list. A text view made on the
+    /// container before it joined a manager (-initWithFrame:textContainer:
+    /// first, as Bean makes its pages) now shows the manager's storage.
+    @ObjCMethod("insertTextContainer:atIndex:")
+    func insertTextContainer(_ container: NSTextContainer?, at index: Int) {
+        guard let container else { return }
+        containers.insert(container, at: min(max(index, 0), containers.count))
         container.layoutManagerObject = objcObject
+        if let view = container.textView, view.manager !== self {
+            view.manager = self
+            view.textChanged()
+        }
     }
     @ObjCMethod("removeTextContainerAtIndex:") func removeTextContainer(at index: Int) { if containers.indices.contains(index) { containers.remove(at: index) } }
     @ObjCMethod("delegate") func managerDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
