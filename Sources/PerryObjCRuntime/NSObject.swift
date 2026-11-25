@@ -280,21 +280,35 @@ extension NSObject {
 
     // MARK: Sending
 
+    // Darwin's -performSelector: methods shift their arguments down a
+    // register and jump to objc_msgSend, so the register after the last
+    // argument still holds its value: the selector for -performSelector:,
+    // the object for -performSelector:withObject:, the second object for
+    // the two-object form. A method that takes one more argument than it
+    // is sent gets that value; these send it too. Unity sends
+    // application:supportedInterfaceOrientationsForWindow: with one
+    // object, and retains its window: nil, as on Darwin, not stack garbage.
+
     @ObjCMethod("performSelector:")
     func perform(_ selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
-        selector.flatMap { Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self)) }
+        selector.flatMap {
+            Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer($0.pointer))
+        }
     }
 
     @ObjCMethod("performSelector:withObject:")
     func perform(_ selector: ObjCSelector?, with argument: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-        selector.flatMap { Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(argument)) }
+        selector.flatMap {
+            Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(argument), UnsafeRawPointer(argument))
+        }
     }
 
     @ObjCMethod("performSelector:withObject:withObject:")
     func perform(_ selector: ObjCSelector?, with first: UnsafeMutableRawPointer?,
                  with second: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         selector.flatMap {
-            Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(first), UnsafeRawPointer(second))
+            Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(first), UnsafeRawPointer(second),
+                          UnsafeRawPointer(second))
         }
     }
 
