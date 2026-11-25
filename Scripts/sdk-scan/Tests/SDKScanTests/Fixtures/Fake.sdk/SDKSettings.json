@@ -1,0 +1,8 @@
+{
+  "CanonicalName": "fakeos1.2",
+  "Version": "1.2",
+  "DefaultProperties": { "PLATFORM_NAME": "macosx" },
+  "SupportedTargets": {
+    "macosx": { "LLVMTargetTripleSys": "macos", "LLVMTargetTripleEnvironment": "", "DefaultDeploymentTarget": "14.0" }
+  }
+}
