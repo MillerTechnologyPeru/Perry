@@ -71,6 +71,8 @@ enum GLES {
     nonisolated(unsafe) static var texParameteri: (@convention(c) (UInt32, UInt32, Int32) -> Void)?
     nonisolated(unsafe) static var texImage2D: (@convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, UInt32, UInt32, UnsafeRawPointer?) -> Void)?
     nonisolated(unsafe) static var copyTexSubImage2D: (@convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, Int32, Int32) -> Void)?
+    nonisolated(unsafe) static var generateMipmap: (@convention(c) (UInt32) -> Void)?
+    nonisolated(unsafe) static var pixelStorei: (@convention(c) (UInt32, Int32) -> Void)?
     nonisolated(unsafe) static var createImage: (@convention(c) (Pointer?, Pointer?, UInt32, Pointer?, UnsafePointer<Int32>?) -> Pointer?)?
     nonisolated(unsafe) static var destroyImage: (@convention(c) (Pointer?, Pointer?) -> UInt32)?
     nonisolated(unsafe) static var exportImageQuery: (@convention(c) (Pointer?, Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?,
@@ -145,6 +147,8 @@ enum GLES {
         texParameteri = host("glTexParameteri")
         texImage2D = host("glTexImage2D")
         copyTexSubImage2D = host("glCopyTexSubImage2D")
+        generateMipmap = host("glGenerateMipmap")
+        pixelStorei = host("glPixelStorei")
         func extension_<T>(_ name: String) -> T? { getProcAddress?(name).map { unsafeBitCast($0, to: T.self) } }
         createImage = extension_("eglCreateImageKHR")
         destroyImage = extension_("eglDestroyImageKHR")

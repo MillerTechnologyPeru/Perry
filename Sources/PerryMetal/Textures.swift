@@ -214,6 +214,8 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
         switch descriptor.pixel_format {
         case 70, 71: layout = 2
         case 80, 81: layout = 3
+        // RGB10A2Unorm and BGR10A2Unorm, narrowed to RGBA8 below.
+        case 90, 94: layout = 2
         default: return -1
         }
         let rowBytes = Int(width) * 4
@@ -225,7 +227,23 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
             metalWarning("reading a drawable: \(message ?? "failed")")
             return -1
         }
+        if descriptor.pixel_format == 90 || descriptor.pixel_format == 94 {
+            Self.narrowTenBit(pixels, count: Int(width) * Int(height), redFirst: descriptor.pixel_format == 90)
+        }
         return layout
+    }
+
+    /// Ten-bit pixels, red (or blue) in the low ten bits and two bits of
+    /// alpha at the top, as RGBA8 in place.
+    static func narrowTenBit(_ pixels: UnsafeMutableRawPointer, count: Int, redFirst: Bool) {
+        let words = pixels.assumingMemoryBound(to: UInt32.self), bytes = pixels.assumingMemoryBound(to: UInt8.self)
+        for index in 0..<count {
+            let word = UInt32(littleEndian: words[index])
+            let low = UInt8((word & 0x3FF) >> 2), green = UInt8(((word >> 10) & 0x3FF) >> 2)
+            let high = UInt8(((word >> 20) & 0x3FF) >> 2), alpha = UInt8((word >> 30) * 85)
+            let pixel = bytes + index * 4
+            (pixel[0], pixel[1], pixel[2], pixel[3]) = redFirst ? (low, green, high, alpha) : (high, green, low, alpha)
+        }
     }
 
     /// Perry's, for CAMetalLayer: the 2D texture's pixels as RGBA rows,
