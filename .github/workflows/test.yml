@@ -51,24 +51,150 @@ jobs:
           path: perry-fixtures.tar.gz
           retention-days: 7
 
+  # The same fixtures as x86_64 programs, for Linux x86_64: Mac apps (Mac
+  # Catalyst ones for UIKit) and, for those that need entitlements,
+  # simulator apps, each recorded on this Intel Mac. Anvil and Forge may go
+  # without a reference where the runner has no Metal device.
+  fixtures-x86_64:
+    name: Darwin fixtures x86_64
+    runs-on: macos-26-intel
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build the fixtures
+        run: Scripts/build-darwin-fixtures.sh
+        env:
+          PERRY_FIXTURES_ARCH: x86_64
+          PERRY_FIXTURES_UNRECORDED: Cumulus Anvil Forge
+
+      - name: Pack the fixtures
+        run: |
+          rm -f .build/perry-fixtures/darwin-x86_64/Almanac.expected
+          tar -czf perry-fixtures-x86_64.tar.gz -C .build/perry-fixtures darwin-x86_64
+
+      - name: Upload the fixtures
+        uses: actions/upload-artifact@v7
+        with:
+          name: perry-fixtures-x86_64
+          path: perry-fixtures-x86_64.tar.gz
+          retention-days: 7
+
+  # Darwin's Swift runtime for Perry: the iOS Simulator runtime's libraries
+  # and Xcode's Swift 5.0 overlays. Scripts/swift-runtime.sh needs a
+  # simulator runtime from before iOS 27, which keeps its libraries as
+  # files; this runner has iOS 26's.
+  swift-runtime:
+    name: Swift runtime
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: List the simulator runtimes
+        run: xcrun simctl runtime list
+
+      - name: Assemble the runtime
+        run: Scripts/swift-runtime.sh .build/perry-swift-runtime
+
+      - name: Pack the runtime
+        run: tar -czf perry-swift-runtime-base.tar.gz -C .build perry-swift-runtime
+
+      - name: Upload the runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: perry-swift-runtime-base
+          path: perry-swift-runtime-base.tar.gz
+          retention-days: 7
+
+  # Perry's Swift overlays and frameworks (Darwin/), written against the
+  # Xcode 27 SDKs: arm64 for iOS apps, built into the runtime above, and
+  # x86_64 for Mac and Mac Catalyst apps (Scripts/build-swift-overlays.sh).
+  swift-overlays:
+    name: Swift overlays ${{ matrix.arch }}
+    needs: swift-runtime
+    runs-on: xcode-27
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runtime: perry-swift-runtime
+          - arch: x86_64
+            runtime: perry-swift-runtime-x86_64
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # The sources the overlay scripts fetch by commit, and SwiftPM's.
+      - name: Restore the sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/perry-foundation/packages
+            .build/perry-swiftui/upstream
+            Darwin/SwiftUI/Compute/Submodules
+            Darwin/SwiftUI/OpenAttributeGraph/Checkouts
+            ~/Library/Caches/org.swift.swiftpm
+          key: perry-overlay-sources-${{ hashFiles('Scripts/build-foundation.sh', 'Scripts/build-swiftui.sh', 'Darwin/SwiftUI/*/Package.resolved') }}
+          restore-keys: perry-overlay-sources-
+
+      - name: Download the runtime
+        if: matrix.arch == 'arm64'
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-swift-runtime-base
+
+      - name: Unpack the runtime
+        if: matrix.arch == 'arm64'
+        run: |
+          mkdir -p .build
+          tar -xzf perry-swift-runtime-base.tar.gz -C .build
+          rm perry-swift-runtime-base.tar.gz
+
+      - name: Build the overlays
+        run: Scripts/build-swift-overlays.sh .build/${{ matrix.runtime }} ${{ matrix.arch }}
+
+      - name: Pack the overlays
+        run: tar -czf ${{ matrix.runtime }}.tar.gz -C .build ${{ matrix.runtime }}
+
+      - name: Upload the overlays
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.runtime }}
+          path: ${{ matrix.runtime }}.tar.gz
+          retention-days: 7
+
+  # Perry for Linux, with the 32-bit targets each host runs: i386 on
+  # x86_64, armv7 on arm64 (under qemu-arm where the CPU has no AArch32).
+  # The tests run the Darwin fixtures of the host's architecture, and the
+  # arm64 job the Swift fixtures on the runtime above. The Swift jobs are
+  # waited for but not required: without the runtime the Swift fixtures
+  # are left out.
   linux:
     name: Linux ${{ matrix.arch }}
-    needs: fixtures
+    needs: [fixtures, fixtures-x86_64, swift-overlays]
+    if: ${{ !cancelled() && needs.fixtures.result == 'success' && needs.fixtures-x86_64.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include:
-          # The fixtures are arm64 programs, as iOS apps are: arm64 runs all
-          # of them, and must have them all.
           - arch: arm64
             runner: ubuntu-24.04-arm
-            fixtures: true
-          # x86_64 builds everything and runs what needs no arm64 program.
+            fixtures: perry-fixtures
           - arch: x86_64
             runner: ubuntu-24.04
-            fixtures: false
+            fixtures: perry-fixtures-x86_64
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -86,17 +212,68 @@ jobs:
           cache-to: type=gha,scope=perry-dev-${{ matrix.arch }},mode=max
 
       - name: Download the fixtures
-        if: matrix.fixtures
         uses: actions/download-artifact@v8
         with:
-          name: perry-fixtures
+          name: ${{ matrix.fixtures }}
 
       - name: Unpack the fixtures
-        if: matrix.fixtures
         run: |
           mkdir -p .build/perry-fixtures
-          tar -xzf perry-fixtures.tar.gz -C .build/perry-fixtures
-          rm perry-fixtures.tar.gz
+          tar -xzf ${{ matrix.fixtures }}.tar.gz -C .build/perry-fixtures
+          rm ${{ matrix.fixtures }}.tar.gz
+
+      - name: Download the Swift runtime
+        if: matrix.arch == 'arm64' && needs.swift-overlays.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-swift-runtime
+
+      - name: Unpack the Swift runtime
+        if: matrix.arch == 'arm64' && needs.swift-overlays.result == 'success'
+        run: |
+          tar -xzf perry-swift-runtime.tar.gz -C .build
+          rm perry-swift-runtime.tar.gz
+
+      # cctools-port's ld64, which links the i386 and armv7 fixtures.
+      - name: Restore cctools
+        uses: actions/cache@v4
+        with:
+          path: .toolchains/cctools
+          key: cctools-${{ matrix.arch }}-${{ hashFiles('Scripts/build-cctools.sh', 'Dockerfile') }}
+
+      - name: Build cctools
+        run: Scripts/build-cctools.sh
+
+      # Before Build: these run in the image as this user, and write
+      # .build before the build makes it root's. i386 has no Swift, so its
+      # fixtures are the C ones.
+      - name: Build i386
+        if: matrix.arch == 'x86_64'
+        run: |
+          Scripts/build-i386-sdk.sh --sysroot-only
+          for part in loader system carbon opengl quicktime audiotoolbox; do
+            Scripts/build-i386-$part.sh
+          done
+          Scripts/build-i386-fixtures.sh 10.6 hello.c system.c legacy_files.c legacy_start.c legacy_audio.c
+
+      - name: Restore the armv7 SDK
+        if: matrix.arch == 'arm64'
+        uses: actions/cache@v4
+        with:
+          path: .toolchains/swift-*-armv7-sdk
+          key: armv7-sdk-${{ hashFiles('Scripts/setup-armv7-sdk.sh', 'Dockerfile') }}
+
+      # The Swift SDK for armv7 Debian (swift-embedded-linux/armhf-debian)
+      # of the image's Swift, and qemu-arm for 32-bit ARM programs:
+      # registered with F, so it runs them in containers too.
+      - name: Set up armv7
+        if: matrix.arch == 'arm64'
+        run: |
+          sdk=$(Scripts/setup-armv7-sdk.sh)
+          echo "ARMV7_SDK=${sdk#"$PWD"/}" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-static
+          [ -e /proc/sys/fs/binfmt_misc/qemu-arm ] || printf '%s\n' ':qemu-arm:M::\x7fELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-arm-static:F' | sudo tee /proc/sys/fs/binfmt_misc/register
 
       # As Scripts/docker-test.sh runs them. WebKit's web processes run
       # without their bubblewrap sandbox, which can't make namespaces in a
@@ -106,14 +283,29 @@ jobs:
           docker run --rm -v "$PWD:/perry" perry-dev \
             swift build --build-tests --scratch-path .build/linux
 
+      # After Build: libPerryobjc for armv7 is built with the macro tool
+      # Build made.
+      - name: Build armv7
+        if: matrix.arch == 'arm64'
+        run: |
+          docker run --rm -v "$PWD:/perry" -e PERRY_SWIFT=/usr/bin \
+            -e PERRY_OBJC_MACROS=/perry/.build/linux/debug/PerryObjCMacros perry-dev sh -euc '
+              Scripts/build-armv7-loader.sh
+              Scripts/build-armv7-system.sh
+              Scripts/build-armv7-objc.sh
+              Scripts/build-armv7-fixtures.sh 6.0 hello.c abi.c seeko.c files.c zoo.m runtime.m system.c'
+
       # The tests take under a minute; one that hangs fails the job here,
-      # not hours later at the job's own limit.
+      # not hours later at the job's own limit. perry32 for i386 gets the
+      # sysroot's dynamic loader, and qemu-arm the armv7 SDK's libraries.
+      # No core files: tests that abort on purpose would leave qemu's.
       - name: Test
         timeout-minutes: 20
         run: |
-          docker run --rm -v "$PWD:/perry" \
+          docker run --rm -v "$PWD:/perry" --ulimit core=0 \
             -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
-            ${{ matrix.fixtures && '-e PERRY_REQUIRE_FIXTURES=1' || '' }} \
+            -e PERRY_REQUIRE_FIXTURES=1 \
+            ${{ matrix.arch == 'x86_64' && '-v "$PWD/.toolchains/i386-sdk/sysroot/usr/lib/i386-linux-gnu/ld-linux.so.2:/lib/ld-linux.so.2:ro" -e PERRY_REQUIRE_I386=1' || '-e QEMU_LD_PREFIX=/perry/$ARMV7_SDK -e PERRY_REQUIRE_ARMV7=1' }} \
             perry-dev \
             swift test --skip-build --scratch-path .build/linux
 
@@ -121,7 +313,7 @@ jobs:
       # Tests/Benchmarks/baseline.json in the job's summary. Report only:
       # hosted runners are too noisy to fail a build on.
       - name: Benchmark
-        if: matrix.fixtures && !cancelled()
+        if: matrix.arch == 'arm64' && !cancelled()
         continue-on-error: true
         timeout-minutes: 10
         run: |
@@ -131,9 +323,34 @@ jobs:
           { echo "## Benchmarks (ns per operation)"; echo; cat benchmarks.md; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the benchmarks
-        if: matrix.fixtures && !cancelled()
+        if: matrix.arch == 'arm64' && !cancelled()
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: benchmarks-${{ matrix.arch }}
           path: benchmarks.json
+
+  # PowerPC's loader, Carbon provider and sysroot with a cross gcc, and a
+  # smoke run under qemu-ppc. Its fixtures need Xcode 3.2.6, which CI
+  # can't have, and it has no Swift.
+  ppc:
+    name: PowerPC
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install the cross compiler and qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-powerpc-linux-gnu g++-powerpc-linux-gnu qemu-user cmake ninja-build
+
+      - name: Build and smoke-test
+        env:
+          PPC_CC: powerpc-linux-gnu-gcc
+        run: |
+          Scripts/build-ppc-loader.sh
+          Scripts/build-ppc-carbon.sh
+          Scripts/build-ppc-sysroot.sh
+          Scripts/test-ppc-smoke.sh
