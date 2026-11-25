@@ -122,9 +122,16 @@ typedef struct {
     uint8_t pnPat[8];
 } PenState;
 
+// A 64-bit number's words in the processor's order: the low word first on
+// i386, the high word first on ppc.
 typedef struct {
+#if defined(__BIG_ENDIAN__) || defined(__powerpc__)
+    int32_t hi;
+    int32_t lo;
+#else
     int32_t lo;
     int32_t hi;
+#endif
 } UnsignedWide;
 
 #pragma pack(pop)
