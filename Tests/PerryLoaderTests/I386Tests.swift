@@ -3,9 +3,13 @@ import Testing
 
 /// i386 Mac programs, run by perry32 on x86_64. The tests need the 32-bit
 /// loader and providers, which Scripts/build-i386-loader.sh,
-/// build-i386-system.sh and build-i386-swiftpm.sh make, the SDK's Swift
+/// build-i386-system.sh and the other build-i386-*.sh make, the SDK's
 /// libraries, and the fixtures of build-i386-fixtures.sh. Without them they
-/// are skipped.
+/// are skipped. The C programs need only the sysroot
+/// (`build-i386-sdk.sh --sysroot-only`) and the C providers; the Objective-C
+/// ones need libPerryobjc too (build-i386-swiftpm.sh, on the full SDK).
+/// perry32 starts with the sysroot's dynamic loader at /lib/ld-linux.so.2,
+/// which Scripts/docker-test.sh mounts into the perry-dev container.
 @Suite("i386", .enabled(if: I386.available))
 struct I386Tests {
     @Test("A C program runs through perry32")
@@ -13,6 +17,15 @@ struct I386Tests {
         let result = try run(I386.perry32, [I386.fixture("hello").path, "a", "b"], environment: I386.environment)
         #expect(result.status == 7)
         #expect(result.stdout == "hello from iOS argc=3\narg[1]=a\narg[2]=b\n")
+    }
+
+    @Test("perry hands an i386 program to perry32")
+    func handoff() throws {
+        var environment = I386.environment
+        environment["PERRY32"] = I386.perry32.path
+        let result = try runPerry([I386.fixture("hello").path], environment: environment)
+        #expect(result.status == 7, "\(result.stderr)")
+        #expect(result.stdout == "hello from iOS argc=1\n")
     }
 
     @Test("Threads, libm, signal handlers and socket options pass as on Darwin")
@@ -204,6 +217,20 @@ struct I386Tests {
             "in 1",
             "color 0.250 0.125",
         ])
+    }
+}
+
+/// With `PERRY_REQUIRE_I386=1`, as CI sets it where it builds them, a run
+/// without perry32 and the fixtures fails here instead of skipping "i386".
+@Suite("i386 required", .enabled(if: ProcessInfo.processInfo.environment["PERRY_REQUIRE_I386"] == "1"))
+struct I386RequiredTests {
+    @Test("perry32 and the C fixtures are there, and run")
+    func built() throws {
+        #expect(I386.available, "build \(I386.perry32.path) and \(I386.fixture("hello").path) with Scripts/build-i386-*.sh")
+        if I386.available {
+            let result = try run(I386.perry32, [I386.fixture("hello").path], environment: I386.environment)
+            #expect(result.status == 7, "perry32 doesn't start (no /lib/ld-linux.so.2?): \(result.stderr)")
+        }
     }
 }
 
