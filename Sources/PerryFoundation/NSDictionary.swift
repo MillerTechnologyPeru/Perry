@@ -8,41 +8,49 @@ import PerryObjCInterop
 final class DictionaryStorage {
     private(set) var keys: [id] = []
     private(set) var values: [id] = []
-    private var index: [ObjectKey: Int] = [:]
+    private var index = ObjectIndex()
     let enumeration = EnumerationBuffer()
 
     deinit {
         for object in keys + values { ObjC.release(object) }
     }
 
+    /// The key's hash and the position of the key equal to it. The app's
+    /// -hash and -isEqual: run here, before any change, with the index and
+    /// the keys copied (ObjectIndex).
+    private func find(_ key: id) -> (hash: UInt, position: Int?) {
+        let hash = ObjectIndex.hash(of: key)
+        let (index, keys) = (self.index, self.keys)
+        return (hash, index.position(of: key, hash: hash, in: keys))
+    }
+
     func value(for key: id) -> id? {
-        index[ObjectKey(object: key)].map { values[$0] }
+        guard !keys.isEmpty else { return nil }
+        return find(key).position.map { values[$0] }
     }
 
     /// Sets a value. A new key is copied, unless `copyingKey` is false (as
     /// CFDictionarySetValue only retains it) or its class can't copy.
     func set(_ value: id, for key: id, copyingKey: Bool = true) {
-        let retained = ObjC.retain(value)!
-        if let position = index[ObjectKey(object: key)] {
+        let found = find(key)
+        if let position = found.position {
             let old = values[position]
-            values[position] = retained
+            values[position] = ObjC.retain(value)!
             ObjC.release(old)
         } else {
             let copies = copyingKey && ObjC.instanceMethod(ObjC.objectGetClass(key), Selectors.copyWithZone) != nil
             let copied = (copies ? ObjC.send(key, Selectors.copyWithZone, nil) : nil) ?? ObjC.retain(key)!
-            index[ObjectKey(object: copied)] = keys.count
+            index.append(found.hash)
             keys.append(copied)
-            values.append(retained)
+            values.append(ObjC.retain(value)!)
         }
         enumeration.mutated()
     }
 
     func remove(_ key: id) {
-        guard let position = index.removeValue(forKey: ObjectKey(object: key)) else { return }
+        guard !keys.isEmpty, let position = find(key).position else { return }
+        index.remove(at: position)
         let removed = [keys.remove(at: position), values.remove(at: position)]
-        for (key, at) in index where at > position {
-            index[key] = at - 1
-        }
         enumeration.mutated()
         for object in removed { ObjC.release(object) }
     }
