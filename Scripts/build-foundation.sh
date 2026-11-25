@@ -13,8 +13,11 @@
 # bridging between the two, the part of Apple's Foundation that
 # swift-foundation leaves to Apple's own build.
 #
-# Usage: Scripts/build-foundation.sh [output directory]
+# Usage: [PERRY_OVERLAY_PLATFORM=macosx] [PERRY_OVERLAY_TARGET=<triple>] Scripts/build-foundation.sh [output directory]
 #   default output: .build/perry-foundation/out
+#   PERRY_OVERLAY_PLATFORM and PERRY_OVERLAY_TARGET name another SDK and
+#   target, as for Scripts/build-overlay.sh: macosx and
+#   x86_64-apple-macos15.0 for a Mac app on x86_64.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -23,8 +26,9 @@ root=$PWD
 work=$root/.build/perry-foundation
 out=${1:-$work/out}
 case $out in /*) ;; *) out=$root/$out ;; esac
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-target=arm64-apple-ios18.0
+platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
+sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+target=${PERRY_OVERLAY_TARGET:-arm64-apple-ios18.0}
 mkdir -p "$work" "$out"
 
 # swift-foundation and its packages, side by side as its manifest expects
@@ -49,13 +53,28 @@ fetch "$packages/swift-syntax" \
 foundation=$packages/swift-foundation
 
 # The package build gives the C shims, ICU and swift-collections as objects
-# for iOS, and the Foundation macros as a plugin for this Mac.
+# for the target, and the Foundation macros as a plugin for this Mac. For
+# a macOS target SwiftPM's default build system puts the target's products
+# and this Mac's in one directory, where swift-syntax built for one
+# replaces the other's: there the native one builds, into a directory of
+# the target's own, each target's objects in its <Target>.build.
 export SWIFTCI_USE_LOCAL_DEPS=1
-(cd "$foundation" && swift build --scratch-path "$work/spm" --triple "$target" --sdk "$sdk" \
-    --product FoundationInternationalization)
-products=$(cd "$foundation" && swift build --scratch-path "$work/spm" --triple "$target" --sdk "$sdk" \
-    --show-bin-path)
-macros=$(cd "$foundation" && swift build --scratch-path "$work/spm" --show-bin-path)/FoundationMacros
+spm=(--scratch-path "$work/spm")
+[ "$platform" = iphoneos ] || spm=(--build-system native --scratch-path "$work/spm-$target")
+(cd "$foundation" && swift build "${spm[@]}" --triple "$target" --sdk "$sdk" --product FoundationInternationalization)
+products=$(cd "$foundation" && swift build "${spm[@]}" --triple "$target" --sdk "$sdk" --show-bin-path)
+host=$(cd "$foundation" && swift build "${spm[@]}" --show-bin-path)
+objects=() modules=$products
+for each in _FoundationCShims _FoundationICU _RopeModule DequeModule OrderedCollections InternalCollectionsUtilities; do
+    if [ "$platform" = iphoneos ]; then
+        objects+=("$products/$each.o")
+    else
+        while IFS= read -r file; do objects+=("$file"); done < <(find "$products/$each.build" -name '*.o' | sort)
+    fi
+done
+[ "$platform" = iphoneos ] || modules=$products/Modules
+macros=$host/FoundationMacros
+[ -x "$macros" ] || macros=$host/FoundationMacros-tool
 [ -x "$macros" ] || macros=$(dirname "$products")/Debug/FoundationMacros
 
 # One module: Internationalization's imports of Essentials go, and names
@@ -101,18 +120,16 @@ sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "$merged" "$root/Darwin/Foundation/Sources" -name '*.swift' | sort)
 shims=$foundation/Sources/_FoundationCShims/include
 icu=$packages/swift-foundation-icu/icuSources/include
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" \
+xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
     -module-name Foundation -package-name swift_foundation -parse-as-library \
     -enable-library-evolution -swift-version 5 -O -wmo -import-underlying-module -D FOUNDATION_OBJC_TYPES \
     -emit-library -emit-module -emit-module-path "$out/Foundation.swiftmodule" \
-    -I "$products" \
+    -I "$modules" \
     -Xcc -fmodule-map-file="$shims/module.modulemap" -Xcc -I"$shims" \
     -Xcc -fmodule-map-file="$icu/_foundation_unicode/module.modulemap" -Xcc -I"$icu" \
     -load-plugin-executable "$macros#FoundationMacros" \
     "${settings[@]}" "${sources[@]}" \
-    "$products"/_FoundationCShims.o "$products"/_FoundationICU.o \
-    "$products"/_RopeModule.o "$products"/DequeModule.o "$products"/OrderedCollections.o \
-    "$products"/InternalCollectionsUtilities.o -lc++ -framework Foundation \
+    "${objects[@]}" -lc++ -framework Foundation \
     -Xlinker -install_name -Xlinker /usr/lib/swift/libswiftFoundation.dylib \
     -o "$out/libswiftFoundation.dylib"
 echo "$out/libswiftFoundation.dylib"

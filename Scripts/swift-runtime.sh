@@ -23,6 +23,9 @@
 #   default output: .build/perry-swift-runtime
 #   PERRY_SWIFT_SOURCE: where build-swift-runtime.sh built
 #     (default .build/swift-source)
+#   PERRY_SIMULATOR_RUNTIME: the iOS Simulator runtime (an iOS
+#     <version>.simruntime bundle) to take the libraries from, in place of
+#     the newest one installed
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -32,7 +35,8 @@ out=${1:-.build/perry-swift-runtime}
 # cryptexes, mounted under /private/var/run/com.apple.security.cryptexd),
 # preferring one that still has libswiftCore as a file: from iOS 27 it is
 # only in the simulator's dyld shared cache.
-runtime=$(xcrun simctl runtime list -j 2>/dev/null | /usr/bin/python3 -I -c '
+runtime=${PERRY_SIMULATOR_RUNTIME:-}
+[ -n "$runtime" ] || runtime=$(xcrun simctl runtime list -j 2>/dev/null | /usr/bin/python3 -I -c '
 import json, os, sys
 runtimes = [r for r in json.load(sys.stdin).values()
             if r.get("platformIdentifier", "").endswith("iphonesimulator") and r.get("runtimeBundlePath")]

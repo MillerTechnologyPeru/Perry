@@ -18,18 +18,26 @@ and `section_t` name the structures of the loader's own pointer width.
 
 ## Toolchain
 
-Providers are Swift, so they need Swift for armv7. The Swift 6.4.0 SDK from
-swift-embedded-linux/armhf-debian provides it. With the Swift 6.4.0 toolchain
-for the host (the SDK is built against exactly 6.4.0):
+Providers are Swift, so they need Swift for armv7. The SDKs from
+swift-embedded-linux/armhf-debian provide it, one for each Swift release; an
+SDK's modules load only in the compiler of its exact version.
+`Scripts/setup-armv7-sdk.sh [version]` downloads one, checked against the
+SHA-256 it pins, into `.toolchains/swift-VERSION-RELEASE-debian-trixie-armv7-sdk`:
+by default the perry-dev image's version, so that the image's own `swift`
+builds for armv7 (`PERRY_SWIFT=/usr/bin`). With the host toolchain of the
+SDK's version:
 
     swiftc -target armv7-unknown-linux-gnueabihf -use-ld=lld \
         -Xcc --gcc-toolchain=$SDK/usr -resource-dir $SDK/usr/lib/swift \
         -sdk $SDK -latomic -tools-directory $HOST_SWIFT_BIN hello.swift
 
-`Scripts/build-armv7-loader.sh` builds `perry32` with clang from `.toolchains`.
+`Scripts/build-armv7-loader.sh` builds `perry32` with clang from `.toolchains`,
+or `PERRY_LLVM_BIN`'s, which the perry-dev image sets.
 
 Linking armv7 Mach-O test programs needs a linker that supports it: lld's
 Mach-O port does not, Apple's `ld64` (cctools-port) does.
+`Scripts/build-cctools.sh` builds it, at a pinned commit, into
+`.toolchains/cctools`, in the perry-dev image, where it runs.
 
 ## Darwin armv7 ABI, against Linux's armhf
 
@@ -192,6 +200,8 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
 
 ## Building and running
 
+    Scripts/build-cctools.sh                   # .toolchains/cctools (once)
+    Scripts/setup-armv7-sdk.sh                 # .toolchains/swift-*-armv7-sdk (once)
     Scripts/build-armv7-loader.sh              # .build/armv7/bin/perry32
     Scripts/build-armv7-system.sh              # .build/armv7/bin/libPerrySystem.so
     Scripts/build-host-macros.sh               # .build/macros/PerryObjCMacros
@@ -210,7 +220,8 @@ machine with the memory for swift-syntax (a 4 GB one does not have it):
     Scripts/build-armv7-swiftpm.sh Perryobjc   # one product
 
 They go to `.build/armv7-pm/armv7-unknown-linux-gnueabihf/release`, built
-with the 6.4.0 toolchain the SDK matches, and are copied to `.build/armv7/bin`
+with the toolchain the SDK matches (`PERRY_SWIFT`, or the 6.4.0 one under
+`.toolchains`), and are copied to `.build/armv7/bin`
 beside `perry32`. SwiftPM runs the macros and the
 provider generator on the host; pkg-config reads the SDK's `.pc` files, so
 libxml2 is the SDK's armv7 build. A library's runpath names the SDK as the
@@ -240,3 +251,19 @@ one `build-armv7-objc.sh` builds does. On a machine without the memory,
 `build-armv7-objc.sh` compiles the modules with `swiftc` directly and
 `build-host-macros.sh` the macro plugin against the swift-syntax libraries
 the toolchain ships.
+
+## In CI
+
+The arm64 Linux job builds the armv7 loader, libSystem and libobjc and the C
+and Objective-C fixtures in the perry-dev container, after Perry itself, whose
+macro plugin (`.build/linux/debug/PerryObjCMacros`) build-armv7-objc.sh
+takes as `PERRY_OBJC_MACROS`; then `swift test` runs `ARMv7Tests` under
+qemu-arm (`qemu-user-static`, registered with binfmt_misc, and
+`QEMU_LD_PREFIX` naming the SDK), with `PERRY_REQUIRE_ARMV7=1`, so that a
+run that cannot start perry32 fails rather than skipping them. CI leaves out
+the SwiftPM providers (Foundation, libdispatch), the sysroot they link
+against (`build-armv7-sysroot.sh`) and the fixtures that need them
+(`exceptions.m`, `foundation_abi.m`, `callbacks.m`): their SwiftPM build
+builds swift-syntax again, for the host, and takes far longer than the rest.
+`build-armv7-libcxx.sh` needs an iOS SDK's headers, which only a Mac has, and
+no test loads its library, so CI does not build it either.

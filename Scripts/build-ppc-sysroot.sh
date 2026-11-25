@@ -15,8 +15,9 @@
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cc=${PPC_CC:?set PPC_CC to a powerpc-linux-gnu cross compiler}
-cxx=$(dirname "$cc")/$(basename "$cc" | sed 's/gcc$/g++/')
-ar=$(dirname "$cc")/$(basename "$cc" | sed 's/gcc$/ar/')
+# The toolchain's other programs, beside gcc or, for a bare name, on PATH.
+cxx=$(echo "$cc" | sed 's/gcc$/g++/')
+ar=$(echo "$cc" | sed 's/gcc$/ar/')
 prefix=${PPC_PREFIX:-$root/.toolchains/ppc-sysroot}
 lib=$prefix/usr/lib
 include=$prefix/usr/include

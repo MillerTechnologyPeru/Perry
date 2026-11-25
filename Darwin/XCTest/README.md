@@ -13,7 +13,7 @@ into `libXCTestSwiftSupport.dylib`) and replaces the Swift 5.0 overlay
 It is compiled as the module `XCTest` over XCTest's Objective-C headers, as
 Apple builds its overlays. XCTest isn't in the SDK but in the platform's
 `Developer/Library/Frameworks`, which `swiftc-flags` points the compiler and
-linker at (with Xcode's default path), and links XCTest outside the shared
+linker at (the selected Xcode's), and links XCTest outside the shared
 cache (`-not_for_dyld_shared_cache`), as it isn't in it:
 
     PERRY_OVERLAY_PLATFORM=macosx PERRY_OVERLAY_TARGET=x86_64-apple-macos15.0 Scripts/build-overlay.sh XCTest <runtime directory>

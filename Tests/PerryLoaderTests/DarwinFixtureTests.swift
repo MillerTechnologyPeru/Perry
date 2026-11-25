@@ -2,8 +2,9 @@ import Foundation
 import Testing
 
 /// Apps built on a Mac by Scripts/build-darwin-fixtures.sh with Xcode and the
-/// real iPhoneOS SDK. Linux has no Apple SDK, so these are prebuilt and the
-/// suite is skipped when they are missing.
+/// real iPhoneOS SDK, or for x86_64 the macOS SDK (DarwinFixtures.directory).
+/// Linux has no Apple SDK, so these are prebuilt and the suite is skipped
+/// when they are missing.
 @Suite(.enabled(if: DarwinFixtures.available, "run Scripts/build-darwin-fixtures.sh on a Mac first"))
 struct DarwinFixtureTests {
 
@@ -31,11 +32,19 @@ struct DarwinFixtureTests {
             #expect(lines.contains(expected), "missing report line: \(expected)")
         }
         // Every import resolves: libobjc to libPerryobjc, and Foundation and
-        // CoreFoundation both to libPerryFoundation.
+        // CoreFoundation both to libPerryFoundation. The x86_64 Menagerie is
+        // a macOS app, which links the frameworks' versioned paths.
+        #if arch(x86_64)
+        let foundation = "Foundation.framework/Versions/C/Foundation"
+        let coreFoundation = "CoreFoundation.framework/Versions/A/CoreFoundation"
+        #else
+        let foundation = "Foundation.framework/Foundation"
+        let coreFoundation = "CoreFoundation.framework/CoreFoundation"
+        #endif
         for (library, provider) in [
             ("/usr/lib/libobjc.A.dylib", "libPerryobjc.so"),
-            ("/System/Library/Frameworks/Foundation.framework/Foundation", "libPerryFoundation.so"),
-            ("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", "libPerryFoundation.so"),
+            ("/System/Library/Frameworks/\(foundation)", "libPerryFoundation.so"),
+            ("/System/Library/Frameworks/\(coreFoundation)", "libPerryFoundation.so"),
         ] {
             #expect(lines.contains { $0.hasPrefix("dependency\t\(library)\t") && $0.hasSuffix("/\(provider)") },
                     "\(library) should resolve to \(provider)")
@@ -124,10 +133,49 @@ struct DarwinFixtureTests {
 }
 
 enum DarwinFixtures {
-    static let directory = TestEnvironment.fixtureBuild.appending(path: "darwin")
+    /// Scripts/build-darwin-fixtures.sh's output for this machine's
+    /// architecture: iOS apps on arm64; on x86_64 (PERRY_FIXTURES_ARCH=x86_64)
+    /// the macOS and Mac Catalyst apps their references come from, in macOS
+    /// bundles, and iOS Simulator apps.
+    static let directory: URL = {
+        #if arch(x86_64)
+        TestEnvironment.fixtureBuild.appending(path: "darwin-x86_64")
+        #else
+        TestEnvironment.fixtureBuild.appending(path: "darwin")
+        #endif
+    }()
+
+    /// Fixtures the script doesn't build for this architecture, and why.
+    static let leftOut: [String: String] = {
+        #if arch(x86_64)
+        ["Tempo": "Swift, and Perry has no x86_64 Swift runtime"]
+        #else
+        [:]
+        #endif
+    }()
+
+    /// Fixtures built for this architecture whose output is known to differ
+    /// from their reference here, and why: matchesDarwin leaves them out.
+    static let unlikeDarwin: [String: String] = {
+        #if arch(x86_64)
+        [
+            "Glossary": "NSDecimalNumber's out-of-range integer values are the CPU's, and Perry's are arm64's",
+            "Scrivener": "x86_64 has no initWithValidatedFormat:validFormatSpecifiers:locale:error:",
+        ]
+        #else
+        [:]
+        #endif
+    }()
 
     static func app(_ name: String) -> URL {
         directory.appending(path: "\(name).app")
+    }
+
+    /// The app's executable: under Contents/MacOS in a macOS bundle, beside
+    /// Info.plist in an iOS one.
+    static func executable(_ name: String) -> URL {
+        let macOS = app(name).appending(path: "Contents/MacOS/\(name)")
+        return FileManager.default.fileExists(atPath: macOS.path) ? macOS : app(name).appending(path: name)
     }
 
     static func reference(_ name: String) -> URL {
@@ -142,7 +190,7 @@ enum DarwinFixtures {
             "Logbook", "Menagerie", "Orchard", "Panorama", "Parsley", "Quill", "Quiver", "Relay", "Roster", "Satchel", "Scribe", "Scriptorium", "Scrivener", "Scroll", "Semaphore", "Sentinel", "Shelf",
             "Sketchbook", "Sluice", "Sundial", "Tally", "Telegraph", "Typecast", "Vault", "Viewport", "Whittle",
         ].filter {
-            built($0) && FileManager.default.fileExists(atPath: reference($0).path)
+            built($0) && FileManager.default.fileExists(atPath: reference($0).path) && unlikeDarwin[$0] == nil
         } + swift.filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path) && swiftRuntime != nil
         }
@@ -175,7 +223,7 @@ enum DarwinFixtures {
     }
 
     static func built(_ name: String) -> Bool {
-        FileManager.default.fileExists(atPath: app(name).appending(path: name).path)
+        FileManager.default.fileExists(atPath: executable(name).path)
     }
 
     static var available: Bool {

@@ -1,7 +1,10 @@
 #!/bin/sh
-# Builds armv7 providers with SwiftPM, cross-compiling in the arm64 Linux
-# container with the Swift 6.4.0 toolchain and the armv7 SDK under
-# .toolchains. SwiftPM builds the macros and the provider generator for the
+# Builds armv7 providers with SwiftPM, cross-compiling in the Linux container
+# of the host's architecture with the armv7 SDK under .toolchains and the
+# Swift toolchain of its exact version: the 6.4.0 one under .toolchains, or
+# PERRY_SWIFT, its bin directory as the container sees it (/usr/bin for the
+# perry-dev image's own, when Scripts/setup-armv7-sdk.sh fetched the SDK of
+# its version). SwiftPM builds the macros and the provider generator for the
 # host and runs them itself. Products go to
 # .build/armv7-pm/armv7-unknown-linux-gnueabihf/release, optimized like the
 # Swift runtime they run with, which has no SwiftOnoneSupport on armv7
@@ -28,9 +31,9 @@ for product; do
 done
 
 # Paths as the container sees the checkout, at /perry.
-swift=$(cd .toolchains && ls -d swift-6.4.0-RELEASE-*/usr/bin | head -1)
+swift=${PERRY_SWIFT:-/perry/.toolchains/$(cd .toolchains && ls -d swift-6.4.0-RELEASE-*/usr/bin | head -1)}
 sdk=$(cd .toolchains && ls -d swift-*-armv7-sdk/*/debian-* | head -1)
-swift=/perry/.toolchains/$swift sdk=/perry/.toolchains/$sdk
+sdk=/perry/.toolchains/$sdk
 
 # r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
 # register, which Linux's preserves across calls, so Perry's code never keeps
@@ -59,9 +62,9 @@ EOF
 # the SDK's armv7 builds rather than the container's arm64 ones.
 pc=$sdk/usr/lib/arm-linux-gnueabihf/pkgconfig:$sdk/usr/share/pkgconfig
 configuration=${PERRY_CONFIGURATION:-release}
-docker run --rm --platform linux/arm64 -v "$root:/perry" \
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry \
     -e PKG_CONFIG_SYSROOT_DIR="$sdk" -e PKG_CONFIG_LIBDIR="$pc" -e PKG_CONFIG_PATH="$pc" \
-    perry-dev sh -c '
+    --entrypoint sh "${PERRY_IMAGE:-perry-dev}" -c '
         swift=$1 configuration=$2; shift 2
         for product; do
             "$swift/swift" build --build-system native --destination .build/armv7/destination.json \

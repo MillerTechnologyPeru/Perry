@@ -128,9 +128,15 @@ esac
 
 # Perry's DeveloperToolsSupport (Scripts/build-framework.sh), in place of
 # the SDK's: SwiftUI reads its resources' names and bundles through Perry's
-# SPI.
+# SPI. It is built first unless this target's interface and the framework
+# in the output directory, which SwiftUI links, are there and newer than
+# its sources.
 dts=.build/perry-frameworks/DeveloperToolsSupport.swiftmodule
-[ -d "$dts" ] || Scripts/build-framework.sh DeveloperToolsSupport "$out"
+dts_binary=$out/DeveloperToolsSupport.framework/DeveloperToolsSupport
+if [ ! -f "$dts/$interface.swiftinterface" ] || [ ! -f "$dts_binary" ] ||
+   [ -n "$(find Darwin/DeveloperToolsSupport -newer "$dts_binary" -print -quit)" ]; then
+    Scripts/build-framework.sh DeveloperToolsSupport "$out"
+fi
 rm -rf "$work/sdk/DeveloperToolsSupport.swiftmodule"
 cp -R "$dts" "$work/sdk/DeveloperToolsSupport.swiftmodule"
 

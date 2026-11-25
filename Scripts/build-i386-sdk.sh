@@ -5,17 +5,24 @@
 # perry-dev image; the libraries are built from the Swift sources of its exact
 # version, against Debian's i386 packages.
 #
-# Takes about an hour and 15 GB. Usage: Scripts/build-i386-sdk.sh
+# Takes about an hour and 15 GB.
+#
+# With --sysroot-only it stops after the C libraries (a minute, 250 MB):
+# enough for perry32 and the C providers (Scripts/build-i386-loader.sh,
+# build-i386-system.sh, build-i386-carbon.sh, build-i386-opengl.sh,
+# build-i386-quicktime.sh, build-i386-audiotoolbox.sh) and the C fixtures,
+# as CI builds them.
+# Usage: Scripts/build-i386-sdk.sh [--sysroot-only]
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
+image=${PERRY_IMAGE:-perry-dev}
 tag=${PERRY_SWIFT_TAG:-swift-6.4.2-RELEASE}
 work=$root/.toolchains/i386-sdk
-mkdir -p "$work/src"
+mkdir -p "$work/sysroot"
 
 # The C libraries, from Debian's i386 packages, with absolute links made
 # relative so the sysroot can move.
 if [ ! -e "$work/sysroot/usr/include/stdio.h" ]; then
-    mkdir -p "$work/sysroot"
     docker run --rm --platform linux/386 -e OWNER="$(id -u):$(id -g)" -v "$work/sysroot:/out" debian:trixie sh -euc '
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends libc6-dev libgcc-14-dev libstdc++-14-dev libstdc++6 \
@@ -27,7 +34,12 @@ if [ ! -e "$work/sysroot/usr/include/stdio.h" ]; then
         done
         chown -R "$OWNER" /out'
 fi
+if [ "${1:-}" = --sysroot-only ]; then
+    echo "$work/sysroot"
+    exit 0
+fi
 
+mkdir -p "$work/src"
 for repository in swift llvm-project swift-syntax swift-experimental-string-processing \
     swift-corelibs-libdispatch swift-corelibs-foundation swift-foundation swift-foundation-icu; do
     [ -d "$work/src/$repository/.git" ] ||
@@ -37,7 +49,7 @@ done
 [ -d "$work/src/swift-collections/.git" ] ||
     git clone -q --depth 1 --branch "1.1.6" https://github.com/apple/swift-collections.git "$work/src/swift-collections"
 
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" --entrypoint bash perry-dev -euxc '
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" --entrypoint bash "$image" -euxc '
     work=/perry/.toolchains/i386-sdk src=$work/src sysroot=$work/sysroot build=$work/build
     target=i686-unknown-linux-gnu
     mkdir -p $build

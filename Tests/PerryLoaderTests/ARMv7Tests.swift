@@ -16,7 +16,9 @@ struct ARMv7Tests {
         #expect(result.stdout == "hello from iOS argc=3\narg[1]=a\narg[2]=b\n")
     }
 
-    @Test("perry hands an armv7 program to perry32")
+    /// Only arm64's perry hands armv7 programs over; x86_64's hands over
+    /// i386 ones.
+    @Test("perry hands an armv7 program to perry32", .enabled(if: TestEnvironment.runsARM64))
     func handoff() throws {
         let result = try runPerry([ARMv7.fixture("hello").path], environment: ["PERRY32": ARMv7.perry32.path])
         #expect(result.status == 7)
@@ -313,6 +315,25 @@ struct ARMv7Tests {
             "  new 3.250",
             "after 5 34359738368 2 4.75",
         ])
+    }
+}
+
+/// With `PERRY_REQUIRE_ARMV7=1`, as CI sets it where it builds them, a run
+/// without perry32, the fixtures or a way to run them fails here instead of
+/// skipping "armv7".
+@Suite("armv7 required", .enabled(if: ProcessInfo.processInfo.environment["PERRY_REQUIRE_ARMV7"] == "1"))
+struct ARMv7RequiredTests {
+    @Test("perry32 and the fixtures are there, and run")
+    func built() {
+        let fm = FileManager.default
+        #expect(fm.isExecutableFile(atPath: ARMv7.perry32.path), "build it with Scripts/build-armv7-loader.sh")
+        for name in ["hello", "runtime", "abi", "seeko", "files", "zoo"] {
+            #expect(fm.fileExists(atPath: ARMv7.fixture(name).path), "build it with Scripts/build-armv7-fixtures.sh")
+        }
+        #expect(ARMv7.runs, """
+            perry32 doesn't run hello: this kernel runs no 32-bit ARM programs, or qemu-arm isn't registered \
+            with binfmt_misc, or QEMU_LD_PREFIX doesn't name the armv7 SDK
+            """)
     }
 }
 
