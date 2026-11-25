@@ -235,7 +235,7 @@ public func CFStringSetExternalCharactersNoCopy(_ string: id?, _ characters: Uns
     let storage = MutableStrings.storage(string)
     storage.external = nil
     storage.value = characters.map { CFStrings.string(UnsafeBufferPointer(start: $0, count: count)) } ?? ""
-    storage.external = characters.map { ExternalCharacters(characters: $0, capacity: max(capacity, count)) }
+    storage.external = characters.map { ExternalCharacters(characters: $0, capacity: max(capacity, count), count: count) }
 }
 
 @c(_CFStringCreateMutableCopy)

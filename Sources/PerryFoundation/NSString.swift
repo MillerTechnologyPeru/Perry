@@ -6,13 +6,36 @@ import Synchronization
 /// An NSString's contents: its own, or for an NSMutableAttributedString's
 /// -mutableString, the attributed string's characters, read and changed in
 /// place.
-/// A program's buffer that a mutable CFString keeps its characters in.
+/// A program's buffer that a mutable CFString keeps its characters in,
+/// and how many of its units the string is. The program may change the
+/// units in place, and the string is what the buffer holds now: games
+/// lowercase a character by writing it into such a string's buffer and
+/// calling CFStringLowercase.
 struct ExternalCharacters {
     var characters: UnsafeMutablePointer<UInt16>
     var capacity: Int
+    var count: Int
 
-    func copy(_ value: String) {
-        for (index, unit) in value.utf16.prefix(capacity).enumerated() { characters[index] = unit }
+    mutating func copy(_ value: String) {
+        var written = 0
+        for unit in value.utf16.prefix(capacity) {
+            characters[written] = unit
+            written += 1
+        }
+        count = written
+    }
+
+    /// The buffer's units as a string.
+    var string: String { String(decoding: UnsafeBufferPointer(start: characters, count: count), as: UTF16.self) }
+
+    /// Whether the buffer holds `value`'s units.
+    func holds(_ value: String) -> Bool {
+        var index = 0
+        for unit in value.utf16 {
+            guard index < count, characters[index] == unit else { return false }
+            index += 1
+        }
+        return index == count
     }
 }
 
@@ -23,7 +46,10 @@ final class StringStorage {
 
     /// Changes only for NSMutableString.
     var value: String {
-        get { attributed?.string ?? stored }
+        get {
+            if attributed == nil { refreshFromExternal() }
+            return attributed?.string ?? stored
+        }
         set {
             if let attributed { attributed.replaceChanged(with: Array(newValue.utf16)) } else { stored = newValue }
             external?.copy(newValue)
@@ -36,6 +62,15 @@ final class StringStorage {
     /// over it (CFStringCreateMutableWithExternalCharactersNoCopy): each
     /// change is written there, as much as fits.
     var external: ExternalCharacters?
+    /// The program's buffer as it is now, if it was changed in place.
+    private func refreshFromExternal() {
+        guard let external, !external.holds(stored) else { return }
+        stored = external.string
+        free(cString)
+        cString = nil
+        asciiChecked = false
+    }
+
     /// Whether the string has been looked at for being all ASCII, and was.
     private var asciiChecked = false
     private var isASCII = false
@@ -56,6 +91,7 @@ final class StringStorage {
     /// from it rather than a character at a time.
     var asciiPointer: UnsafePointer<CChar>? {
         guard attributed == nil else { return nil }
+        refreshFromExternal()
         if !asciiChecked {
             isASCII = stored.utf8.allSatisfy { $0 != 0 && $0 < 0x80 }
             asciiChecked = true
