@@ -232,7 +232,33 @@ open class NSEvent: NSObject {
     static func mouseLocation() -> CGPoint {
         guard SDLSession.start() else { return .zero }
         let mouse = SDL.globalMouseState
+        // Over a window scaled to the screen from a display mode's size,
+        // the mouse is where it would be over the window as the program
+        // placed it: the screen the program knows is that mode's.
+        if let window = Windows.all.first(where: { $0.displayModeScaled }) {
+            let origin = window.sdlWindow.flatMap { try? $0.position } ?? (0, 0)
+            let point = window.contentPoint(sdlX: CGFloat(mouse.x) - CGFloat(origin.0), sdlY: CGFloat(mouse.y) - CGFloat(origin.1))
+            return CGPoint(x: window.frame.minX + point.x, y: window.frame.maxY - point.y)
+        }
         return CGPoint(x: CGFloat(mouse.x), y: Screens.height - CGFloat(mouse.y))
+    }
+
+    /// Moves the mouse to a place the program gives in its own screen
+    /// coordinates, from the top left (Core Graphics' warp), where a window
+    /// is scaled to the screen from a display mode's size: to where that
+    /// place is shown, so that the program reads back the place it asked
+    /// for (mouseLocation). A game that puts the mouse back each frame and
+    /// takes how far it had moved would otherwise see it drift. False when
+    /// no window is scaled, and the place is the screen's own.
+    @ObjCClassMethod("_perryWarpMouseToX:y:")
+    static func warpMouse(toX x: Int, y: Int) -> Bool {
+        guard let window = Windows.all.first(where: { $0.displayModeScaled }), let sdlWindow = window.sdlWindow,
+              SDLSession.start() else { return false }
+        let fromTop = window.frame.maxY - (Screens.height - CGFloat(y))
+        let shown = window.sdlPoint(contentX: CGFloat(x) - window.frame.minX, contentY: fromTop)
+        let origin = (try? sdlWindow.position) ?? (0, 0)
+        try? SDL.warpMouse(toGlobal: (Float(CGFloat(origin.0) + shown.x), Float(CGFloat(origin.1) + shown.y)))
+        return true
     }
 
     @ObjCClassMethod("pressedMouseButtons") static func pressedMouseButtons() -> UInt { MouseButtons.pressed }

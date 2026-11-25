@@ -68,13 +68,27 @@ enum Displays {
         return DisplayModeState(width: Int(bounds.size.width), height: Int(bounds.size.height), density: 1, refreshRate: 60)
     }
 
-    /// The full-screen modes, the desktop's first.
+    /// Sizes a Mac's display had modes of, which programs ask for by size.
+    private static let usualSizes = [(640, 480), (800, 600), (1024, 768), (1152, 864), (1280, 720), (1280, 960), (1280, 1024),
+                                     (1600, 900), (1600, 1200), (1920, 1080)]
+
+    /// The full-screen modes, the desktop's first: SDL's, and the usual
+    /// sizes that fit the desktop's where SDL has none of them. A display
+    /// needn't have a mode for a program to be shown in it: AppKit scales a
+    /// window of a mode's size to the screen (and a panel turned on its
+    /// side has SDL listing its modes turned, none of a size asked for).
     static var all: [DisplayModeState] {
-        var modes = [current]
+        let desktop = current
+        var modes = [desktop]
         for found in (try? display?.modes()) ?? [] {
             let state = mode(found)
             if !modes.contains(where: { $0.width == state.width && $0.height == state.height && $0.refreshRate == state.refreshRate }) {
                 modes.append(state)
+            }
+        }
+        for (width, height) in usualSizes where width <= desktop.width && height <= desktop.height {
+            if !modes.contains(where: { $0.width == width && $0.height == height }) {
+                modes.append(DisplayModeState(width: width, height: height, density: 1, refreshRate: desktop.refreshRate))
             }
         }
         return modes
@@ -82,7 +96,19 @@ enum Displays {
 
     static func object(_ state: DisplayModeState) -> Ref { makeObject(CGDisplayModeObject.objCClass, CGDisplayModeObject.states, state) }
 
-    static func warp(to point: CGPoint) { if display != nil { try? SDL.warpMouse(toGlobal: (Float(point.x), Float(point.y))) } }
+    /// AppKit moves the mouse where it shows a window scaled to the screen
+    /// from a display mode's size: the place is in that window's terms.
+    private static func appKitWarps(to point: CGPoint) -> Bool {
+        guard let event = ObjCRuntime.registeredClassPair("NSEvent")?.cls else { return false }
+        typealias Warp = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Int, Int) -> Bool
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Warp.self)(event, ObjCRuntime.selector("_perryWarpMouseToX:y:"),
+                                                                Int(point.x.rounded()), Int(point.y.rounded()))
+    }
+
+    static func warp(to point: CGPoint) {
+        guard display != nil, !appKitWarps(to: point) else { return }
+        try? SDL.warpMouse(toGlobal: (Float(point.x), Float(point.y)))
+    }
 
     static var mouse: CGPoint {
         guard display != nil else { return CGPoint(x: 0, y: 0) }

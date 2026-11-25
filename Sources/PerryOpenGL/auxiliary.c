@@ -10,6 +10,11 @@
 // buffer as a window's buffers do. Swapping copies the back buffer to the
 // window. The program sees none of it: the buffers it selects and asks
 // about are the window's, and framebuffer 0 is this one.
+//
+// The same framebuffer is what a window scaled to the screen is drawn
+// through: a program that switched the display to a mode the display hasn't
+// got draws at that mode's size, into attachments of that size, and the
+// swap scales the back buffer to the window, which is the screen's size.
 
 #include "PerryOpenGL.h"
 
@@ -22,7 +27,7 @@ enum {
     GL_RIGHT = 0x0407, GL_FRONT_AND_BACK = 0x0408, GL_AUX0 = 0x0409, GL_AUX3 = 0x040C,
     GL_AUX_BUFFERS = 0x0C00, GL_DRAW_BUFFER = 0x0C01, GL_READ_BUFFER = 0x0C02, GL_SCISSOR_TEST = 0x0C11, GL_VIEWPORT = 0x0BA2,
     GL_TEXTURE_2D = 0x0DE1, GL_TEXTURE_BINDING_2D = 0x8069, GL_RGBA = 0x1908, GL_UNSIGNED_BYTE = 0x1401, GL_RGBA8 = 0x8058,
-    GL_NEAREST = 0x2600, GL_TEXTURE_MAG_FILTER = 0x2800, GL_TEXTURE_MIN_FILTER = 0x2801, GL_COLOR_BUFFER_BIT = 0x4000,
+    GL_NEAREST = 0x2600, GL_LINEAR = 0x2601, GL_COLOR_CLEAR_VALUE = 0x0C22, GL_COLOR_WRITEMASK = 0x0C23, GL_TEXTURE_MAG_FILTER = 0x2800, GL_TEXTURE_MIN_FILTER = 0x2801, GL_COLOR_BUFFER_BIT = 0x4000,
     GL_DRAW_BUFFER0 = 0x8825, GL_DEPTH24_STENCIL8 = 0x88F0, GL_DEPTH_STENCIL_ATTACHMENT = 0x821A,
     GL_FRAMEBUFFER_BINDING = 0x8CA6, GL_RENDERBUFFER_BINDING = 0x8CA7, GL_READ_FRAMEBUFFER = 0x8CA8,
     GL_DRAW_FRAMEBUFFER = 0x8CA9, GL_READ_FRAMEBUFFER_BINDING = 0x8CAA, GL_COLOR_ATTACHMENT0 = 0x8CE0,
@@ -50,6 +55,11 @@ static struct {
     unsigned char (*IsEnabled)(unsigned);
     void (*Enable)(unsigned);
     void (*Disable)(unsigned);
+    void (*Clear)(unsigned);
+    void (*ClearColor)(float, float, float, float);
+    void (*GetFloatv)(unsigned, float *);
+    void (*GetBooleanv)(unsigned, unsigned char *);
+    void (*ColorMask)(unsigned char, unsigned char, unsigned char, unsigned char);
 } gl;
 
 static bool load(void) {
@@ -60,7 +70,8 @@ static bool load(void) {
                LOAD(GenFramebuffers) && LOAD(GenTextures) && LOAD(GenRenderbuffers) && LOAD(BindTexture) &&
                LOAD(BindRenderbuffer) && LOAD(TexImage2D) && LOAD(TexParameteri) && LOAD(RenderbufferStorage) &&
                LOAD(FramebufferTexture2D) && LOAD(FramebufferRenderbuffer) && LOAD(CheckFramebufferStatus) &&
-               LOAD(BlitFramebuffer) && LOAD(IsEnabled) && LOAD(Enable) && LOAD(Disable);
+               LOAD(BlitFramebuffer) && LOAD(IsEnabled) && LOAD(Enable) && LOAD(Disable) && LOAD(Clear) &&
+               LOAD(ClearColor) && LOAD(GetFloatv) && LOAD(GetBooleanv) && LOAD(ColorMask);
 #undef LOAD
     loaded = all ? 1 : -1;
     return all;
@@ -118,6 +129,51 @@ static void window_size(int *width, int *height) {
 
 enum { AUX_COUNT = 1, COLORS = 1 + AUX_COUNT };
 
+/// The size the program draws at where that isn't the window's (a display
+/// mode's, scaled to the screen), as the last swap had it; zeros otherwise.
+static struct { int width, height; } presented;
+
+/// What the back buffer is scaled into on its way to a window of another
+/// size: a framebuffer of the window's size with one sample a pixel. A
+/// window with several (the program asked for antialiasing) takes a copy of
+/// its own size only, so the scaling can't be the copy to it.
+static struct { unsigned framebuffer, color; int width, height; } scaled;
+
+/// The scaling framebuffer at the window's size, bound for drawing; false
+/// if it can't be had.
+static bool bind_scaled(int width, int height) {
+    if (!scaled.framebuffer) {
+        gl.GenFramebuffers(1, &scaled.framebuffer);
+        gl.GenTextures(1, &scaled.color);
+    }
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, scaled.framebuffer);
+    if (scaled.width != width || scaled.height != height) {
+        int texture = 0;
+        gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+        gl.BindTexture(GL_TEXTURE_2D, scaled.color);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl.BindTexture(GL_TEXTURE_2D, (unsigned)texture);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scaled.color, 0);
+        scaled.width = width;
+        scaled.height = height;
+    }
+    if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
+    gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
+    return true;
+}
+
+/// The size of the attachments: what the program draws at.
+static void drawn_size(int *width, int *height) {
+    if (presented.width > 0 && presented.height > 0) {
+        *width = presented.width;
+        *height = presented.height;
+    } else {
+        window_size(width, height);
+    }
+}
+
 static struct {
     void *context;
     unsigned framebuffer, colors[COLORS], depth;
@@ -171,7 +227,7 @@ static bool activate(void) {
     int bound = 0, width, height, draw = GL_BACK, read = GL_BACK;
     gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
     if (bound != 0) return false;
-    window_size(&width, &height);
+    drawn_size(&width, &height);
     if (width <= 0 || height <= 0) return false;
     gl.GetIntegerv(GL_DRAW_BUFFER, &draw);
     gl.GetIntegerv(GL_READ_BUFFER, &read);
@@ -282,21 +338,62 @@ void perry_aux_integer(unsigned name, int *values) {
 static struct { bool pending; int read; unsigned char scissor; } swap;
 
 /// Before the window's buffers swap: the back buffer's attachment goes to
-/// the window, and attachments follow a window that changed size.
-void perry_aux_before_swap(void) {
+/// the window, and attachments follow a window that changed size. With a
+/// size the program draws at that isn't the window's (`width` by `height`,
+/// or zeros), the framebuffer is that size, drawn into from here on if it
+/// wasn't yet, and goes to the window scaled: as large as fits, centered,
+/// with black around it.
+void perry_aux_before_swap(int width, int height) {
     swap.pending = false;
+    presented.width = width > 0 && height > 0 ? width : 0;
+    presented.height = width > 0 && height > 0 ? height : 0;
+    // The frame the program drew at that size in the window's corner is
+    // what activating copies in.
+    if (presented.width > 0 && !aux.context) activate();
     if (!aux.context || !active()) return;
     gl.GetIntegerv(GL_READ_BUFFER, &swap.read);
     swap.scissor = gl.IsEnabled(GL_SCISSOR_TEST);
     if (swap.scissor) gl.Disable(GL_SCISSOR_TEST);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, aux.framebuffer);
     gl.ReadBuffer(GL_COLOR_ATTACHMENT0);
+    int wide = 0, high = 0;
+    // The window's size is its surface's, asked while it is what's bound.
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.DrawBuffer(GL_BACK);
-    int width, height;
-    window_size(&width, &height);
-    gl.BlitFramebuffer(0, 0, aux.width, aux.height, 0, 0, aux.width, aux.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    if (width > 0 && height > 0 && (width != aux.width || height != aux.height)) allocate(width, height);
+    window_size(&wide, &high);
+    bool scaling = presented.width > 0 && wide > 0 && high > 0 && (wide != aux.width || high != aux.height) && bind_scaled(wide, high);
+    if (!scaling) {
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.DrawBuffer(GL_BACK);
+    }
+    if (scaling) {
+        float color[4] = {0, 0, 0, 0};
+        unsigned char mask[4] = {1, 1, 1, 1};
+        gl.GetFloatv(GL_COLOR_CLEAR_VALUE, color);
+        gl.GetBooleanv(GL_COLOR_WRITEMASK, mask);
+        gl.ColorMask(1, 1, 1, 1);
+        gl.ClearColor(0, 0, 0, 1);
+        gl.Clear(GL_COLOR_BUFFER_BIT);
+        gl.ClearColor(color[0], color[1], color[2], color[3]);
+        gl.ColorMask(mask[0], mask[1], mask[2], mask[3]);
+        // As large as fits: by the width, or by the height.
+        int across = wide, down = (int)((long long)wide * aux.height / aux.width);
+        if (down > high) {
+            down = high;
+            across = (int)((long long)high * aux.width / aux.height);
+        }
+        int left = (wide - across) / 2, bottom = (high - down) / 2;
+        gl.BlitFramebuffer(0, 0, aux.width, aux.height, left, bottom, left + across, bottom + down, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        // And that, the window's size, to the window.
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, scaled.framebuffer);
+        gl.ReadBuffer(GL_COLOR_ATTACHMENT0);
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.DrawBuffer(GL_BACK);
+        gl.BlitFramebuffer(0, 0, wide, high, 0, 0, wide, high, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    } else {
+        gl.BlitFramebuffer(0, 0, aux.width, aux.height, 0, 0, aux.width, aux.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    drawn_size(&wide, &high);
+    if (wide > 0 && high > 0 && (wide != aux.width || high != aux.height)) allocate(wide, high);
     swap.pending = true;
 }
 
