@@ -3,7 +3,9 @@
 // one raised in a method of the app's own, which a @finally block on the
 // way out sees, a rethrow from a @catch block, a clause for another class
 // that lets one by, a subclass of the app's caught by its own class and by
-// NSException's, and @catch (id).
+// NSException's, and @catch (id). And ones that unwind through the runtime's
+// and Foundation's own frames: an unrecognized selector, an observer that
+// raises from a KVO setter, and a method -[NSInvocation invoke] calls.
 
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -20,12 +22,29 @@ static void say(NSString *line) {
 @end
 
 @interface Thrower : NSObject
+@property (nonatomic) NSInteger level;
 - (void)raiseNamed:(NSString *)name;
 @end
 
 @implementation Thrower
 - (void)raiseNamed:(NSString *)name {
     [NSException raise:name format:@"raised by %@", NSStringFromClass(self.class)];
+}
+@end
+
+// A method Thrower doesn't have.
+@interface Thrower (Missing)
+- (void)vanish;
+@end
+
+// Raises when the level it observes goes past 1.
+@interface Watcher : NSObject
+@end
+
+@implementation Watcher
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if ([change[NSKeyValueChangeNewKey] integerValue] > 1)
+        [NSException raise:@"Overflow" format:@"%@ is %@", keyPath, change[NSKeyValueChangeNewKey]];
 }
 @end
 
@@ -125,6 +144,40 @@ static void classes(void) {
     }
 }
 
+static void runtime(void) {
+    Thrower *thrower = [Thrower new];
+    @try {
+        [thrower vanish];
+        say(@"unrecognized: not raised");
+    } @catch (NSException *exception) {
+        // The reason ends with the receiver's address.
+        say([NSString stringWithFormat:@"unrecognized: %@: %@", exception.name,
+             [exception.reason componentsSeparatedByString:@" sent to "].firstObject]);
+    }
+    Watcher *watcher = [Watcher new];
+    [thrower addObserver:watcher forKeyPath:@"level" options:NSKeyValueObservingOptionNew context:NULL];
+    thrower.level = 1;
+    @try {
+        thrower.level = 2;
+        say(@"observer: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"observer: %@: %@, level %ld", exception.name, exception.reason, (long)thrower.level]);
+    }
+    [thrower removeObserver:watcher forKeyPath:@"level"];
+    SEL selector = @selector(raiseNamed:);
+    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:[thrower methodSignatureForSelector:selector]];
+    invocation.target = thrower;
+    invocation.selector = selector;
+    NSString *name = @"Invoked";
+    [invocation setArgument:&name atIndex:2];
+    @try {
+        [invocation invoke];
+        say(@"invocation: not raised");
+    } @catch (NSException *exception) {
+        say([NSString stringWithFormat:@"invocation: %@: %@", exception.name, exception.reason]);
+    }
+}
+
 int main(void) {
     @autoreleasepool {
         raised();
@@ -133,6 +186,7 @@ int main(void) {
         method();
         rethrown();
         classes();
+        runtime();
         say(@"done");
     }
     return 0;
