@@ -1318,7 +1318,15 @@ open class NSBezierPath: NSObject {
     func appendArc(center: CGPoint, radius: CGFloat, startAngle: CGFloat, endAngle: CGFloat) {
         appendArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: false)
     }
-    @ObjCMethod("transformUsingAffineTransform:") func transform(using transform: NSObject?) {}
+    /// The path's points moved through an NSAffineTransform.
+    @ObjCMethod("transformUsingAffineTransform:")
+    func transform(using transform: NSObject?) {
+        guard let transform = transform?.as(NSAffineTransform.self), let path, let moved = CG.pathCreateMutable() else { return }
+        var matrix = transform.matrix
+        CG.pathAddPath(moved, &matrix, path)
+        CG.release(path)
+        self.path = moved
+    }
     @ObjCMethod("isEmpty") func isEmpty() -> Bool { path.map { CG.pathIsEmpty($0) } ?? true }
     @ObjCMethod("currentPoint") func currentPoint() -> CGPoint { path.map { CG.pathGetCurrentPoint($0) } ?? .zero }
     @ObjCMethod("bounds") func bounds() -> CGRect { path.map { CG.pathGetBoundingBox($0) } ?? .zero }
