@@ -10,7 +10,7 @@ import PerryObjCInterop
 /// Members in order, each retained, with an index by equality.
 final class OrderedSetStorage {
     private(set) var members: [id] = []
-    private var positions: [ObjectKey: Int] = [:]
+    private var positions = ObjectIndex()
     let enumeration = EnumerationBuffer()
 
     init(_ members: [id] = []) {
@@ -21,57 +21,78 @@ final class OrderedSetStorage {
         members.forEach { ObjC.release($0) }
     }
 
-    private func reindex() {
-        positions = Dictionary(members.enumerated().map { (ObjectKey(object: $1), $0) }, uniquingKeysWith: { first, _ in first })
-        enumeration.mutated()
+    /// The object's hash and the position of the member equal to it. The
+    /// app's -hash and -isEqual: run here, before any change, with the
+    /// index and the members copied (ObjectIndex).
+    private func find(_ object: id) -> (hash: UInt, position: Int?) {
+        let hash = ObjectIndex.hash(of: object)
+        let (positions, members) = (self.positions, self.members)
+        return (hash, positions.position(of: object, hash: hash, in: members))
     }
 
-    func index(of object: id) -> Int? { positions[ObjectKey(object: object)] }
+    func index(of object: id) -> Int? {
+        guard !members.isEmpty else { return nil }
+        return find(object).position
+    }
 
     @discardableResult
     func append(_ object: id) -> Bool { insert(object, at: members.count) }
 
     @discardableResult
     func insert(_ object: id, at index: Int) -> Bool {
-        guard positions[ObjectKey(object: object)] == nil else { return false }
+        let found = find(object)
+        guard found.position == nil else { return false }
+        positions.insert(found.hash, at: index)
         members.insert(ObjC.retain(object)!, at: index)
-        reindex()
+        enumeration.mutated()
         return true
     }
 
     func remove(at index: Int) {
+        positions.remove(at: index)
         let removed = members.remove(at: index)
-        reindex()
+        enumeration.mutated()
         ObjC.release(removed)
     }
 
     func replace(at index: Int, with object: id) {
-        if let existing = self.index(of: object), existing != index { return }
+        let found = find(object)
+        if let existing = found.position, existing != index { return }
         let old = members[index]
+        positions.replace(at: index, with: found.hash)
         members[index] = ObjC.retain(object)!
-        reindex()
+        enumeration.mutated()
         ObjC.release(old)
     }
 
     func removeAll() {
         let old = members
         members = []
-        reindex()
+        positions.removeAll()
+        enumeration.mutated()
         old.forEach { ObjC.release($0) }
     }
 
     func exchange(_ a: Int, _ b: Int) {
         members.swapAt(a, b)
-        reindex()
+        positions.swapAt(a, b)
+        enumeration.mutated()
     }
 
     /// The members made `replacement`, in its order, the first of equal
     /// ones kept; the new ones are retained before the old ones go.
     func setMembers(_ replacement: [id]) {
+        var kept: [id] = [], keptPositions = ObjectIndex()
+        for object in replacement {
+            let hash = ObjectIndex.hash(of: object)
+            guard keptPositions.position(of: object, hash: hash, in: kept) == nil else { continue }
+            keptPositions.append(hash)
+            kept.append(object)
+        }
         let old = members
-        var seen: Set<ObjectKey> = []
-        members = replacement.filter { seen.insert(ObjectKey(object: $0)).inserted }.map { ObjC.retain($0)! }
-        reindex()
+        members = kept.map { ObjC.retain($0)! }
+        positions = keptPositions
+        enumeration.mutated()
         old.forEach { ObjC.release($0) }
     }
 }
