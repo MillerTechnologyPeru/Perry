@@ -91,16 +91,17 @@ func describeStack(_ protocols: [Any]) -> StackDescription {
 private let verifyQueue = DispatchQueue(label: "com.apple.network.verify", attributes: .concurrent)
 
 /// Sets whether TLS asks the peer for a certificate: required, optional
-/// (macOS has no optional request: there it isn't required) or neither.
+/// (only visionOS has an optional request: elsewhere it isn't required) or
+/// neither.
 private func setPeerAuthentication(_ options: sec_protocol_options_t, required: Bool, optional: Bool) {
-    #if os(macOS)
-    sec_protocol_options_set_peer_authentication_required(options, required)
-    #else
+    #if os(visionOS)
     if optional {
         sec_protocol_options_set_peer_authentication_optional(options, true)
     } else {
         sec_protocol_options_set_peer_authentication_required(options, required)
     }
+    #else
+    sec_protocol_options_set_peer_authentication_required(options, required)
     #endif
 }
 
