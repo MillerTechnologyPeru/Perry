@@ -71,8 +71,7 @@ parse of the `.tbd` stubs; the scripts below make them repeatable.
   the SDKs only on Apple-branded computers and forbids using them
   separately from Xcode or altering a copy (2.5, 2.7). So `sdk-scan scan`
   reads the SDK where Xcode keeps it, through xcrun, and never from a copy
-  on a Linux host or in a Docker volume such as `Scripts/docker-darwin.sh`
-  makes. Everything after the scan reads only the manifests.
+  on a Linux host or in a Docker volume. Everything after the scan reads only the manifests.
 - **Stubs where needed, not everywhere.** A stub changes what a program
   sees: `respondsToSelector:`, `NSClassFromString` and a weak import's
   address all start answering yes, and code that checks for new API takes
