@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Perry's _AuthenticationServices_SwiftUI on a Mac with Xcode:
+# Builds Perry's _AuthenticationServices_SwiftUI with Xcode's SDKs:
 # Darwin/_AuthenticationServices_SwiftUI, the Swift framework
 # AuthenticationServices' SwiftUI API is in (AuthenticationServices'
 # cross-import overlay with SwiftUI). It is compiled for iOS arm64 as the module
@@ -16,14 +16,14 @@
 #   default output: .build/perry-swift-runtime
 set -eu
 cd "$(dirname "$0")/.."
-[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
+. Scripts/darwin-toolchain.sh
 
 root=$PWD
 out=${1:-.build/perry-swift-runtime}
 case $out in /*) ;; *) out=$root/$out ;; esac
 work=$root/.build/perry-swiftui
 products=$work/spm/out/Products/Release-iphoneos
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
+sdk=$(darwin_sdk iphoneos)
 target=arm64-apple-ios18.0
 packages=$root/Darwin/SwiftUI
 [ -e "$products/OpenSwiftUI.swiftmodule" ] && [ -e "$out/SwiftUI.framework/SwiftUI" ] || {
@@ -41,7 +41,7 @@ for module in OpenRenderBox/Sources/OpenRenderBoxShimsCxx/include/OpenRenderBox 
     set -- "$@" -Xcc "-fmodule-map-file=$packages/$module/module.modulemap" -Xcc "-I$packages/$module"
 done
 
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -module-name _AuthenticationServices_SwiftUI -parse-as-library \
+darwin_swiftc iphoneos -target "$target" -sdk "$sdk" -module-name _AuthenticationServices_SwiftUI -parse-as-library \
     -enable-library-evolution -swift-version 5 -O -suppress-warnings -package-name openswiftui \
     -I "$work/sdk" -I "$products" "$@" -Xcc -DOPENSWIFTUI_LINK_COREUI=0 \
     -emit-library $(find Darwin/_AuthenticationServices_SwiftUI/Sources -name '*.swift' | sort) \
