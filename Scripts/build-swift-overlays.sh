@@ -8,7 +8,8 @@
 # after.
 #
 # Both architectures get the overlays written from the SDKs' interfaces
-# (Darwin/<Module>/README.md), with Darwin's split names
+# (Darwin/<Module>/README.md), System from swift-system's sources
+# (Scripts/build-system.sh), and Darwin's split names
 # (libswift_DarwinFoundation1.dylib and the rest) as links to
 # libswiftDarwin.dylib, which defines all their symbols.
 #
@@ -119,6 +120,7 @@ if [ "$arch" = arm64 ]; then
         step "$module" Scripts/build-overlay.sh "$module" "$out"
     done
     link_darwin_parts
+    step System Scripts/build-system.sh "$out"
     step UIKit Scripts/build-overlay.sh UIKit "$out"
     step WebKit Scripts/build-webkit.sh "$out"
     for module in DeveloperToolsSupport "${frameworks[@]}"; do
@@ -137,6 +139,7 @@ else
         macos "$module" Scripts/build-overlay.sh "$module" "$out"
     done
     link_darwin_parts
+    macos System Scripts/build-system.sh "$out"
     for module in TabularData CryptoKit; do
         macos "$module" Scripts/build-framework.sh "$module" "$out"
     done
