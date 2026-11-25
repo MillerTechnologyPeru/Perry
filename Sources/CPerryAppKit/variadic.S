@@ -13,8 +13,14 @@
     .type \name, @function
     .p2align 4
 \name:
+    // Described to the unwinder, which an exception the Swift function
+    // raises passes through on its way to the caller's @catch.
+    .cfi_startproc
     pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
     movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
     subq $208, %rsp
     movq %rdi, 0(%rsp)
     movq %rsi, 8(%rsp)
@@ -38,7 +44,9 @@
     leaq 176(%rsp), %r9
     call \target@PLT
     leave
+    .cfi_def_cfa %rsp, 8
     ret
+    .cfi_endproc
     .size \name, . - \name
 .endm
 
