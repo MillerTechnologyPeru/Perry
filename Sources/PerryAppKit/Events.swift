@@ -32,7 +32,8 @@ enum Events {
         /// A mouse event's place, SDL's top-left window coordinates in the
         /// window's base coordinates.
         func location(_ x: Float, _ y: Float, in window: NSWindow?) -> CGPoint {
-            CGPoint(x: CGFloat(x), y: (window?.frame.height ?? 0) - CGFloat(y))
+            let point = window?.contentPoint(sdlX: CGFloat(x), sdlY: CGFloat(y)) ?? CGPoint(x: CGFloat(x), y: CGFloat(y))
+            return CGPoint(x: point.x, y: (window?.frame.height ?? 0) - point.y)
         }
         switch event {
         case .quit:
