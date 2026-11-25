@@ -166,6 +166,11 @@ jobs:
       - name: Build the overlays
         run: Scripts/build-swift-overlays.sh .build/${{ matrix.runtime }} ${{ matrix.arch }}
 
+      # The libraries not built from source here (the simulator's and
+      # Xcode's), in the job's summary. A report until none is left.
+      - name: Check the runtime's provenance
+        run: Scripts/check-runtime-provenance.sh --report .build/${{ matrix.runtime }}
+
       - name: Pack the overlays
         run: tar -czf ${{ matrix.runtime }}.tar.gz -C .build ${{ matrix.runtime }}
 
