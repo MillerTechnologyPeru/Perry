@@ -78,6 +78,7 @@ double carbon_now(void) {
     return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
 }
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Script Manager
 
 // One script, Roman, with English and the United States' conventions.
@@ -115,7 +116,9 @@ long carbon_GetScriptManagerVariable(int16_t selector) {
 
 int16_t carbon_IntlScript(void) CARBON_SYMBOL(IntlScript);
 int16_t carbon_IntlScript(void) { return 0; }
+#endif  // PERRY_CARBON_SWIFT
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Dates and times
 
 // Seconds since the start of 1904, in local time, as the Mac's clock counts.
@@ -324,6 +327,7 @@ void carbon_Microseconds(UnsignedWide *microseconds) {
     microseconds->hi = (int32_t)(now >> 32);
     microseconds->lo = (int32_t)(uint32_t)now;
 }
+#endif  // PERRY_CARBON_SWIFT
 
 // Durations: positive milliseconds, negative microseconds. AbsoluteTime
 // counts nanoseconds here, as mach_absolute_time does.
@@ -353,6 +357,7 @@ int32_t carbon_IncrementAtomic(int32_t *value) { return __atomic_fetch_add(value
 int32_t carbon_DecrementAtomic(int32_t *value) CARBON_SYMBOL(DecrementAtomic);
 int32_t carbon_DecrementAtomic(int32_t *value) { return __atomic_fetch_sub(value, 1, __ATOMIC_SEQ_CST); }
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Extended numbers
 
 // SANE's 80-bit extended, as the Sound Manager's sample rates and AIFF
@@ -404,6 +409,7 @@ double carbon_x80tod(const extended80 *value) {
     double result = mantissa == 0 ? 0 : ldexp((double)mantissa, exponent - 16383 - 63);
     return value->exp & 0x8000 ? -result : result;
 }
+#endif  // PERRY_CARBON_SWIFT
 
 // MARK: - Multiprocessing Services
 
@@ -430,6 +436,7 @@ OSStatus carbon_MPDelayUntil(const uint64_t *deadline) {
     return noErr;
 }
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 // MARK: - Strings
 
 void carbon_c2pstrcpy(unsigned char *pascal, const char *c) CARBON_SYMBOL(c2pstrcpy);
@@ -476,6 +483,7 @@ void carbon_StringToNum(ConstStr255Param text, long *number) {
     }
     *number = strtol(digits, NULL, 10);
 }
+#endif  // PERRY_CARBON_SWIFT
 
 // MARK: - Memory
 
@@ -488,8 +496,10 @@ void carbon_BlockMove(const void *source, void *destination, long size) {
 void carbon_BlockMoveData(const void *source, void *destination, long size) CARBON_SYMBOL(BlockMoveData);
 void carbon_BlockMoveData(const void *source, void *destination, long size) { carbon_BlockMove(source, destination, size); }
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 int32_t carbon_Fix2Long(int32_t value) CARBON_SYMBOL(Fix2Long);
 int32_t carbon_Fix2Long(int32_t value) { return (value + 0x8000) >> 16; }
+#endif  // PERRY_CARBON_SWIFT
 
 // MARK: - UPPs
 
@@ -655,6 +665,7 @@ void carbon_SysBeep(int16_t duration) {
 
 // MARK: - QuickDraw globals
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 static uint32_t random_seed = 1;
 
 void carbon_SetQDGlobalsRandomSeed(int32_t seed) CARBON_SYMBOL(SetQDGlobalsRandomSeed);
@@ -667,6 +678,7 @@ int16_t carbon_Random(void) {
     int16_t value = (int16_t)(random_seed & 0xffff);
     return value == -32768 ? 0 : value;
 }
+#endif  // PERRY_CARBON_SWIFT
 
 // The five patterns, eight rows of bits each.
 #define PATTERN(name, a, b) \
