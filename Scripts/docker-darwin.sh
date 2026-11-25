@@ -8,7 +8,8 @@
 # build (perry-xcode-27B52 say), mounted read-only at /Developer: the
 # iPhoneOS, iPhoneSimulator and MacOSX SDKs, their platforms'
 # Developer/Library (XCTest), and the toolchain's usr/lib/swift and
-# usr/lib/clang. In the copy, the SDKs' .tbd stubs lose the arm64e.x1
+# usr/lib/clang (with compiler-rt's libclang_rt.<os>.a, which links
+# availability checks). In the copy, the SDKs' .tbd stubs lose the arm64e.x1
 # targets Xcode 27 lists beside arm64e, which LLVM's ld64.lld rejects
 # (each one's arm64e target, which it links arm64 against, stays).
 # Clang's module cache is kept in the volume perry-darwin-module-cache.
@@ -28,14 +29,18 @@ image=${PERRY_IMAGE:-perry-dev}
 developer=${DEVELOPER_DIR:-$(xcode-select -p)}
 build=$(/usr/libexec/PlistBuddy -c 'Print :ProductBuildVersion' "$developer/../version.plist")
 volume=perry-xcode-$build
+# What a complete copy holds: a new name when the copy changes, so older
+# volumes are made again.
+marker=.perry-copy-2
 case $(uname -m) in
     x86_64) platform=linux/amd64 ;;
     *) platform=linux/arm64 ;;
 esac
 
-if ! docker run --rm -v "$volume:/Developer:ro" "$image" test -e /Developer/.perry-complete 2>/dev/null; then
+if ! docker run --rm -v "$volume:/Developer:ro" "$image" test -e /Developer/$marker 2>/dev/null; then
     echo "copying $developer ($build) into the volume $volume"
-    docker volume rm -f "$volume" >/dev/null
+    # A volume in use stays, and is written over.
+    docker volume rm "$volume" >/dev/null 2>&1 || true
     toolchain=Toolchains/XcodeDefault.xctoolchain/usr/lib
     parts=()
     for sdk in iPhoneOS iPhoneSimulator MacOSX; do
@@ -45,7 +50,7 @@ if ! docker run --rm -v "$volume:/Developer:ro" "$image" test -e /Developer/.per
     # Only the toolchain's libraries for these platforms.
     COPYFILE_DISABLE=1 tar --no-xattrs -cf - -C "$developer" \
         --exclude "$toolchain/swift/appletv*" --exclude "$toolchain/swift/watch*" --exclude "$toolchain/swift/xr*" \
-        --exclude "$toolchain/swift-5.*" --exclude '*.a' \
+        --exclude "$toolchain/swift-5.*" \
         "${parts[@]}" "$toolchain/swift" "$toolchain/clang" |
         docker run --rm -i --platform "$platform" -v "$volume:/Developer" "$image" sh -euc '
             tar -xf - -C /Developer --warning=no-unknown-keyword
@@ -65,7 +70,7 @@ for root, dirs, files in os.walk(sys.argv[1]):
         with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write(text)
 EOF
-            touch /Developer/.perry-complete'
+            touch "/Developer/$1"' sh "$marker"
 fi
 
 env_args=()
