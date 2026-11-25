@@ -1,0 +1,37 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos, arm64e-macos ]
+install-name:    '/System/Library/Frameworks/Widget.framework/Versions/A/Widget'
+current-version: 12.3
+reexported-libraries:
+  - targets:         [ x86_64-macos, arm64e-macos ]
+    libraries:       [ '/System/Library/PrivateFrameworks/WidgetCore.framework/Versions/A/WidgetCore' ]
+exports:
+  - targets:         [ x86_64-macos, arm64e-macos ]
+    symbols:         [ '$ld$hide$os10.9$_OBJC_CLASS_$_Widget', _WidgetCount, _WidgetDidChangeNotification,
+                       '_$s6Widget5ScaleV8rawValueSivg' ]
+    objc-classes:    [ Widget, _WidgetPrivate ]
+    objc-ivars:      [ Widget._count ]
+  - targets:         [ arm64e-macos ]
+    symbols:         [ _WidgetArm64Only ]
+    weak-symbols:    [ _WidgetWeak ]
+...
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos, arm64e-macos ]
+install-name:    '/System/Library/PrivateFrameworks/WidgetCore.framework/Versions/A/WidgetCore'
+parent-umbrella:
+  - targets:         [ x86_64-macos, arm64e-macos ]
+    umbrella:        Widget
+exports:
+  - targets:         [ x86_64-macos, arm64e-macos ]
+    objc-classes:    [ WidgetBase ]
+...
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos ]
+install-name:    '/usr/lib/libunrelated.dylib'
+exports:
+  - targets:         [ x86_64-macos ]
+    symbols:         [ _unrelated ]
+...

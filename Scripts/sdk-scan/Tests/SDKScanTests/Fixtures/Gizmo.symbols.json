@@ -1,0 +1,15 @@
+{
+ "metadata": {"formatVersion": {"major": 0, "minor": 6, "patch": 0}, "generator": "hand-written for sdk-scan's tests"},
+ "module": {"name": "Gizmo", "platform": {"operatingSystem": {"name": "macosx"}}},
+ "relationships": [],
+ "symbols": [
+  {"kind": {"identifier": "swift.struct"}, "identifier": {"precise": "s:5Gizmo5ScaleV"}, "pathComponents": ["Scale"],
+   "declarationFragments": [{"kind": "keyword", "spelling": "struct"}, {"kind": "text", "spelling": " "}, {"kind": "identifier", "spelling": "Scale"}],
+   "availability": [{"domain": "macOS", "introduced": {"major": 14}}]},
+  {"kind": {"identifier": "swift.property"}, "identifier": {"precise": "s:5Gizmo5ScaleV8rawValueSivp"}, "pathComponents": ["Scale", "rawValue"],
+   "declarationFragments": [{"kind": "keyword", "spelling": "var"}, {"kind": "text", "spelling": " rawValue: "}, {"kind": "typeIdentifier", "spelling": "Int"}]},
+  {"kind": {"identifier": "swift.method"}, "identifier": {"precise": "s:SQsE2neoiySbx_xtFZ::SYNTHESIZED::s:5Gizmo5ScaleV"}, "pathComponents": ["Scale", "!=(_:_:)"]},
+  {"kind": {"identifier": "swift.class"}, "identifier": {"precise": "c:objc(cs)GZGizmo"}, "pathComponents": ["GZGizmo"]},
+  {"kind": {"identifier": "swift.func"}, "identifier": {"precise": "s:5Gizmo8internalyyF"}, "pathComponents": ["internal()"], "spi": true}
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "metadata": {"formatVersion": {"major": 0, "minor": 6, "patch": 0}, "generator": "hand-written for sdk-scan's tests"},
+ "module": {"name": "Gizmo", "platform": {"operatingSystem": {"name": "macosx"}}},
+ "relationships": [],
+ "symbols": [
+  {"kind": {"identifier": "swift.method"}, "identifier": {"precise": "s:10Foundation4DataV5GizmoE6gizmoSiyF"}, "pathComponents": ["Data", "gizmo()"],
+   "declarationFragments": [{"kind": "keyword", "spelling": "func"}, {"kind": "text", "spelling": " gizmo() -> Int"}],
+   "swiftExtension": {"extendedModule": "Foundation"}}
+ ]
+}
