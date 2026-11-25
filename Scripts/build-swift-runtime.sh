@@ -162,50 +162,55 @@ fi
 ninja -C "$build/llvm" -j "$jobs" llvm-tblgen clang-resource-headers intrinsics_gen clang-tablegen-targets
 
 # The standard library: the flags utils/build-script gives a release build of
-# it, for this one target.
+# it, for this one target. arm64's code is for apple-a7, plain Armv8.0, as
+# Scripts/darwin-toolchain.sh builds the overlays (Scripts/check-armv8.sh).
+# Configured each time, so that a changed flag reaches an existing build.
 c_flags="-DSWIFT_THREADING_NO_DIRECT_TSD=1"
-[ "$arch" = arm64 ] && c_flags="$c_flags;-DSWIFT_ISA_MASK_OVERRIDE=0x007ffffffffffff8ULL"
-if [ ! -f "$build/swift/build.ninja" ]; then
-    cmake -G Ninja -S "$work/swift" -B "$build/swift" ${platform_cmake[@]+"${platform_cmake[@]}"} \
-        -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_Swift_COMPILER="$swiftc" \
-        -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=FALSE -DCMAKE_INSTALL_PREFIX=/usr \
-        -DLLVM_DIR="$build/llvm/lib/cmake/llvm" -DClang_DIR="$build/llvm/lib/cmake/clang" \
-        -DSWIFT_PATH_TO_CMARK_SOURCE="$work/cmark" \
-        -DSWIFT_PATH_TO_STRING_PROCESSING_SOURCE="$work/swift-experimental-string-processing" \
-        -DSWIFT_HOST_VARIANT=macosx -DSWIFT_HOST_VARIANT_SDK=OSX -DSWIFT_HOST_VARIANT_ARCH="$host_arch" \
-        -DSWIFT_HOST_TRIPLE="$host_arch-apple-macosx13.0" -DSWIFT_USE_LINKER= \
-        -DSWIFT_SDKS="$sdk_name" -DSWIFT_DARWIN_SUPPORTED_ARCHS="$arch" \
-        -DSWIFT_DARWIN_DEPLOYMENT_VERSION_OSX=13.0 -DSWIFT_DARWIN_DEPLOYMENT_VERSION_IOS=18.0 \
-        -DSWIFT_DARWIN_DEPLOYMENT_VERSION_"$sdk_name"="$deployment" \
-        -DSWIFT_NATIVE_LLVM_TOOLS_PATH="$tools" -DSWIFT_NATIVE_CLANG_TOOLS_PATH="$tools" \
-        -DSWIFT_NATIVE_SWIFT_TOOLS_PATH="$(dirname "$swiftc")" \
-        -DSWIFT_LIPO="$lipo" -DSWIFT_DARWIN_XCRUN_TOOLCHAIN=default \
-        -DSWIFT_INCLUDE_TOOLS=FALSE -DSWIFT_INCLUDE_TESTS=FALSE -DSWIFT_INCLUDE_DOCS=FALSE \
-        -DSWIFT_INCLUDE_APINOTES=FALSE -DSWIFT_BUILD_EXAMPLES=FALSE -DSWIFT_BUILD_LIBEXEC=FALSE \
-        -DSWIFT_BUILD_REMOTE_MIRROR=FALSE -DSWIFT_BUILD_CLANG_OVERLAYS=TRUE \
-        -DSWIFT_BUILD_DYNAMIC_STDLIB=TRUE -DSWIFT_BUILD_STATIC_STDLIB=FALSE \
-        -DSWIFT_BUILD_DYNAMIC_SDK_OVERLAY=FALSE -DSWIFT_BUILD_STATIC_SDK_OVERLAY=FALSE \
-        -DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=FALSE -DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING=FALSE \
-        -DSWIFT_ENABLE_EXPERIMENTAL_DIFFERENTIABLE_PROGRAMMING=TRUE -DSWIFT_ENABLE_EXPERIMENTAL_CONCURRENCY=TRUE \
-        -DSWIFT_ENABLE_EXPERIMENTAL_CXX_INTEROP=TRUE -DSWIFT_ENABLE_CXX_INTEROP_SWIFT_BRIDGING_HEADER=TRUE \
-        -DSWIFT_ENABLE_EXPERIMENTAL_DISTRIBUTED=TRUE -DSWIFT_ENABLE_BACKTRACING=TRUE \
-        -DSWIFT_ENABLE_EXPERIMENTAL_OBSERVATION=TRUE -DSWIFT_ENABLE_SYNCHRONIZATION=TRUE \
-        -DSWIFT_ENABLE_VOLATILE=TRUE -DSWIFT_ENABLE_RUNTIME_MODULE=TRUE \
-        -DSWIFT_ENABLE_EXPERIMENTAL_STRING_PROCESSING=TRUE -DSWIFT_ENABLE_NEW_RUNTIME_BUILD=FALSE \
-        -DSWIFT_STDLIB_BUILD_TYPE=Release -DSWIFT_STDLIB_ASSERTIONS=FALSE \
-        -DSWIFT_STDLIB_ENABLE_STDLIBCORE_EXCLUSIVITY_CHECKING=FALSE \
-        -DSWIFT_STDLIB_BUILD_PRIVATE=TRUE -DSWIFT_STDLIB_ENABLE_UNICODE_DATA=TRUE \
-        -DSWIFT_STDLIB_STATIC_PRINT=FALSE -DSWIFT_FREESTANDING_IS_DARWIN=FALSE \
-        -DSWIFT_STDLIB_SUPPORT_BACK_DEPLOYMENT=TRUE -DSWIFT_STDLIB_OVERRIDABLE_RETAIN_RELEASE=TRUE \
-        -DSWIFT_ENABLE_DISPATCH=TRUE -DSWIFT_IMPLICIT_CONCURRENCY_IMPORT=TRUE \
-        -DSWIFT_STDLIB_EXTRA_C_COMPILE_FLAGS="$c_flags" \
-        "-DSWIFT_STDLIB_EXTRA_SWIFT_COMPILE_FLAGS=-Xcc;-DSWIFT_THREADING_NO_DIRECT_TSD=1" \
-        -DPKG_CONFIG_EXECUTABLE=/usr/bin/false
+swift_flags="-Xcc;-DSWIFT_THREADING_NO_DIRECT_TSD=1"
+if [ "$arch" = arm64 ]; then
+    c_flags="$c_flags;-DSWIFT_ISA_MASK_OVERRIDE=0x007ffffffffffff8ULL;-mcpu=apple-a7"
+    swift_flags="$swift_flags;-target-cpu;apple-a7"
 fi
+cmake -G Ninja -S "$work/swift" -B "$build/swift" ${platform_cmake[@]+"${platform_cmake[@]}"} \
+    -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_Swift_COMPILER="$swiftc" \
+    -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=FALSE -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLLVM_DIR="$build/llvm/lib/cmake/llvm" -DClang_DIR="$build/llvm/lib/cmake/clang" \
+    -DSWIFT_PATH_TO_CMARK_SOURCE="$work/cmark" \
+    -DSWIFT_PATH_TO_STRING_PROCESSING_SOURCE="$work/swift-experimental-string-processing" \
+    -DSWIFT_HOST_VARIANT=macosx -DSWIFT_HOST_VARIANT_SDK=OSX -DSWIFT_HOST_VARIANT_ARCH="$host_arch" \
+    -DSWIFT_HOST_TRIPLE="$host_arch-apple-macosx13.0" -DSWIFT_USE_LINKER= \
+    -DSWIFT_SDKS="$sdk_name" -DSWIFT_DARWIN_SUPPORTED_ARCHS="$arch" \
+    -DSWIFT_DARWIN_DEPLOYMENT_VERSION_OSX=13.0 -DSWIFT_DARWIN_DEPLOYMENT_VERSION_IOS=18.0 \
+    -DSWIFT_DARWIN_DEPLOYMENT_VERSION_"$sdk_name"="$deployment" \
+    -DSWIFT_NATIVE_LLVM_TOOLS_PATH="$tools" -DSWIFT_NATIVE_CLANG_TOOLS_PATH="$tools" \
+    -DSWIFT_NATIVE_SWIFT_TOOLS_PATH="$(dirname "$swiftc")" \
+    -DSWIFT_LIPO="$lipo" -DSWIFT_DARWIN_XCRUN_TOOLCHAIN=default \
+    -DSWIFT_INCLUDE_TOOLS=FALSE -DSWIFT_INCLUDE_TESTS=FALSE -DSWIFT_INCLUDE_DOCS=FALSE \
+    -DSWIFT_INCLUDE_APINOTES=FALSE -DSWIFT_BUILD_EXAMPLES=FALSE -DSWIFT_BUILD_LIBEXEC=FALSE \
+    -DSWIFT_BUILD_REMOTE_MIRROR=FALSE -DSWIFT_BUILD_CLANG_OVERLAYS=TRUE \
+    -DSWIFT_BUILD_DYNAMIC_STDLIB=TRUE -DSWIFT_BUILD_STATIC_STDLIB=FALSE \
+    -DSWIFT_BUILD_DYNAMIC_SDK_OVERLAY=FALSE -DSWIFT_BUILD_STATIC_SDK_OVERLAY=FALSE \
+    -DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=FALSE -DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING=FALSE \
+    -DSWIFT_ENABLE_EXPERIMENTAL_DIFFERENTIABLE_PROGRAMMING=TRUE -DSWIFT_ENABLE_EXPERIMENTAL_CONCURRENCY=TRUE \
+    -DSWIFT_ENABLE_EXPERIMENTAL_CXX_INTEROP=TRUE -DSWIFT_ENABLE_CXX_INTEROP_SWIFT_BRIDGING_HEADER=TRUE \
+    -DSWIFT_ENABLE_EXPERIMENTAL_DISTRIBUTED=TRUE -DSWIFT_ENABLE_BACKTRACING=TRUE \
+    -DSWIFT_ENABLE_EXPERIMENTAL_OBSERVATION=TRUE -DSWIFT_ENABLE_SYNCHRONIZATION=TRUE \
+    -DSWIFT_ENABLE_VOLATILE=TRUE -DSWIFT_ENABLE_RUNTIME_MODULE=TRUE \
+    -DSWIFT_ENABLE_EXPERIMENTAL_STRING_PROCESSING=TRUE -DSWIFT_ENABLE_NEW_RUNTIME_BUILD=FALSE \
+    -DSWIFT_STDLIB_BUILD_TYPE=Release -DSWIFT_STDLIB_ASSERTIONS=FALSE \
+    -DSWIFT_STDLIB_ENABLE_STDLIBCORE_EXCLUSIVITY_CHECKING=FALSE \
+    -DSWIFT_STDLIB_BUILD_PRIVATE=TRUE -DSWIFT_STDLIB_ENABLE_UNICODE_DATA=TRUE \
+    -DSWIFT_STDLIB_STATIC_PRINT=FALSE -DSWIFT_FREESTANDING_IS_DARWIN=FALSE \
+    -DSWIFT_STDLIB_SUPPORT_BACK_DEPLOYMENT=TRUE -DSWIFT_STDLIB_OVERRIDABLE_RETAIN_RELEASE=TRUE \
+    -DSWIFT_ENABLE_DISPATCH=TRUE -DSWIFT_IMPLICIT_CONCURRENCY_IMPORT=TRUE \
+    -DSWIFT_STDLIB_EXTRA_C_COMPILE_FLAGS="$c_flags" \
+    -DSWIFT_STDLIB_EXTRA_SWIFT_COMPILE_FLAGS="$swift_flags" \
+    -DPKG_CONFIG_EXECUTABLE=/usr/bin/false
 ninja -C "$build/swift" -j "$jobs" "swift-stdlib-$os"
 
 # libswiftDemangle: lib/Demangling and lib/SwiftDemangle, as the compiler's
-# build links them (their CMakeLists.txt), over LLVM's headers.
+# build links them (their CMakeLists.txt), over LLVM's headers. Compiled
+# each time (a minute), so that changed flags reach them.
 demangle=$build/demangle
 objects=()
 for source in Demangling/{Demangler,Context,ManglingUtils,NodeDumper,NodePrinter,OldDemangler,OldRemangler,Punycode,Remangler,DemanglingErrorHandling,CrashReporter}.cpp \
@@ -213,14 +218,12 @@ for source in Demangling/{Demangler,Context,ManglingUtils,NodeDumper,NodePrinter
     object=$demangle/${source%.cpp}.o
     source=$work/swift/lib/$source
     mkdir -p "$(dirname "$object")"
-    if [ ! -f "$object" ] || [ "$source" -nt "$object" ]; then
-        darwin_clangxx "$os" -target "$triple" -isysroot "$(darwin_sdk "$os")" \
-            -std=c++17 -O2 -fPIC -fno-exceptions -fno-rtti -DNDEBUG -DLLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING=1 \
-            -DSWIFT_SUPPORT_OLD_MANGLING=1 -DSWIFT_STDLIB_HAS_TYPE_PRINTING=1 \
-            -I "$work/swift/include" -I "$build/swift/include" \
-            -I "$work/llvm-project/llvm/include" -I "$build/llvm/include" \
-            -c "$source" -o "$object"
-    fi
+    darwin_clangxx "$os" -target "$triple" -isysroot "$(darwin_sdk "$os")" \
+        -std=c++17 -O2 -fPIC -fno-exceptions -fno-rtti -DNDEBUG -DLLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING=1 \
+        -DSWIFT_SUPPORT_OLD_MANGLING=1 -DSWIFT_STDLIB_HAS_TYPE_PRINTING=1 \
+        -I "$work/swift/include" -I "$build/swift/include" \
+        -I "$work/llvm-project/llvm/include" -I "$build/llvm/include" \
+        -c "$source" -o "$object"
     objects+=("$object")
 done
 darwin_clangxx "$os" -target "$triple" -isysroot "$(darwin_sdk "$os")" \
