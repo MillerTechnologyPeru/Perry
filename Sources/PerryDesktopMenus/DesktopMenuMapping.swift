@@ -46,12 +46,25 @@ public struct DesktopMenuMapping: Sendable {
             if menus.isEmpty { item.label = DBusMenuLabel(title: appName).rawValue }
             menus.append(item)
         }
-        // Items that left the menu let go of their identifiers.
+        forgetItems(notIn: seen)
+        return .root(menus)
+    }
+
+    /// A menu of its own, such as a status item's: the root, whose children
+    /// are the menu's items, as it shows them when it opens.
+    public mutating func menu(forItems items: [DesktopMenuEntry]) -> DBusMenuItem {
+        var seen: Set<UInt> = []
+        let children = items.map { item(for: $0, seen: &seen) }
+        forgetItems(notIn: seen)
+        return .root(children)
+    }
+
+    /// Items that left the menu let go of their identifiers.
+    private mutating func forgetItems(notIn seen: Set<UInt>) {
         for (key, id) in identifiers where !seen.contains(key) {
             identifiers[key] = nil
             keys[id] = nil
         }
-        return .root(menus)
     }
 
     /// The key of the item an identifier was given to, while it is in the

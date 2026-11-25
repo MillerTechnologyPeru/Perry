@@ -60,6 +60,33 @@ struct DesktopMenuMappingTests {
         #expect(app.children[0].type == .standard)
     }
 
+    @Test("A menu of its own, as a status item's: every item, loose ones too, as the root's children")
+    func menuOfItems() throws {
+        var mapping = DesktopMenuMapping(commandKey: .super)
+        let items = [
+            DesktopMenuEntry(key: Keys.new, title: "New Note", keyEquivalent: "n"),
+            DesktopMenuEntry(key: Keys.appSeparator, isSeparator: true, isEnabled: false),
+            DesktopMenuEntry(key: Keys.recent, title: "Recent", submenu: [
+                DesktopMenuEntry(key: Keys.recentItem, title: "notes.txt"),
+            ], submenuTitle: "Recent"),
+            DesktopMenuEntry(key: Keys.quit, title: "Quit Probe", keyEquivalent: "q"),
+        ]
+        let root = mapping.menu(forItems: items)
+        #expect(root.id == DBusMenuItem.rootID)
+        #expect(root.children.map(\.title) == ["New Note", "", "Recent", "Quit Probe"])
+        #expect(root.children[1].type == .separator)
+        #expect(root.children[2].isSubmenu)
+        #expect(root.children[2].children.map(\.title) == ["notes.txt"])
+        #expect(root.children[0].shortcut?.glyphs == "⌘N")
+        let quit = try #require(mapping.identifier(for: Keys.quit))
+        #expect(mapping.key(for: quit) == Keys.quit)
+
+        // An item that leaves lets go of its identifier.
+        _ = mapping.menu(forItems: Array(items.prefix(3)))
+        #expect(mapping.identifier(for: Keys.quit) == nil)
+        #expect(mapping.identifier(for: Keys.new) == root.children[0].id)
+    }
+
     @Test("Identifiers: one per item, nonzero, and the same from one mapping to the next")
     func stableIdentifiers() throws {
         var mapping = DesktopMenuMapping(commandKey: .super)
