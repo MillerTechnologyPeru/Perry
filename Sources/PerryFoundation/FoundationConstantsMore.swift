@@ -365,3 +365,11 @@ enum FoundationKeysMore {
 enum BundleResourceRequestPriorities {
     static let NSBundleResourceRequestLoadingPriorityUrgent: Double = 1.7976931348623157e308
 }
+
+/// NSConnection's run loop mode for replies, and NSDebugEnabled, the BOOL
+/// Foundation's debugging checks read, off.
+@ObjCConstants
+enum DistributedObjectsConstants {
+    static let NSConnectionReplyMode = "NSConnectionReplyMode"
+    static let NSDebugEnabled: Int64 = 0
+}
