@@ -3,7 +3,7 @@
 # .build/armv7/bin beside perry32, which finds providers there.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-llvm=$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)
+llvm=${PERRY_LLVM_BIN:-$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)}
 sdk=${PERRY_ARMV7_SDK:-$(ls -d "$root"/.toolchains/swift-*-armv7-sdk/*/debian-* | head -1)}
 out=$root/.build/armv7
 mkdir -p "$out/bin" "$out/obj"
@@ -15,8 +15,8 @@ cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi
   -I$root/Sources/PerrySystem/include -I$root/Sources/PerryInterface/include"
 
 objects=""
-for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c \
-    pthread.c process.c mach.c sockets.c math.c dyld.c compat.c callbacks.c compiler.c stdcxx.c aio.c dispatch.c commoncryptor.c commondigest.c isa.c kqueue.c xpc.c keymgr.c; do
+# Every C source, as SwiftPM builds the target, and the armv7 thunks.
+for name in thunks_arm.S $(cd "$root/Sources/PerrySystem" && ls *.c); do
     object=$out/obj/system-$name.o
     # shellcheck disable=SC2086
     "$llvm/clang" $cflags -c "$root/Sources/PerrySystem/$name" -o "$object"
@@ -24,5 +24,5 @@ for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c b
 done
 # shellcheck disable=SC2086
 "$llvm/clang" --target=armv7-linux-gnueabihf --sysroot="$sdk" -fuse-ld=lld -shared $objects \
-    -o "$out/bin/libPerrySystem.so" -lm
+    -o "$out/bin/libPerrySystem.so" -lm -Wl,-z,defs
 echo "$out/bin/libPerrySystem.so"
