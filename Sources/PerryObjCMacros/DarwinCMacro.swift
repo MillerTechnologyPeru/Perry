@@ -137,10 +137,10 @@ public struct DarwinCMacro: PeerMacro {
     // MARK: - ppc
 
     /// How 32-bit ppc Darwin passes a converted type, or one passed the
-    /// same as Linux's elsewhere (CFRange): a double or float in a
-    /// floating-point register, which also takes one or two words of the
-    /// general registers; a 64-bit integer or a structure in its words. On
-    /// ppc a CGFloat is a float.
+    /// same as Linux's elsewhere (CFRange, QuickDraw's Point and Rect): a
+    /// double or float in a floating-point register, which also takes one or
+    /// two words of the general registers; a 64-bit integer or a structure
+    /// in its words. On ppc a CGFloat is a float.
     enum PPCKind {
         case double, float, words(Int), pair
     }
@@ -153,11 +153,16 @@ public struct DarwinCMacro: PeerMacro {
         "CLLocationCoordinate2D": .words(4), "MKCoordinateSpan": .words(4), "MKCoordinateRegion": .words(8),
         "MKMapPoint": .words(4), "MKMapSize": .words(4), "MKMapRect": .words(8),
         "CFRange": .words(2), "PerryCFRange": .words(2),
+        // QuickDraw's, which Carbon passes by value: two and four 16-bit
+        // coordinates.
+        "Point": .words(1), "Rect": .words(2),
     ]
 
     /// The encodings of ppcKinds' structures that aren't converted types, for
     /// the loader's moves past the registers.
-    static let ppcEncodings: [String: String] = ["CFRange": "{CFRange=ll}", "PerryCFRange": "{CFRange=ll}"]
+    static let ppcEncodings: [String: String] = [
+        "CFRange": "{CFRange=ll}", "PerryCFRange": "{CFRange=ll}", "Point": "{Point=ss}", "Rect": "{Rect=ssss}",
+    ]
 
     /// __darwin_<name> for ppc, with parameters where Darwin leaves its
     /// arguments, or nil when they go past r10 or f8.
