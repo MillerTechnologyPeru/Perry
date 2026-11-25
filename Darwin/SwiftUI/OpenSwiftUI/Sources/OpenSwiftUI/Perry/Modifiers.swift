@@ -146,6 +146,11 @@ extension View {
         accessibility()
     }
 
+    /// iOS 13's spelling of accessibilityHidden(_:).
+    nonisolated public func accessibility(hidden: Bool) -> ModifiedContent<Self, AccessibilityAttachmentModifier> {
+        accessibilityHidden(hidden)
+    }
+
     /// Adds an accessibility scroll action to the view.
     nonisolated public func accessibilityScrollAction(_ handler: @escaping (Edge) -> Void) -> ModifiedContent<Self, AccessibilityAttachmentModifier> {
         accessibility()
@@ -225,6 +230,11 @@ extension ModifiedContent where Modifier == AccessibilityAttachmentModifier {
     /// features.
     nonisolated public func accessibilityHidden(_ hidden: Bool) -> ModifiedContent<Content, Modifier> {
         self
+    }
+
+    /// iOS 13's spelling of accessibilityHidden(_:).
+    nonisolated public func accessibility(hidden: Bool) -> ModifiedContent<Content, Modifier> {
+        accessibilityHidden(hidden)
     }
 }
 

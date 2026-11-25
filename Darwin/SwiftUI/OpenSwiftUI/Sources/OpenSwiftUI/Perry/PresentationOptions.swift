@@ -210,6 +210,19 @@ extension View {
         )
     }
 
+    /// Presents a confirmation dialog with a message, titled by a
+    /// localized string key.
+    nonisolated public func confirmationDialog<A, M>(
+        _ titleKey: LocalizedStringKey,
+        isPresented: Binding<Bool>,
+        titleVisibility: Visibility = .automatic,
+        @ViewBuilder actions: () -> A,
+        @ViewBuilder message: () -> M
+    ) -> some View where A: View, M: View {
+        confirmationDialog(Text(titleKey), isPresented: isPresented, titleVisibility: titleVisibility,
+                           actions: actions, message: message)
+    }
+
     /// Presents a confirmation dialog with a message, its actions and
     /// message made from the given data: only while there is data.
     nonisolated public func confirmationDialog<A, M, T>(
