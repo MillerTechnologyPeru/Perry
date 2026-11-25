@@ -2,10 +2,13 @@ import Glibc
 
 // The keychain API from before SecItem: identity searches, generic and
 // internet passwords, the default keychain and its callbacks. There are no
-// keychain files here, so every search ends at once and finds nothing, as
-// it does on a Mac with an empty keychain; there is no default keychain,
-// and items can't be added (programs then keep what they would have stored
-// for the session, or ask again).
+// keychain files here, so identity searches and the password find
+// functions end at once and find nothing, as they do on a Mac with an empty
+// keychain; there is no default keychain, and items can't be added this way
+// (programs then keep what they would have stored for the session, or ask
+// again). Attribute searches (KeychainSearch.swift) look through the items
+// SecItemAdd keeps, and the items they find can be read, changed and
+// deleted here.
 
 private let itemNotFound: Int32 = -25300        // errSecItemNotFound
 private let notAvailable: Int32 = -25291        // errSecNotAvailable
@@ -99,15 +102,27 @@ public func SecKeychainAddInternetPassword(_ keychain: UnsafeMutableRawPointer?,
 }
 
 @c(_SecKeychainItemDelete)
-public func SecKeychainItemDelete(_ item: UnsafeMutableRawPointer?) -> Int32 { invalidItem }
+public func SecKeychainItemDelete(_ item: UnsafeMutableRawPointer?) -> Int32 { LegacyItems.delete(item) ?? invalidItem }
 
 @c(_SecKeychainItemModifyAttributesAndData)
 public func SecKeychainItemModifyAttributesAndData(_ item: UnsafeMutableRawPointer?, _ attributes: UnsafeRawPointer?, _ length: UInt32,
-                                                   _ data: UnsafeRawPointer?) -> Int32 { invalidItem }
+                                                   _ data: UnsafeRawPointer?) -> Int32 {
+    LegacyItems.modify(item, attributes, length, data) ?? invalidItem
+}
 
-/// Content the find functions gave, which is none.
+/// Content SecKeychainItemCopyContent gave: each attribute's buffer in the
+/// list (not the list itself, which is the caller's) and the data.
 @c(_SecKeychainItemFreeContent)
-public func SecKeychainItemFreeContent(_ attributes: UnsafeMutableRawPointer?, _ data: UnsafeMutableRawPointer?) -> Int32 { 0 }
+public func SecKeychainItemFreeContent(_ attributes: UnsafeMutableRawPointer?, _ data: UnsafeMutableRawPointer?) -> Int32 {
+    if let attributes {
+        for entry in AttributeLists.entries(attributes) {
+            free(entry.data)
+            entry.store(nil)
+        }
+    }
+    free(data)
+    return 0
+}
 
 // MARK: - Policies
 
