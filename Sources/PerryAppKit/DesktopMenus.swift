@@ -191,7 +191,11 @@ enum DesktopMenus {
         return mapping.menu(for: entries(of: main, depth: 0), appName: appName)
     }
 
-    private static func entries(of menu: NSMenu, depth: Int) -> [DesktopMenuEntry] {
+    /// The key that stands for Command on this desktop.
+    static var commandKey: DesktopMenuMapping.CommandKey { mapping.commandKey }
+
+    /// A menu's items as the desktop reads them, with their submenus.
+    static func entries(of menu: NSMenu, depth: Int = 0) -> [DesktopMenuEntry] {
         // A menu inside itself goes no deeper.
         guard depth < 16 else { return [] }
         return menu.items.map { item in
