@@ -5,30 +5,42 @@ import PerryObjCInterop
 /// An NSSet's members in insertion order, each retained.
 final class SetStorage {
     private(set) var members: [id] = []
-    private var index: [ObjectKey: Int] = [:]
+    private var index = ObjectIndex()
     let enumeration = EnumerationBuffer()
 
     deinit {
         for member in members { ObjC.release(member) }
     }
 
-    func member(_ object: id) -> id? {
-        index[ObjectKey(object: object)].map { members[$0] }
+    /// The object's hash and the position of the member equal to it. The
+    /// app's -hash and -isEqual: run here, before any change, with the
+    /// index and the members copied (ObjectIndex).
+    private func find(_ object: id) -> (hash: UInt, position: Int?) {
+        let hash = ObjectIndex.hash(of: object)
+        let (index, members) = (self.index, self.members)
+        return (hash, index.position(of: object, hash: hash, in: members))
     }
 
-    func add(_ object: id) {
-        guard index[ObjectKey(object: object)] == nil else { return }
-        index[ObjectKey(object: object)] = members.count
+    func member(_ object: id) -> id? {
+        guard !members.isEmpty else { return nil }
+        return find(object).position.map { members[$0] }
+    }
+
+    /// Adds the object unless a member is equal to it; that member, if so.
+    @discardableResult
+    func add(_ object: id) -> id? {
+        let found = find(object)
+        if let position = found.position { return members[position] }
+        index.append(found.hash)
         members.append(ObjC.retain(object)!)
         enumeration.mutated()
+        return nil
     }
 
     func remove(_ object: id) {
-        guard let position = index.removeValue(forKey: ObjectKey(object: object)) else { return }
+        guard !members.isEmpty, let position = find(object).position else { return }
+        index.remove(at: position)
         let removed = members.remove(at: position)
-        for (key, at) in index where at > position {
-            index[key] = at - 1
-        }
         enumeration.mutated()
         ObjC.release(removed)
     }
