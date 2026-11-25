@@ -26,6 +26,7 @@ enum CG {
     nonisolated(unsafe) static var translateCTM: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var scaleCTM: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var concatCTM: (@convention(c) (Ref, CGAffineTransform) -> Void)!
+    nonisolated(unsafe) static var getCTM: (@convention(c) (Ref) -> CGAffineTransform)!
     nonisolated(unsafe) static var setFillColorWithColor: (@convention(c) (Ref, Ref) -> Void)!
     nonisolated(unsafe) static var setStrokeColorWithColor: (@convention(c) (Ref, Ref) -> Void)!
     nonisolated(unsafe) static var setAlpha: (@convention(c) (Ref, CGFloat) -> Void)!
@@ -109,6 +110,7 @@ enum CG {
         translateCTM = bind("CGContextTranslateCTM")
         scaleCTM = bind("CGContextScaleCTM")
         concatCTM = bind("CGContextConcatCTM")
+        getCTM = bind("CGContextGetCTM")
         setFillColorWithColor = bind("CGContextSetFillColorWithColor")
         setStrokeColorWithColor = bind("CGContextSetStrokeColorWithColor")
         setAlpha = bind("CGContextSetAlpha")

@@ -15,6 +15,25 @@ struct Encoder {
 
     private func key(_ name: String) -> UnsafeMutableRawPointer? { name.objCArgument() }
 
+    /// Whether the coder writes keys: NSArchiver's typed streams don't, and
+    /// raise if given them.
+    var isKeyed: Bool { coder.sendAllowsKeyedCoding() }
+
+    /// An unkeyed coder's next value, of a one-type encoding ("c", "f").
+    func value<T>(_ type: String, _ value: T) {
+        var value = value
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafePointer<CChar>, UnsafeRawPointer) -> Void
+        type.withCString { type in
+            withUnsafeBytes(of: &value) {
+                unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(coder.objcObject, ObjCRuntime.selector("encodeValueOfObjCType:at:"), type,
+                                                               $0.baseAddress!)
+            }
+        }
+    }
+
+    /// An unkeyed coder's next object.
+    func nextObject(_ value: NSObject?) { Send.void(coder.objcObject, "encodeObject:", value?.objcObject) }
+
     func object(_ value: NSObject?, _ name: String) {
         guard let value else { return }
         Send.void(coder.objcObject, "encodeObject:forKey:", value.objcObject, key(name))
