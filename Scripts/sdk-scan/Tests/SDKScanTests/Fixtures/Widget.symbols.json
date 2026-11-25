@@ -1,0 +1,1496 @@
+{
+ "metadata": {
+  "formatVersion": {
+   "major": 0,
+   "minor": 5,
+   "patch": 3
+  },
+  "generator": "clang"
+ },
+ "module": {
+  "name": "Widget",
+  "platform": {
+   "architecture": "arm64",
+   "operatingSystem": {
+    "minimumVersion": {
+     "major": 11,
+     "minor": 0,
+     "patch": 0
+    },
+    "name": "macosx"
+   },
+   "vendor": "apple"
+  }
+ },
+ "relationships": [
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)WidgetBase(cm)alloc",
+   "target": "c:objc(cs)WidgetBase",
+   "targetFallback": "WidgetBase"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)WidgetBase(im)init",
+   "target": "c:objc(cs)WidgetBase",
+   "targetFallback": "WidgetBase"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)WidgetBase(im)setName:animated:",
+   "target": "c:objc(cs)WidgetBase",
+   "targetFallback": "WidgetBase"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)WidgetBase(py)name",
+   "target": "c:objc(cs)WidgetBase",
+   "targetFallback": "WidgetBase"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(pl)WidgetDrawing(im)drawInContext:",
+   "target": "c:objc(pl)WidgetDrawing",
+   "targetFallback": "WidgetDrawing"
+  },
+  {
+   "kind": "conformsTo",
+   "source": "c:objc(cs)Widget",
+   "target": "c:objc(pl)WidgetDrawing",
+   "targetFallback": "WidgetDrawing"
+  },
+  {
+   "kind": "inheritsFrom",
+   "source": "c:objc(cs)Widget",
+   "target": "c:objc(cs)WidgetBase",
+   "targetFallback": "WidgetBase"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(im)initWithName:count:",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(cm)widgetNamed:",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(im)oldMethod",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(py)enabled",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(py)count",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  },
+  {
+   "kind": "memberOf",
+   "source": "c:objc(cs)Widget(cpy)sharedWidget",
+   "target": "c:objc(cs)Widget",
+   "targetFallback": "Widget"
+  }
+ ],
+ "symbols": [
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "typedef"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:r",
+     "spelling": "signed char"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "BOOL"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:@T@BOOL"
+   },
+   "kind": {
+    "displayName": "Type Alias",
+    "identifier": "objective-c.typealias"
+   },
+   "location": {
+    "position": {
+     "character": 20,
+     "line": 1
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "BOOL"
+   ],
+   "type": "c:r"
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@interface"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "WidgetBase"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)WidgetBase"
+   },
+   "kind": {
+    "displayName": "Class",
+    "identifier": "objective-c.class"
+   },
+   "location": {
+    "position": {
+     "character": 11,
+     "line": 4
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "WidgetBase"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "+ ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "instancetype"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "alloc"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "returns": [
+     {
+      "kind": "keyword",
+      "spelling": "instancetype"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)WidgetBase(cm)alloc"
+   },
+   "kind": {
+    "displayName": "Type Method",
+    "identifier": "objective-c.type.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 5
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "WidgetBase",
+    "alloc"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "- ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "instancetype"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "init"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "returns": [
+     {
+      "kind": "keyword",
+      "spelling": "instancetype"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)WidgetBase(im)init"
+   },
+   "kind": {
+    "displayName": "Instance Method",
+    "identifier": "objective-c.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 6
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "WidgetBase",
+    "init"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "- ("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:v",
+     "spelling": "void"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "setName:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:C",
+     "spelling": "char"
+    },
+    {
+     "kind": "text",
+     "spelling": " *) "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "name"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "animated:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:@T@BOOL",
+     "spelling": "BOOL"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "animated"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "parameters": [
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "keyword",
+        "spelling": "const"
+       },
+       {
+        "kind": "text",
+        "spelling": " "
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:C",
+        "spelling": "char"
+       },
+       {
+        "kind": "text",
+        "spelling": " *) "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "name"
+       }
+      ],
+      "name": "name"
+     },
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:@T@BOOL",
+        "spelling": "BOOL"
+       },
+       {
+        "kind": "text",
+        "spelling": ") "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "animated"
+       }
+      ],
+      "name": "animated"
+     }
+    ],
+    "returns": [
+     {
+      "kind": "typeIdentifier",
+      "preciseIdentifier": "c:v",
+      "spelling": "void"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)WidgetBase(im)setName:animated:"
+   },
+   "kind": {
+    "displayName": "Instance Method",
+    "identifier": "objective-c.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 11
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "WidgetBase",
+    "setName:animated:"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@property"
+    },
+    {
+     "kind": "text",
+     "spelling": " ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "nonatomic"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:C",
+     "spelling": "char"
+    },
+    {
+     "kind": "text",
+     "spelling": " * "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "name"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)WidgetBase(py)name"
+   },
+   "kind": {
+    "displayName": "Instance Property",
+    "identifier": "objective-c.property"
+   },
+   "location": {
+    "position": {
+     "character": 34,
+     "line": 10
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/WidgetBase.h"
+   },
+   "pathComponents": [
+    "WidgetBase",
+    "name"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@protocol"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "WidgetDrawing"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(pl)WidgetDrawing"
+   },
+   "kind": {
+    "displayName": "Protocol",
+    "identifier": "objective-c.protocol"
+   },
+   "location": {
+    "position": {
+     "character": 10,
+     "line": 3
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "WidgetDrawing"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "- ("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:v",
+     "spelling": "void"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "drawInContext:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:v",
+     "spelling": "void"
+    },
+    {
+     "kind": "text",
+     "spelling": " *) "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "context"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "parameters": [
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:v",
+        "spelling": "void"
+       },
+       {
+        "kind": "text",
+        "spelling": " *) "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "context"
+       }
+      ],
+      "name": "context"
+     }
+    ],
+    "returns": [
+     {
+      "kind": "typeIdentifier",
+      "preciseIdentifier": "c:v",
+      "spelling": "void"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(pl)WidgetDrawing(im)drawInContext:"
+   },
+   "kind": {
+    "displayName": "Instance Method",
+    "identifier": "objective-c.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 4
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "WidgetDrawing",
+    "drawInContext:"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@interface"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "Widget"
+    },
+    {
+     "kind": "text",
+     "spelling": " : "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:objc(cs)WidgetBase",
+     "spelling": "WidgetBase"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget"
+   },
+   "kind": {
+    "displayName": "Class",
+    "identifier": "objective-c.class"
+   },
+   "location": {
+    "position": {
+     "character": 11,
+     "line": 9
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "- ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "instancetype"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "initWithName:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:C",
+     "spelling": "char"
+    },
+    {
+     "kind": "text",
+     "spelling": " *) "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "name"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "count:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:I",
+     "spelling": "int"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "count"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "parameters": [
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "keyword",
+        "spelling": "const"
+       },
+       {
+        "kind": "text",
+        "spelling": " "
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:C",
+        "spelling": "char"
+       },
+       {
+        "kind": "text",
+        "spelling": " *) "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "name"
+       }
+      ],
+      "name": "name"
+     },
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:I",
+        "spelling": "int"
+       },
+       {
+        "kind": "text",
+        "spelling": ") "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "count"
+       }
+      ],
+      "name": "count"
+     }
+    ],
+    "returns": [
+     {
+      "kind": "keyword",
+      "spelling": "instancetype"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(im)initWithName:count:"
+   },
+   "kind": {
+    "displayName": "Instance Method",
+    "identifier": "objective-c.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 15
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "initWithName:count:"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "+ ("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:objc(cs)Widget",
+     "spelling": "Widget"
+    },
+    {
+     "kind": "text",
+     "spelling": " *) "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "widgetNamed:"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:C",
+     "spelling": "char"
+    },
+    {
+     "kind": "text",
+     "spelling": " *) "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "name"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "parameters": [
+     {
+      "declarationFragments": [
+       {
+        "kind": "text",
+        "spelling": "("
+       },
+       {
+        "kind": "keyword",
+        "spelling": "const"
+       },
+       {
+        "kind": "text",
+        "spelling": " "
+       },
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:C",
+        "spelling": "char"
+       },
+       {
+        "kind": "text",
+        "spelling": " *) "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "name"
+       }
+      ],
+      "name": "name"
+     }
+    ],
+    "returns": [
+     {
+      "kind": "typeIdentifier",
+      "preciseIdentifier": "c:objc(cs)Widget",
+      "spelling": "Widget"
+     },
+     {
+      "kind": "text",
+      "spelling": " *"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(cm)widgetNamed:"
+   },
+   "kind": {
+    "displayName": "Type Method",
+    "identifier": "objective-c.type.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 16
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "widgetNamed:"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "deprecated": {
+      "major": 10,
+      "minor": 12,
+      "patch": 0
+     },
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "text",
+     "spelling": "- ("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:v",
+     "spelling": "void"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "oldMethod"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "functionSignature": {
+    "returns": [
+     {
+      "kind": "typeIdentifier",
+      "preciseIdentifier": "c:v",
+      "spelling": "void"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(im)oldMethod"
+   },
+   "kind": {
+    "displayName": "Instance Method",
+    "identifier": "objective-c.method"
+   },
+   "location": {
+    "position": {
+     "character": 0,
+     "line": 17
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "oldMethod"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@property"
+    },
+    {
+     "kind": "text",
+     "spelling": " ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "nonatomic"
+    },
+    {
+     "kind": "text",
+     "spelling": ", "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "getter"
+    },
+    {
+     "kind": "text",
+     "spelling": "="
+    },
+    {
+     "kind": "identifier",
+     "spelling": "isEnabled"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:@T@BOOL",
+     "spelling": "BOOL"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "enabled"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(py)enabled"
+   },
+   "kind": {
+    "displayName": "Instance Property",
+    "identifier": "objective-c.property"
+   },
+   "location": {
+    "position": {
+     "character": 45,
+     "line": 12
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "enabled"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@property"
+    },
+    {
+     "kind": "text",
+     "spelling": " ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "nonatomic"
+    },
+    {
+     "kind": "text",
+     "spelling": ", "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "readonly"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:I",
+     "spelling": "int"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "count"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(py)count"
+   },
+   "kind": {
+    "displayName": "Instance Property",
+    "identifier": "objective-c.property"
+   },
+   "location": {
+    "position": {
+     "character": 36,
+     "line": 13
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "count"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "availability": [
+    {
+     "domain": "macos",
+     "introduced": {
+      "major": 10,
+      "minor": 10,
+      "patch": 0
+     }
+    }
+   ],
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "@property"
+    },
+    {
+     "kind": "text",
+     "spelling": " ("
+    },
+    {
+     "kind": "keyword",
+     "spelling": "class"
+    },
+    {
+     "kind": "text",
+     "spelling": ", "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "nonatomic"
+    },
+    {
+     "kind": "text",
+     "spelling": ", "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "readonly"
+    },
+    {
+     "kind": "text",
+     "spelling": ") "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:objc(cs)Widget",
+     "spelling": "Widget"
+    },
+    {
+     "kind": "text",
+     "spelling": " * "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "sharedWidget"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:objc(cs)Widget(cpy)sharedWidget"
+   },
+   "kind": {
+    "displayName": "Type Property",
+    "identifier": "objective-c.type.property"
+   },
+   "location": {
+    "position": {
+     "character": 47,
+     "line": 14
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "Widget",
+    "sharedWidget"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "extern"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:C",
+     "spelling": "char"
+    },
+    {
+     "kind": "text",
+     "spelling": " * "
+    },
+    {
+     "kind": "keyword",
+     "spelling": "const"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "WidgetDidChangeNotification"
+    },
+    {
+     "kind": "text",
+     "spelling": ";"
+    }
+   ],
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:@WidgetDidChangeNotification"
+   },
+   "kind": {
+    "displayName": "Global Variable",
+    "identifier": "objective-c.var"
+   },
+   "location": {
+    "position": {
+     "character": 25,
+     "line": 20
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "WidgetDidChangeNotification"
+   ]
+  },
+  {
+   "accessLevel": "public",
+   "declarationFragments": [
+    {
+     "kind": "keyword",
+     "spelling": "extern"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:I",
+     "spelling": "int"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "identifier",
+     "spelling": "WidgetCount"
+    },
+    {
+     "kind": "text",
+     "spelling": "("
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:objc(cs)Widget",
+     "spelling": "Widget"
+    },
+    {
+     "kind": "text",
+     "spelling": " *"
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "widget"
+    },
+    {
+     "kind": "text",
+     "spelling": ", "
+    },
+    {
+     "kind": "typeIdentifier",
+     "preciseIdentifier": "c:@T@BOOL",
+     "spelling": "BOOL"
+    },
+    {
+     "kind": "text",
+     "spelling": " "
+    },
+    {
+     "kind": "internalParam",
+     "spelling": "visibleOnly"
+    },
+    {
+     "kind": "text",
+     "spelling": ");"
+    }
+   ],
+   "functionSignature": {
+    "parameters": [
+     {
+      "declarationFragments": [
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:objc(cs)Widget",
+        "spelling": "Widget"
+       },
+       {
+        "kind": "text",
+        "spelling": " *"
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "widget"
+       }
+      ],
+      "name": "widget"
+     },
+     {
+      "declarationFragments": [
+       {
+        "kind": "typeIdentifier",
+        "preciseIdentifier": "c:@T@BOOL",
+        "spelling": "BOOL"
+       },
+       {
+        "kind": "text",
+        "spelling": " "
+       },
+       {
+        "kind": "internalParam",
+        "spelling": "visibleOnly"
+       }
+      ],
+      "name": "visibleOnly"
+     }
+    ],
+    "returns": [
+     {
+      "kind": "typeIdentifier",
+      "preciseIdentifier": "c:I",
+      "spelling": "int"
+     }
+    ]
+   },
+   "identifier": {
+    "interfaceLanguage": "objective-c",
+    "precise": "c:@F@WidgetCount"
+   },
+   "kind": {
+    "displayName": "Function",
+    "identifier": "objective-c.func"
+   },
+   "location": {
+    "position": {
+     "character": 11,
+     "line": 21
+    },
+    "uri": "file:///Fake.sdk/System/Library/Frameworks/Widget.framework/Headers/Widget.h"
+   },
+   "pathComponents": [
+    "WidgetCount"
+   ]
+  }
+ ]
+}
