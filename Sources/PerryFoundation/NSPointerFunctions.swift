@@ -123,14 +123,15 @@ enum PointerFunctionDefaults {
 
     nonisolated(unsafe) static let cStringHash: Hash = { item, _ in
         guard let item else { return 0 }
-        // FNV-1a over the bytes.
-        var hash: UInt = 0xcbf29ce484222325
+        // FNV-1a over the bytes, in 64 bits, which a 32-bit UInt keeps
+        // the low half of.
+        var hash: UInt64 = 0xcbf29ce484222325
         var cursor = item.assumingMemoryBound(to: UInt8.self)
         while cursor.pointee != 0 {
-            hash = (hash ^ UInt(cursor.pointee)) &* 0x100000001b3
+            hash = (hash ^ UInt64(cursor.pointee)) &* 0x100000001b3
             cursor += 1
         }
-        return hash
+        return UInt(truncatingIfNeeded: hash)
     }
 
     nonisolated(unsafe) static let cStringEqual: Equal = { a, b, _ in
@@ -145,10 +146,10 @@ enum PointerFunctionDefaults {
 
     nonisolated(unsafe) static let structHash: Hash = { item, function in
         guard let item else { return 0 }
-        var hash: UInt = 0xcbf29ce484222325
+        var hash: UInt64 = 0xcbf29ce484222325
         let bytes = item.assumingMemoryBound(to: UInt8.self)
-        for offset in 0..<PointerFunctionDefaults.size(item, function) { hash = (hash ^ UInt(bytes[offset])) &* 0x100000001b3 }
-        return hash
+        for offset in 0..<PointerFunctionDefaults.size(item, function) { hash = (hash ^ UInt64(bytes[offset])) &* 0x100000001b3 }
+        return UInt(truncatingIfNeeded: hash)
     }
 
     nonisolated(unsafe) static let structEqual: Equal = { a, b, function in
