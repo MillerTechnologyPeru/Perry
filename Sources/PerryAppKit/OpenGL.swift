@@ -351,6 +351,15 @@ open class NSOpenGLContext: NSObject {
         return nil
     }
 
+    /// The size the context's window is scaled to the screen from, when it
+    /// is shown in a display mode the display hasn't got, or zero: what
+    /// the program draws at, which Perry's OpenGL scales to the window as
+    /// the buffers swap.
+    @ObjCMethod("_perryPresentationWidth")
+    func presentationWidth() -> Int { viewObject.flatMap { NSView.wrap($0).window?.presentationSize?.width } ?? 0 }
+    @ObjCMethod("_perryPresentationHeight")
+    func presentationHeight() -> Int { viewObject.flatMap { NSView.wrap($0).window?.presentationSize?.height } ?? 0 }
+
     @ObjCMethod("flushBuffer")
     func flushBuffer() {
         guard let window = drawable() else { return }
