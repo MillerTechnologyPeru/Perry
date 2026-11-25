@@ -18,6 +18,17 @@ private func dispatchWallTime(_ when: UnsafePointer<timespec>?, _ delta: Int64) 
 let dispatchTimeNow: dispatch_time_t = 0
 let dispatchTimeForever: dispatch_time_t = ~0
 
+/// The nanoseconds in a unit of mach_absolute_time, which the uptime clock's
+/// dispatch_time_t values count: numer / denom.
+private let machTimebase: mach_timebase_info_data_t = {
+    var timebase = mach_timebase_info_data_t()
+    mach_timebase_info(&timebase)
+    if timebase.denom == 0 {
+        timebase = mach_timebase_info_data_t(numer: 1, denom: 1)
+    }
+    return timebase
+}()
+
 public struct DispatchTime: Comparable, Sendable {
     public let rawValue: dispatch_time_t
 
@@ -31,13 +42,28 @@ public struct DispatchTime: Comparable, Sendable {
         self.rawValue = rawValue
     }
 
-    /// A time this many nanoseconds after the clock started. On Darwin the
-    /// uptime clock counts nanoseconds; the forever value is kept.
+    /// A time this many nanoseconds after the clock started. The uptime
+    /// clock counts mach_absolute_time's units: nanoseconds on x86_64, ticks
+    /// of 125/3 ns on arm64, rounded up here so that the time converts back
+    /// to at least the nanoseconds given. The forever value is kept.
     public init(uptimeNanoseconds: UInt64) {
-        rawValue = uptimeNanoseconds == dispatchTimeForever ? dispatchTimeForever - 1 : uptimeNanoseconds
+        var ticks = uptimeNanoseconds
+        if machTimebase.numer != machTimebase.denom {
+            let product = uptimeNanoseconds.multipliedFullWidth(by: UInt64(machTimebase.denom))
+            let (quotient, remainder) = UInt64(machTimebase.numer).dividingFullWidth(product)
+            ticks = remainder == 0 ? quotient : quotient + 1
+        }
+        rawValue = ticks == dispatchTimeForever ? dispatchTimeForever - 1 : ticks
     }
 
-    public var uptimeNanoseconds: UInt64 { rawValue }
+    /// The nanoseconds since the clock started, the most a UInt64 holds for
+    /// a time too far to count.
+    public var uptimeNanoseconds: UInt64 {
+        guard machTimebase.numer != machTimebase.denom else { return rawValue }
+        let product = rawValue.multipliedFullWidth(by: UInt64(machTimebase.numer))
+        guard product.high < UInt64(machTimebase.denom) else { return .max }
+        return UInt64(machTimebase.denom).dividingFullWidth(product).quotient
+    }
 
     /// Internal: from a raw value, for the arithmetic below.
     init(_raw: dispatch_time_t) {
