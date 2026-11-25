@@ -15,7 +15,14 @@
 # - keep 55 bits of an arm64 isa pointer, as the simulators' runtime does,
 #   rather than a device's 36: the classes Perry defines are in its Linux
 #   libraries, far above 64 GB (SWIFT_ISA_MASK_OVERRIDE). x86_64's mask
-#   already keeps 47 bits.
+#   already keeps 47 bits;
+# - export the prespecializations Apple's own builds add (Dictionary, Set
+#   and Array of String, Any and AnyHashable, in Prespecialize.swift) and
+#   _StringGuts' inlinable accessors, which the SDKs' Swift interface
+#   declares and programs built against it call. Against the SDKs'
+#   libswiftCore.tbd only the unused stubs behind two of them, and
+#   _availabilityNextMajorVersion, which no inlinable code reads, are
+#   missing.
 #
 # The code is built for ARMv8.0 on arm64, where a device's runtime needs
 # ARMv8.3 (pointer authentication).
