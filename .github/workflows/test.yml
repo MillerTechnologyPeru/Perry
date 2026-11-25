@@ -335,6 +335,7 @@ jobs:
           for part in loader system carbon opengl quicktime audiotoolbox; do
             Scripts/build-i386-$part.sh
           done
+          Scripts/check-carbon-exports.sh .build/i386/bin/libPerryCarbon.so
           Scripts/build-i386-fixtures.sh 10.6 hello.c system.c legacy_files.c legacy_start.c legacy_audio.c
 
       - name: Restore the armv7 SDK
@@ -519,5 +520,6 @@ jobs:
         run: |
           Scripts/build-ppc-loader.sh
           Scripts/build-ppc-carbon.sh
+          NM=powerpc-linux-gnu-nm Scripts/check-carbon-exports.sh .build/ppc/bin/libPerryCarbon.so
           Scripts/build-ppc-sysroot.sh
           Scripts/test-ppc-smoke.sh
