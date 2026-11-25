@@ -5,7 +5,7 @@
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$root/.build/i386/bin" "$root/.build/i386/obj"
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry --entrypoint sh perry-dev -euc '
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry --entrypoint sh "${PERRY_IMAGE:-perry-dev}" -euc '
     sysroot=/perry/.toolchains/i386-sdk/sysroot out=.build/i386
     gcc=$(dirname "$(find $sysroot -name crtbegin.o | head -1)")
     cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -ISources/PerryLoaderCore/include -ISources/PerryInterface/include"
