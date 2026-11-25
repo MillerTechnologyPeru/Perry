@@ -615,6 +615,12 @@ let package = Package(
             name: "PerryDesktopNotifications",
             dependencies: [.product(name: "DBus", package: "DBus")]
         ),
+        // A Mac app's status items on the desktop, as StatusNotifierItems,
+        // with their menus served as dbusmenu's.
+        .target(
+            name: "PerryDesktopStatusItems",
+            dependencies: [.product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "DBus", package: "DBus")]
+        ),
         // AppKit: variadic entry points.
         .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
@@ -678,6 +684,10 @@ let package = Package(
         .testTarget(
             name: "PerryDesktopNotificationsTests",
             dependencies: ["PerryDesktopNotifications", .product(name: "DBus", package: "DBus")]
+        ),
+        .testTarget(
+            name: "PerryDesktopStatusItemsTests",
+            dependencies: ["PerryDesktopStatusItems", .product(name: "CacaoDBusMenu", package: "Cacao"), .product(name: "DBus", package: "DBus")]
         ),
     ]
 )
