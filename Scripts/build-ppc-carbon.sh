@@ -15,9 +15,9 @@ cc=${PPC_CC:?set PPC_CC to a powerpc-linux-gnu cross compiler}
 out=$root/.build/ppc
 mkdir -p "$out/bin" "$out/obj"
 cd "$root"
-cflags="-mcpu=7400 -fPIC -O1 -g -D_GNU_SOURCE -Wall -Wno-unused-function -ISources/PerryCarbon/include -ISources/PerryInterface/include"
+cflags="-mcpu=7400 -fPIC -O1 -g -D_GNU_SOURCE -Wall -Wno-unused-function -ISources/CPerryCarbon/include -ISources/PerryInterface/include"
 objects=""
-for source in Sources/PerryCarbon/*.c; do
+for source in Sources/CPerryCarbon/*.c; do
     object=$out/obj/carbon-$(basename "$source").o
     "$cc" $cflags -c "$source" -o "$object" || failed=1
     objects="$objects $object"
