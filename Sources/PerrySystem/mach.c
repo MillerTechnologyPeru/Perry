@@ -1412,9 +1412,6 @@ MACH_FAILS(exception_raise_state, mach_port_t port, int exception, void *code, u
            void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
 MACH_FAILS(exception_raise_state_identity, mach_port_t port, mach_port_t thread, mach_port_t task, int exception,
            void *code, uint32_t count, int *flavor, void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
-MACH_FAILS(mach_port_move_member, mach_port_t task, mach_port_t member, mach_port_t after)
-MACH_FAILS(mach_port_request_notification, mach_port_t task, mach_port_t name, int message_id, uint32_t sync,
-           mach_port_t notify, int disposition, mach_port_t *previous)
 MACH_FAILS(mach_make_memory_entry_64, mach_port_t task, uint64_t *size, uint64_t offset, int permission,
            mach_port_t *entry, mach_port_t parent)
 MACH_FAILS(vm_map, mach_port_t task, uintptr_t *address, uintptr_t size, uintptr_t mask, int flags, mach_port_t object,
@@ -1425,9 +1422,12 @@ MACH_FAILS(vm_map, mach_port_t task, uintptr_t *address, uintptr_t size, uintptr
 // makes a port with a queue of messages, which mach_msg sends to and
 // receives from, waiting as long as the timeout says. Messages are copied
 // whole; port and memory descriptors in them are not carried (they arrive
-// as written). Nothing outside the process can reach a port. Exception
-// ports can be set on the task and its threads, and are never raised.
-// Crash reporters start their exception servers this way, and Chromium's
+// as written). Nothing outside the process can reach a port. A port set
+// (MACH_PORT_RIGHT_PORT_SET) holds no messages: receiving from it takes the
+// next from any port moved into it. Exception ports can be set on the task
+// and its threads, and are never raised. Crash reporters start their
+// exception servers this way (PLCrashReporter's waits on a set of its
+// server port and a notify port, which stops it), and Chromium's
 // WaitableEvent signals and waits on a port. Any other name names nothing.
 #define PORTS_MAX 1024
 #define PORT_QUEUE_MAX 64
@@ -1437,6 +1437,9 @@ struct port_message { uint32_t size; uint8_t *bytes; };
 struct port {
     mach_port_t name;
     bool live;
+    /// A port set, and the set a port is in (0 for none).
+    bool set;
+    mach_port_t member_of;
     uint32_t limit;
     uint32_t count, head;
     struct port_message queue[PORT_QUEUE_MAX];
@@ -1464,7 +1467,7 @@ static bool is_port(mach_port_t name) {
     return found;
 }
 
-static kern_return_t make_port(uint32_t limit, mach_port_t *name) {
+static kern_return_t make_port(uint32_t limit, bool set, mach_port_t *name) {
     pthread_mutex_lock(&ports_lock);
     uint32_t index = 0;
     while (index < ports_made && ports[index].live)
@@ -1480,7 +1483,7 @@ static kern_return_t make_port(uint32_t limit, mach_port_t *name) {
     struct port *port = &ports[index];
     // Names as Darwin's look: an index and a generation, never 0 or ~0.
     uint32_t generation = ((port->name & 0xff) + 4) & 0xfc;
-    *port = (struct port){ .name = ((index + 0x100) << 8) | generation | 3, .live = true,
+    *port = (struct port){ .name = ((index + 0x100) << 8) | generation | 3, .live = true, .set = set,
                            .limit = limit ? (limit < PORT_QUEUE_MAX ? limit : PORT_QUEUE_MAX) : 5 };
     if (name)
         *name = port->name;
@@ -1490,8 +1493,8 @@ static kern_return_t make_port(uint32_t limit, mach_port_t *name) {
 
 kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) DARWIN_SYMBOL(mach_port_allocate);
 kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) {
-    (void)task, (void)right;
-    return make_port(0, name);
+    (void)task;
+    return make_port(0, right == 3, name);    // MACH_PORT_RIGHT_PORT_SET
 }
 
 // mach_port_options_t: flags, then the queue limit.
@@ -1499,7 +1502,7 @@ kern_return_t darwin_mach_port_construct(mach_port_t task, const uint32_t *optio
     DARWIN_SYMBOL(mach_port_construct);
 kern_return_t darwin_mach_port_construct(mach_port_t task, const uint32_t *options, uint64_t context, mach_port_t *name) {
     (void)task, (void)context;
-    return make_port(options ? options[1] : 0, name);
+    return make_port(options ? options[1] : 0, false, name);
 }
 
 static void destroy_port(mach_port_t name) {
@@ -1509,6 +1512,11 @@ static void destroy_port(mach_port_t name) {
         for (uint32_t i = 0; i < port->count; i++)
             free(port->queue[(port->head + i) % PORT_QUEUE_MAX].bytes);
         port->live = false;
+        // A set's ports leave it; a port leaves its set.
+        for (uint32_t i = 0; port->set && i < ports_made; i++)
+            if (ports[i].member_of == name)
+                ports[i].member_of = 0;
+        port->member_of = 0;
         pthread_cond_broadcast(&ports_changed);
     }
     pthread_mutex_unlock(&ports_lock);
@@ -1522,6 +1530,17 @@ kern_return_t darwin_mach_port_destruct(mach_port_t task, mach_port_t name, int 
         return 15;    // KERN_INVALID_NAME
     destroy_port(name);
     return KERN_SUCCESS;
+}
+
+// The port a receive takes a message from, under the lock: the port if it
+// has one, or for a set the first of its ports that has; NULL for none yet.
+static struct port *ready_port(struct port *port) {
+    if (!port->set)
+        return port->count ? port : NULL;
+    for (uint32_t i = 0; i < ports_made; i++)
+        if (ports[i].live && ports[i].member_of == port->name && ports[i].count)
+            return &ports[i];
+    return NULL;
 }
 
 // The time `timeout` milliseconds from now, for pthread_cond_timedwait.
@@ -1550,7 +1569,7 @@ int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t rece
         mach_port_t remote = header ? header[2] : 0;
         pthread_mutex_lock(&ports_lock);
         struct port *port = find_port(remote);
-        if (!port) {
+        if (!port || port->set) {
             pthread_mutex_unlock(&ports_lock);
             return 0x10000003;
         }
@@ -1586,7 +1605,8 @@ int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t rece
         return 0x10004002;
     }
     struct timespec deadline = deadline_after(timeout);
-    while (port->live && port->count == 0) {
+    struct port *source = NULL;
+    while (port->live && !(source = ready_port(port))) {
         if (option & 0x100) {
             if (timeout == 0 || pthread_cond_timedwait(&ports_changed, &ports_lock, &deadline) == ETIMEDOUT) {
                 pthread_mutex_unlock(&ports_lock);
@@ -1600,15 +1620,15 @@ int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t rece
         pthread_mutex_unlock(&ports_lock);
         return 0x10004009;
     }
-    struct port_message *next = &port->queue[port->head];
+    struct port_message *next = &source->queue[source->head];
     if (next->size > receive_size) {
         // MACH_RCV_LARGE (4) leaves the message queued and says its size.
         if (header && receive_size >= 8)
             header[1] = next->size;
         if (!(option & 4)) {
             free(next->bytes);
-            port->head = (port->head + 1) % PORT_QUEUE_MAX;
-            port->count--;
+            source->head = (source->head + 1) % PORT_QUEUE_MAX;
+            source->count--;
             pthread_cond_broadcast(&ports_changed);
         }
         pthread_mutex_unlock(&ports_lock);
@@ -1616,13 +1636,49 @@ int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t rece
     }
     memcpy(message, next->bytes, next->size);
     header[1] = next->size;
-    header[3] = receive_name;
+    // The port it came to, also from a set.
+    header[3] = source->name;
     free(next->bytes);
-    port->head = (port->head + 1) % PORT_QUEUE_MAX;
-    port->count--;
+    source->head = (source->head + 1) % PORT_QUEUE_MAX;
+    source->count--;
     pthread_cond_broadcast(&ports_changed);
     pthread_mutex_unlock(&ports_lock);
     return 0;
+}
+
+// Moves a port into a set, or out of its set when `after` is none.
+// KERN_INVALID_NAME, KERN_INVALID_RIGHT.
+kern_return_t darwin_mach_port_move_member(mach_port_t task, mach_port_t member, mach_port_t after)
+    DARWIN_SYMBOL(mach_port_move_member);
+kern_return_t darwin_mach_port_move_member(mach_port_t task, mach_port_t member, mach_port_t after) {
+    (void)task;
+    pthread_mutex_lock(&ports_lock);
+    struct port *port = find_port(member), *set = after ? find_port(after) : NULL;
+    kern_return_t result = KERN_SUCCESS;
+    if (!port || (after && !set))
+        result = 15;
+    else if (port->set || (set && !set->set))
+        result = 17;
+    else
+        port->member_of = after;
+    // A receive waiting on the set may now have a message.
+    pthread_cond_broadcast(&ports_changed);
+    pthread_mutex_unlock(&ports_lock);
+    return result;
+}
+
+// A notification when a port's last send right goes (MACH_NOTIFY_NO_SENDERS):
+// send rights aren't counted here, so it is taken and never sent; there was
+// none before.
+kern_return_t darwin_mach_port_request_notification(mach_port_t task, mach_port_t name, int message_id, uint32_t sync,
+                                                    mach_port_t notify, int disposition, mach_port_t *previous)
+    DARWIN_SYMBOL(mach_port_request_notification);
+kern_return_t darwin_mach_port_request_notification(mach_port_t task, mach_port_t name, int message_id, uint32_t sync,
+                                                    mach_port_t notify, int disposition, mach_port_t *previous) {
+    (void)task, (void)message_id, (void)sync, (void)notify, (void)disposition;
+    if (previous)
+        *previous = 0;
+    return is_port(name) ? KERN_SUCCESS : 15;
 }
 
 // Rights on a port made here are always there.
