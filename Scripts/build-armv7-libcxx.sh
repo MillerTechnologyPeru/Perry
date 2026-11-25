@@ -7,25 +7,22 @@
 # that shares its objects with the library, so libc++ can't be a Linux build
 # as it is on arm64.
 #
-# Run on the host, with Docker: the libraries are built in the container
-# with the LLVM under .toolchains (or the image's Swift toolchain's), against the C headers of
-# an iOS SDK (IOS_SDK, or Xcode's), copied to .build/armv7/ios-sdk. They are
-# linked into one library by Apple's ld64 (Scripts/build-cctools.sh) against
-# a stub libSystem made from what they import, which Perry's libSystem
-# provider has.
+# Run on a Mac with Xcode: the libraries are built with the iOS SDK's C
+# headers (xcrun --sdk iphoneos) and linked into one library by Apple's ld64
+# (Scripts/build-cctools.sh) against a stub libSystem made from what they
+# import, which Perry's libSystem provider has.
 #
-# Only the SDK's usr/include is read, so on Linux IOS_SDK can name a
-# directory holding a copy of it that a Mac made. No test needs the library,
-# and CI, whose Linux jobs have no iOS SDK, does not build it.
+# No test needs the library, and CI does not build it.
 #
 # usage: Scripts/build-armv7-libcxx.sh
 set -eu
+[ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-sdk=${IOS_SDK:-$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)}
+sdk=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)
 [ -d "$sdk/usr/include" ] || {
-    echo "$0: needs an iOS SDK's C headers: set IOS_SDK to a directory with usr/include from Xcode's iPhoneOS SDK" >&2
+    echo "$0: needs Xcode's iPhoneOS SDK C headers" >&2
     exit 1
 }
 out=.build/armv7
