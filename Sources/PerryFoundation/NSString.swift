@@ -484,7 +484,10 @@ public class NSString: NSObject {
     @ObjCMethod("characterAtIndex:")
     func character(at index: UInt) -> UInt16 {
         let units = value.utf16
-        guard Int(index) < units.count else {
+        // Compared as NSUInteger: an index past Int.max (NSNotFound on a
+        // 32-bit long, or length - 1 of an empty string) raises, as on
+        // Darwin, where Int(index) would trap.
+        guard index < UInt(units.count) else {
             Exceptions.raise(name: "NSRangeException", reason: "-[NSString characterAtIndex:]: Range or index out of bounds")
         }
         return units[units.index(units.startIndex, offsetBy: Int(index))]
