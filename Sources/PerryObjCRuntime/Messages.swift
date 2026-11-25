@@ -8,6 +8,7 @@ public enum Messages {
     typealias Send0 = @convention(c) (ObjectPointer?, SEL) -> ObjectPointer?
     typealias Send1 = @convention(c) (ObjectPointer?, SEL, UnsafeRawPointer?) -> ObjectPointer?
     typealias Send2 = @convention(c) (ObjectPointer?, SEL, UnsafeRawPointer?, UnsafeRawPointer?) -> ObjectPointer?
+    typealias Send3 = @convention(c) (ObjectPointer?, SEL, UnsafeRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> ObjectPointer?
     typealias Send0Void = @convention(c) (ObjectPointer?, SEL) -> Void
     typealias Send1Void = @convention(c) (ObjectPointer?, SEL, UnsafeRawPointer?) -> Void
     typealias Send1Bool = @convention(c) (ObjectPointer?, SEL, UnsafeRawPointer?) -> Bool
@@ -26,6 +27,12 @@ public enum Messages {
     public static func send(_ receiver: ObjectPointer?, _ selector: SEL, _ first: UnsafeRawPointer?,
                             _ second: UnsafeRawPointer?) -> ObjectPointer? {
         unsafeBitCast(msgSend, to: Send2.self)(receiver, selector, first, second)
+    }
+
+    @inline(__always)
+    public static func send(_ receiver: ObjectPointer?, _ selector: SEL, _ first: UnsafeRawPointer?,
+                            _ second: UnsafeRawPointer?, _ third: UnsafeRawPointer?) -> ObjectPointer? {
+        unsafeBitCast(msgSend, to: Send3.self)(receiver, selector, first, second, third)
     }
 
     @inline(__always)
