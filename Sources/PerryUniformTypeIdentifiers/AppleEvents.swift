@@ -749,8 +749,8 @@ public func AERemoveSpecialHandler(_ functionClass: UInt32, _ handler: UnsafeRaw
 
 // MARK: - The object model
 
-/// The object support library is set up; object specifiers are made, but
-/// none are resolved here, as no other process sends them.
+/// The Object Support Library is ready at once: AEResolve uses the
+/// accessors installed, and the object callbacks aren't needed by it.
 @c(_AEObjectInit) public func AEObjectInit() -> Int16 { AE.noErr }
 
 /// OSErr AESetObjectCallbacks(OSLCompareUPP, OSLCountUPP, OSLDisposeTokenUPP,
@@ -780,6 +780,58 @@ public func AEGetObjectAccessor(_ desiredClass: UInt32, _ containerType: UInt32,
     accessor?.pointee = found.procedure
     refCon?.pointee = found.refCon
     return AE.noErr
+}
+
+/// OSErr AEResolve(const AEDesc *objectSpecifier, short callbackFlags, AEDesc *token):
+/// resolves the specifier's container first (the application, a null
+/// descriptor, at the top), then asks the application's accessor for the
+/// desired class in a container of the token's type, falling back to
+/// wildcard accessors as the Object Support Library does. Whose clauses
+/// and marking callbacks aren't evaluated here: an accessor gets the
+/// selection data as it is.
+@c(_AEResolve)
+public func AEResolve(_ specifier: UnsafeRawPointer?, _ flags: Int16, _ token: UnsafeMutableRawPointer?) -> Int16 {
+    guard let specifier, let token else { return AE.paramErr }
+    AE.set(token, AE.typeNull, AEValue())
+    return AE.resolve(AE.item(specifier), into: token)
+}
+
+extension AE {
+    typealias Accessor = @convention(c) (UInt32, UnsafeRawPointer?, UInt32, UInt32, UnsafeRawPointer?, UnsafeMutableRawPointer?,
+                                         UnsafeMutableRawPointer?) -> Int16
+
+    /// Runs `body` with a 12-byte AEDesc holding `item`, disposed after.
+    static func withDesc<T>(_ item: AEItem, _ body: (UnsafeMutableRawPointer) -> T) -> T {
+        var storage = (UInt32(0), UInt16(0), UInt16(0), UInt16(0), UInt16(0))
+        return withUnsafeMutableBytes(of: &storage) { buffer in
+            set(buffer.baseAddress!, item.type, item.value)
+            defer { dispose(buffer.baseAddress!) }
+            return body(buffer.baseAddress!)
+        }
+    }
+
+    static func resolve(_ specifier: AEItem, into token: UnsafeMutableRawPointer) -> Int16 {
+        if specifier.type == typeNull { return noErr }   // the application
+        guard specifier.type == typeObjectSpecifier, specifier.value.keyed else { return -1727 }   // errAENotAnObjSpec
+        func key(_ name: String) -> AEItem? { specifier.value.items.first { $0.keyword == code(name) } }
+        let desiredClass = code(of: key("want")), form = code(of: key("form"))
+        let container = key("from") ?? AEItem(keyword: 0, type: typeNull, value: AEValue())
+        let selection = key("seld") ?? AEItem(keyword: 0, type: typeNull, value: AEValue())
+        return withDesc(AEItem(keyword: 0, type: typeNull, value: AEValue())) { containerToken in
+            let error = resolve(container, into: containerToken)
+            guard error == noErr else { return error }
+            let containerClass = type(containerToken)
+            let accessor = lock.withLock {
+                [(desiredClass, containerClass), (desiredClass, typeWildCard), (typeWildCard, containerClass), (typeWildCard, typeWildCard)]
+                    .lazy.compactMap { pair in accessors.first { $0.eventClass == pair.0 && $0.eventID == pair.1 } }.first
+            }
+            guard let accessor, let procedure = accessor.procedure else { return accessorNotFound }
+            return withDesc(selection) { selectionData in
+                unsafeBitCast(procedure, to: Accessor.self)(desiredClass, containerToken, containerClass, form, selectionData, token,
+                                                            accessor.refCon)
+            }
+        }
+    }
 }
 
 /// OSErr CreateObjSpecifier(DescType desiredClass, AEDesc *container,
