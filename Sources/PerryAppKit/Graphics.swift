@@ -84,6 +84,23 @@ open class NSColor: NSObject {
         }
     }
 
+    /// What decodeTypedStream reads: a catalog color by its names and
+    /// value, else calibrated white or calibrated RGB.
+    private func encodeTypedStream(_ encoder: Encoder) {
+        if let catalogName, let colorName {
+            encoder.value("c", Int8(6))
+            encoder.nextObject(NSObject(objCReturnValue: catalogName.objCReturnValue()))
+            encoder.nextObject(NSObject(objCReturnValue: colorName.objCReturnValue()))
+            encoder.nextObject(NSColor(red: red, green: green, blue: blue, alpha: alpha))
+        } else if red == green && green == blue {
+            encoder.value("c", Int8(3))
+            for component in [red, alpha] { encoder.value("f", Float(component)) }
+        } else {
+            encoder.value("c", Int8(1))
+            for component in [red, green, blue, alpha] { encoder.value("f", Float(component)) }
+        }
+    }
+
     /// NSColor as NSArchiver writes it: its color space as a char (1 and 2
     /// RGB, 3 and 4 gray, 5 CMYK, 6 a catalog color), then its components
     /// as floats ("ffff", "ff", "fffff"), or the catalog's name, the
@@ -121,6 +138,10 @@ open class NSColor: NSObject {
     func encode(with coder: NSObject?) {
         guard let coder else { return }
         let encoder = Encoder(coder: coder)
+        guard encoder.isKeyed else {
+            encodeTypedStream(encoder)
+            return
+        }
         func text(_ values: [CGFloat]) -> [UInt8] {
             Array(values.map { value in
                 let number = Double(value)
