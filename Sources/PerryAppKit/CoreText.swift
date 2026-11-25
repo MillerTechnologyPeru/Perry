@@ -7,7 +7,8 @@ import PerryObjCInterop
 // glyphs, advances, bounds and outlines are those of the CGFont FontConfig
 // finds by its name, scaled from the face's units to points. A CTLine is an
 // attributed string's runs, drawn through CoreGraphics' text functions at the
-// context's text position.
+// context's text position; its glyph runs, typesetters and truncated lines
+// are in CoreTextRuns.swift.
 
 enum CoreText {
     typealias Ref = UnsafeMutableRawPointer?
@@ -26,6 +27,12 @@ enum CoreText {
     nonisolated(unsafe) static var pathForGlyph: (@convention(c) (Ref, UInt16, CGFloat, UnsafePointer<CGAffineTransform>?) -> Ref)?
 
     nonisolated(unsafe) static var copyPostScriptName: (@convention(c) (Ref) -> Ref)?
+
+    // A context's font and size, and glyphs by index at positions, for
+    // CTFontDrawGlyphs.
+    nonisolated(unsafe) static var setContextFont: (@convention(c) (Ref, Ref) -> Void)?
+    nonisolated(unsafe) static var setContextFontSize: (@convention(c) (Ref, CGFloat) -> Void)?
+    nonisolated(unsafe) static var showGlyphsAtPositions: (@convention(c) (Ref, UnsafePointer<UInt16>?, UnsafePointer<CGPoint>?, Int) -> Void)?
 
     nonisolated(unsafe) private static var loaded = false
 
@@ -50,6 +57,28 @@ enum CoreText {
         glyphForCharacter = bind("perry_cgfont_glyph_for_character")
         pathForGlyph = bind("perry_cgfont_create_path_for_glyph")
         copyPostScriptName = bind("CGFontCopyPostScriptName")
+        setContextFont = bind("CGContextSetFont")
+        setContextFontSize = bind("CGContextSetFontSize")
+        showGlyphsAtPositions = bind("CGContextShowGlyphsAtPositions")
+    }
+
+    /// Draws glyphs of the font at positions in text space, leaving the
+    /// context's font and size the font's, as Core Text does. Glyph 0xFFFF
+    /// (kCGFontIndexInvalid) draws nothing.
+    static func draw(_ font: NSFont, _ glyphs: UnsafePointer<UInt16>, _ positions: UnsafePointer<CGPoint>, _ count: Int,
+                     in context: UnsafeMutableRawPointer) {
+        guard count > 0, let face = face(font), let setContextFont, let setContextFontSize, let showGlyphsAtPositions else { return }
+        setContextFont(context, face)
+        setContextFontSize(context, font.size)
+        var shown: [UInt16] = [], points: [CGPoint] = []
+        shown.reserveCapacity(count)
+        points.reserveCapacity(count)
+        for index in 0..<count where glyphs[index] != 0xFFFF {
+            shown.append(glyphs[index])
+            points.append(positions[index])
+        }
+        guard !shown.isEmpty else { return }
+        showGlyphsAtPositions(context, shown, points, shown.count)
     }
 
     /// The family the system font is drawn in: Inter, which is drawn after
@@ -116,6 +145,10 @@ enum CoreTextConstants {
     static let kCTFontAttributeName = "NSFont"
     static let kCTForegroundColorAttributeName = "CTForegroundColor"
     static let kCTForegroundColorFromContextAttributeName = "CTForegroundColorFromContext"
+    static let kCTGlyphInfoAttributeName = "NSGlyphInfo"
+    // Typesetter options, which Perry's typesetters take and don't need.
+    static let kCTTypesetterOptionAllowUnboundedLayout = "CTTypesetterOptionAllowUnboundedLayout"
+    static let kCTTypesetterOptionForcedEmbeddingLevel = "CTTypesetterOptionForcedEmbeddingLevel"
 }
 
 // MARK: - Fonts
@@ -270,48 +303,93 @@ final class CTLine: NSObject {
     struct Run {
         var text: String
         var font: NSFont
-        var cgColor: UnsafeMutableRawPointer?
+        var cgColor: NSObject?
         var color: NSColor?
+        /// The attributes the string gives the run's text.
+        var attributes: NSDictionary?
+        /// The characters of the string the run stands for, by UTF-16
+        /// index: its text's, or a truncation token's the ones it replaces.
+        var location = 0
+        var length = 0
+        var isToken = false
     }
 
     var runs: [Run] = []
+    /// The characters of its string the line was made from.
+    var range: Range<Int> = 0..<0
+    /// The runs as CTRun objects, made when first asked for.
+    var glyphRuns: NSMutableArray?
 
     @ObjCMethod("init")
     public required override init() { super.init() }
 
-    deinit {
-        for run in runs { ObjCRuntime.release(run.cgColor) }
+    /// The UTF-16 units of an attributed string's text.
+    static func units(_ attributed: UnsafeMutableRawPointer) -> [UInt16] {
+        guard let stringObject = Send.object(attributed, "string") else { return [] }
+        return Array(String(objCArgument: stringObject).utf16)
     }
 
-    /// The runs of an attributed string; Core Text's default font is
-    /// Helvetica at 12 points.
-    static func make(_ attributed: UnsafeMutableRawPointer) -> CTLine {
-        let line = CTLine()
-        guard let stringObject = Send.object(attributed, "string") else { return line }
-        let units = Array(String(objCArgument: stringObject).utf16)
+    /// The runs of an attributed string's characters in `range`; Core
+    /// Text's default font is Helvetica at 12 points.
+    static func attributeRuns(of attributed: UnsafeMutableRawPointer, units: [UInt16], in range: Range<Int>) -> [Run] {
         typealias AttributesAt = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UInt, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
         let attributesAt = unsafeBitCast(ObjCRuntime.msgSend, to: AttributesAt.self)
-        var location = 0
-        while location < units.count {
-            var range = NSRange(location: 0, length: 0)
-            let attributes = attributesAt(attributed, ObjCRuntime.selector("attributesAtIndex:effectiveRange:"), UInt(location), &range)
+        var runs: [Run] = []
+        var location = range.lowerBound
+        while location < range.upperBound {
+            var effective = NSRange(location: 0, length: 0)
+            let attributes = attributesAt(attributed, ObjCRuntime.selector("attributesAtIndex:effectiveRange:"), UInt(location), &effective)
                 .map(NSObject.init)?.as(NSDictionary.self)
-            let end = min(units.count, max(location + 1, Int(range.location + range.length)))
-            var run = Run(text: String(decoding: units[location..<end], as: UTF16.self), font: NSFont(name: "Helvetica", size: 12))
+            let end = min(range.upperBound, max(location + 1, Int(effective.location + effective.length)))
+            var run = Run(text: String(decoding: units[location..<end], as: UTF16.self), font: NSFont(name: "Helvetica", size: 12),
+                          attributes: attributes, location: location, length: end - location)
             if let attributes {
                 if let font = attributes.object(forKey: "NSFont")?.as(NSFont.self) { run.font = font }
                 if attributes.object(forKey: "CTForegroundColorFromContext") == nil {
                     if let cgColor = attributes.object(forKey: "CTForegroundColor") {
-                        run.cgColor = ObjCRuntime.retain(cgColor.objcObject)
+                        run.cgColor = cgColor
                     } else {
                         run.color = attributes.object(forKey: "NSColor")?.as(NSColor.self)
                     }
                 }
             }
-            line.runs.append(run)
+            runs.append(run)
             location = end
         }
+        return runs
+    }
+
+    /// A line of the runs of the string's characters in `range`, all of
+    /// them for nil.
+    static func make(_ attributed: UnsafeMutableRawPointer, range wanted: Range<Int>? = nil) -> CTLine {
+        let text = CTLine.units(attributed)
+        let range = wanted.map { $0.clamped(to: 0..<text.count) } ?? 0..<text.count
+        return CTLine.make(runs: CTLine.attributeRuns(of: attributed, units: text, in: range), range: range)
+    }
+
+    static func make(runs: [Run], range: Range<Int>) -> CTLine {
+        let line = CTLine()
+        line.runs = runs
+        line.range = range
         return line
+    }
+
+    /// The parts of runs in a range of their string's characters; truncation
+    /// tokens are left out.
+    static func slice(_ runs: [Run], _ range: Range<Int>) -> [Run] {
+        var sliced: [Run] = []
+        for run in runs where !run.isToken {
+            let start = max(run.location, range.lowerBound), end = min(run.location + run.length, range.upperBound)
+            guard start < end else { continue }
+            var part = run
+            if start > run.location || end < run.location + run.length {
+                let units = Array(run.text.utf16)
+                part.text = String(decoding: units[(start - run.location)..<(end - run.location)], as: UTF16.self)
+                (part.location, part.length) = (start, end - start)
+            }
+            sliced.append(part)
+        }
+        return sliced
     }
 
     static func line(_ object: UnsafeMutableRawPointer?) -> CTLine? {
@@ -362,7 +440,7 @@ public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutabl
     for run in line.runs where !run.text.isEmpty {
         CG.saveGState(context)
         if let cgColor = run.cgColor {
-            CG.setFillColorWithColor(context, cgColor)
+            CG.setFillColorWithColor(context, cgColor.objcObject)
         } else if let color = run.color {
             CG.setFill(context, color)
         }
