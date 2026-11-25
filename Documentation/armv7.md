@@ -187,7 +187,7 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   `.build/armv7/bin`: LLVM 19.1.7's `runtimes` with CMake in the container
   (`CMAKE_SYSTEM_NAME=Generic`, static libraries with libc++abi folded in,
   no filesystem, `-D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC -U__STRICT_ANSI__`),
-  against the C headers of Xcode's iOS SDK (or `IOS_SDK`'s). libSystem has the xlocale and wide-character
+  against the C headers of Xcode's iOS SDK. libSystem has the xlocale and wide-character
   functions it imports. Cut the Rope 2 1.6.9 loads with it and runs into
   its own code; it has not thrown through it yet.
 - Not yet: the remaining files.c
