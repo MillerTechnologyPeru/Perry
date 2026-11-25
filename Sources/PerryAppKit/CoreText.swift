@@ -175,6 +175,13 @@ public func CTFontGetLeading(_ font: UnsafeMutableRawPointer?) -> CGFloat {
     return CoreText.metric(font, CoreText.leading) ?? 0
 }
 
+/// The x-height and cap height, as NSFont gives them.
+@DarwinC("_CTFontGetXHeight")
+public func CTFontGetXHeight(_ font: UnsafeMutableRawPointer?) -> CGFloat { CoreText.font(font)?.xHeight() ?? 0 }
+
+@DarwinC("_CTFontGetCapHeight")
+public func CTFontGetCapHeight(_ font: UnsafeMutableRawPointer?) -> CGFloat { CoreText.font(font)?.capHeight() ?? 0 }
+
 @DarwinC("_CTFontGetBoundingBox")
 public func CTFontGetBoundingBox(_ font: UnsafeMutableRawPointer?) -> CGRect {
     guard let font = CoreText.font(font), let face = CoreText.face(font), let box = CoreText.fontBBox?(face) else { return .zero }
