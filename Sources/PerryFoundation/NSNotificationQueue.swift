@@ -40,14 +40,18 @@ final class NotificationQueueStorage {
     /// style or both.
     func remove(matching notification: id, mask: UInt, fromASAP: Bool = true, fromIdle: Bool = true) {
         let removed: [id] = monitor.locked {
+            // The notifications are sent -object and -name with no access
+            // to the queues open (Array.split).
             var removed: [id] = []
             if fromASAP {
-                removed += asap.filter { NotificationQueues.matches($0, notification, mask: mask) }
-                asap.removeAll { NotificationQueues.matches($0, notification, mask: mask) }
+                let split = asap.split { NotificationQueues.matches($0, notification, mask: mask) }
+                asap = split.kept
+                removed += split.removed
             }
             if fromIdle {
-                removed += idle.filter { NotificationQueues.matches($0, notification, mask: mask) }
-                idle.removeAll { NotificationQueues.matches($0, notification, mask: mask) }
+                let split = idle.split { NotificationQueues.matches($0, notification, mask: mask) }
+                idle = split.kept
+                removed += split.removed
             }
             return removed
         }
