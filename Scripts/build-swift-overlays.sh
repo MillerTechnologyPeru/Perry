@@ -1,9 +1,8 @@
 #!/bin/bash
 # Builds all of Perry's Swift overlays and Swift frameworks with Xcode 27's
 # SDKs, one script after another in the order they need, into a Swift
-# runtime directory (PERRY_SWIFT_RUNTIME): on a Mac, or in perry-dev under
-# Scripts/docker-darwin.sh. The standard library (Scripts/build-swift-runtime.sh)
-# is installed there apart; nothing here needs it, so the overlays can be
+# runtime directory (PERRY_SWIFT_RUNTIME), on a Mac with Xcode. The standard
+# library (Scripts/build-swift-runtime.sh) is installed there apart; nothing here needs it, so the overlays can be
 # built into an empty directory and the standard library added before or
 # after.
 #
