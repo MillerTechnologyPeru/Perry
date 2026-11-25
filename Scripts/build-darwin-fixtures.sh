@@ -296,8 +296,11 @@ for src in Tests/Fixtures/Darwin/*/; do
     # starts without them.
     bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Info.plist")
     rm -rf "$HOME/Library/Saved Application State/$bundle_id~iosmac.savedState"
-    # A hung reference run fails the build instead of stalling it.
-    record "$name" 30 "$macos/MacOS/$name"
+    # A hung reference run fails the build instead of stalling it. A Mac
+    # Catalyst app gets longer: UIKit's first launch on a runner, the Intel
+    # one most, can take more than half a minute.
+    case "$frameworks" in *UIKit*) seconds=120 ;; *) seconds=30 ;; esac
+    record "$name" "$seconds" "$macos/MacOS/$name"
     echo "$app"
 done
 
