@@ -8,28 +8,37 @@
 # as it is on arm64.
 #
 # Run on the host, with Docker: the libraries are built in the container
-# with the LLVM under .toolchains, against the C headers of an iOS SDK
-# (IOS_SDK, or Xcode's), copied to .build/armv7/ios-sdk. They are linked into
-# one library by Apple's ld64 (cctools-port, .toolchains/cctools) against a
-# stub libSystem made from what they import, which Perry's libSystem
+# with the LLVM under .toolchains (or the image's Swift toolchain's), against the C headers of
+# an iOS SDK (IOS_SDK, or Xcode's), copied to .build/armv7/ios-sdk. They are
+# linked into one library by Apple's ld64 (Scripts/build-cctools.sh) against
+# a stub libSystem made from what they import, which Perry's libSystem
 # provider has.
+#
+# Only the SDK's usr/include is read, so on Linux IOS_SDK can name a
+# directory holding a copy of it that a Mac made. No test needs the library,
+# and CI, whose Linux jobs have no iOS SDK, does not build it.
 #
 # usage: Scripts/build-armv7-libcxx.sh
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-sdk=${IOS_SDK:-$(xcrun --sdk iphoneos --show-sdk-path)}
+sdk=${IOS_SDK:-$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)}
+[ -d "$sdk/usr/include" ] || {
+    echo "$0: needs an iOS SDK's C headers: set IOS_SDK to a directory with usr/include from Xcode's iPhoneOS SDK" >&2
+    exit 1
+}
 out=.build/armv7
 mkdir -p "$out/ios-sdk/usr" "$out/bin"
 rm -rf "$out/ios-sdk/usr/include"
 cp -R "$sdk/usr/include" "$out/ios-sdk/usr/include"
 
-docker run --rm -v "$root:/perry" -w /perry perry-dev sh -eu -c '
-llvm=$(ls -d /perry/.toolchains/LLVM-*/bin | head -1)
+docker run --rm -v "$root:/perry" -w /perry "${PERRY_IMAGE:-perry-dev}" sh -eu -c '
+llvm=$(ls -d /perry/.toolchains/LLVM-*/bin 2>/dev/null | head -1)
+llvm=${llvm:-/usr/bin}    # Swift'"'"'s, which has llvm-ar and llvm-nm
 ld=/perry/.toolchains/cctools/bin/arm-apple-darwin11-ld
-blocks=$(ls -d /perry/.toolchains/swift-*-RELEASE-*/usr/lib/swift/linux | head -1)
-export LD_LIBRARY_PATH="$blocks"
+blocks=$(ls -d /perry/.toolchains/swift-*-RELEASE-*/usr/lib/swift/linux 2>/dev/null | head -1)
+export LD_LIBRARY_PATH="${blocks:-/usr/lib/swift/linux}"
 sdk=/perry/.build/armv7/ios-sdk
 work=/perry/.build/armv7/libcxx
 target=armv7-apple-ios10.0
