@@ -333,7 +333,14 @@ open class NSTextStorage: NSObject {
     }
 
     @ObjCMethod("string") func storageString() -> String { Send.object(contents.objcObject, "string").map { String(objCArgument: $0) } ?? "" }
-    @ObjCMethod("length") func length() -> UInt { UInt(Send.integer(contents.objcObject, "length")) }
+    /// The text's length: a subclass that keeps its own text (overrides
+    /// -string, as Bean's word-counting storage does) has its string's, as
+    /// NSAttributedString's -length is; Perry's own, the contents'.
+    @ObjCMethod("length")
+    func length() -> UInt {
+        guard keepsOwnText else { return UInt(Send.integer(Send.object(objcObject, "string"), "length")) }
+        return UInt(Send.integer(contents.objcObject, "length"))
+    }
     @ObjCMethod("mutableString") func mutableString() -> NSObject? { Send.object(contents.objcObject, "mutableString").map(NSObject.init) }
     @ObjCMethod("delegate") func storageDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ value: NSObject?) { delegateObject = value?.objcObject }
