@@ -458,9 +458,23 @@ final class DisplayListCompositor {
 
     // MARK: Images
 
+    /// The most pixels a layer's image has: a bitmap of 64 MB, and its
+    /// copy, in a 32-bit process's address space, which a large app's own
+    /// memory leaves little room in; 1 GB where there's room. A layer
+    /// larger than that, a long document's, draws nothing.
+    #if _pointerBitWidth(_32)
+    static let maximumImagePixels: CGFloat = 16 * 1024 * 1024
+    #else
+    static let maximumImagePixels: CGFloat = 256 * 1024 * 1024
+    #endif
+
     /// An image of premultiplied RGBA pixels from CoreGraphics' ARGB ones.
-    private func makeImage(width: Int, height: Int, pixels: UnsafeRawPointer, pitch: Int) -> ImageSource {
-        var data = Data(count: width * height * 4)
+    /// Nil when there is no memory for the copy, as a 32-bit process can
+    /// run out of room for a large layer's: the layer then draws nothing.
+    private func makeImage(width: Int, height: Int, pixels: UnsafeRawPointer, pitch: Int) -> ImageSource? {
+        let (byteCount, overflowed) = (width * height).multipliedReportingOverflow(by: 4)
+        guard !overflowed, let memory = malloc(byteCount) else { return nil }
+        var data = Data(bytesNoCopy: memory, count: byteCount, deallocator: .free)
         data.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
             let out = target.bindMemory(to: UInt32.self)
             for row in 0..<height {
@@ -509,7 +523,8 @@ final class DisplayListCompositor {
         // A layer laid out to a size that is not a number, or is endless,
         // has nothing to draw (and Int() of it would trap).
         let pixels = (extent.width * scale, extent.height * scale)
-        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576,
+              pixels.0 * pixels.1 <= DisplayListCompositor.maximumImagePixels else { return nil }
         let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
         guard width > 0, height > 0, let context = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
         defer { CG.release(context) }
@@ -527,9 +542,9 @@ final class DisplayListCompositor {
             CALayer.drawContent(of: layer, state: state, shape: shape, in: context)
             CG.restoreGState(context)
         }
-        guard let data = CG.bitmapContextGetData(context) else { return nil }
-        let entry = Entry(image: makeImage(width: width, height: height, pixels: data, pitch: width * 4), version: nextVersion(),
-                          signature: signature, used: true)
+        guard let data = CG.bitmapContextGetData(context),
+              let image = makeImage(width: width, height: height, pixels: data, pitch: width * 4) else { return nil }
+        let entry = Entry(image: image, version: nextVersion(), signature: signature, used: true)
         images[key] = entry
         return entry
     }
@@ -555,7 +570,8 @@ final class DisplayListCompositor {
         let shown = (toScreen.a * toScreen.d - toScreen.b * toScreen.c).magnitude.squareRoot()
         let renderScale = scale * min(1, shown.isFinite ? max(shown, 0.05) : 1)
         let pixels = (extent.width * renderScale, extent.height * renderScale)
-        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576,
+              pixels.0 * pixels.1 <= DisplayListCompositor.maximumImagePixels else { return nil }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
         // A masked layer's image is made at this size: its pixels are the
         // image's. Drawing it again would shrink
@@ -578,9 +594,9 @@ final class DisplayListCompositor {
             CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
             CALayer.drawTree(of: layer, state: state, shape: shape, in: context)
         }
-        guard let data = CG.bitmapContextGetData(context) else { return nil }
-        let entry = Entry(image: makeImage(width: width, height: height, pixels: data, pitch: width * 4), version: nextVersion(),
-                          signature: nil, used: true, flattened: (extent.size, generation))
+        guard let data = CG.bitmapContextGetData(context),
+              let image = makeImage(width: width, height: height, pixels: data, pitch: width * 4) else { return nil }
+        let entry = Entry(image: image, version: nextVersion(), signature: nil, used: true, flattened: (extent.size, generation))
         images[key] = entry
         return entry
     }
