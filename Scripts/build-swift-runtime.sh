@@ -5,8 +5,7 @@
 #   iphoneos-arm64  arm64-apple-ios18.0 (not arm64e), for iOS apps
 #   macosx-x86_64   x86_64-apple-macos15.0, for macOS and Mac Catalyst apps
 #
-# on a Mac with Xcode, or in perry-dev under Scripts/docker-darwin.sh with
-# Xcode's SDKs. It is the release Xcode's compiler matches, with
+# on a Mac with Xcode. It is the release Xcode's compiler matches, with
 # Scripts/swift-runtime.patch, which lets a build:
 #
 # - reach thread-local data through pthread_getspecific instead of the
@@ -27,16 +26,12 @@
 # The code is built for ARMv8.0 on arm64, where a device's runtime needs
 # ARMv8.3 (pointer authentication).
 #
-# It runs Swift's CMake itself rather than utils/build-script, which only
-# runs on a Mac: first LLVM's, for the tools and headers the standard
-# library's build uses (llvm-tblgen, Clang's builtin headers), built for the
-# host; then Swift's, for the standard library alone (SWIFT_INCLUDE_TOOLS
-# off), with Xcode's (or the image's) compilers. In Linux the build is a
-# cross build to Darwin (CMAKE_SYSTEM_NAME), and stand-ins answer for the
-# tools CMake asks Xcode for: xcrun (the SDKs' paths and versions), lipo
-# (one architecture, so a copy), codesign (ld64.lld signs what it links)
-# and install_name_tool (LLVM's objcopy under that name). libswiftDemangle,
-# a tool's library there, is compiled apart: SwiftUI links it.
+# It runs Swift's CMake itself rather than utils/build-script: first
+# LLVM's, for the tools and headers the standard library's build uses
+# (llvm-tblgen, Clang's builtin headers), built for the host; then
+# Swift's, for the standard library alone (SWIFT_INCLUDE_TOOLS off), with
+# Xcode's compilers. libswiftDemangle, a tool's library there, is compiled
+# apart: SwiftUI links it.
 #
 # The libraries (the standard library, _Concurrency, _StringProcessing,
 # RegexBuilder, Observation, Synchronization, Distributed, Volatile,
@@ -93,62 +88,15 @@ fi
 mkdir -p "$build"
 # The compilers and Darwin's tools, as CMake and the standard library's
 # build find them.
-platform_cmake=()
-if [ "$(uname)" = Darwin ]; then
-    toolchain=$(dirname "$(darwin_find swiftc)")
-    cc=$toolchain/clang cxx=$toolchain/clang++ swiftc=$toolchain/swiftc tools=$toolchain
-    lipo=$toolchain/lipo host_cc=$cc host_cxx=$cxx
-    # The toolchain's compilers, called by path rather than through xcrun,
-    # find no SDK of their own: CMake gives them the host's, and checks
-    # only its C compilers (the standard library's Swift is compiled by
-    # the build's own rules, with each target's SDK).
-    platform_cmake=(-DCMAKE_OSX_SYSROOT="$(darwin_sdk macosx)" -DCMAKE_OSX_ARCHITECTURES="$host_arch"
-           -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_Swift_COMPILER_WORKS=YES)
-else
-    tools=$build/tools
-    mkdir -p "$tools"
-    # LLVM's tools run here: the image's compilers, before the stand-ins
-    # below are on PATH.
-    host_cc=$(command -v clang) host_cxx=$(command -v clang++)
-    ld=$(darwin_find ld)
-    for compiler in clang clang++; do
-        printf '#!/bin/sh\nexec %s --ld-path=%s -mlinker-version=1100 -resource-dir %s -Wno-unused-command-line-argument "$@"\n' \
-            "$(command -v $compiler)" "$ld" "$darwin_clang_resources" > "$tools/$compiler"
-    done
-    {
-        echo '#!/bin/bash'
-        echo "# xcrun's answers for Swift's CMake, from Scripts/darwin-toolchain.sh."
-        echo ". $PWD/Scripts/darwin-toolchain.sh"
-        cat <<'EOF'
-sdk=macosx
-while [ $# -gt 0 ]; do
-    case $1 in
-    --sdk | -sdk) sdk=${2%%[0-9]*}; shift 2 ;;
-    --toolchain) shift 2 ;;
-    --show-sdk-path) darwin_sdk "$sdk"; exit ;;
-    --show-sdk-version) darwin_sdk_version "$sdk"; exit ;;
-    --show-sdk-platform-path) darwin_platform_path "$sdk"; exit ;;
-    --find | -f) command -v "$2" || command -v "llvm-$2"; exit ;;
-    *) exec "$@" ;;
-    esac
-done
-EOF
-    } > "$tools/xcrun"
-    printf '#!/bin/sh\n# One architecture: -create copies its input.\nwhile [ $# -gt 0 ]; do\n    case $1 in -create) shift ;; -output) out=$2; shift 2 ;; *) in=$1; shift ;; esac\ndone\ncp "$in" "$out"\n' > "$tools/lipo"
-    printf '#!/bin/sh\n# ld64.lld signs what it links.\nexit 0\n' > "$tools/codesign"
-    ln -sf "$(command -v llvm-objcopy)" "$tools/install_name_tool"
-    chmod +x "$tools"/*
-    export PATH=$tools:$PATH
-    cc=$tools/clang cxx=$tools/clang++ swiftc=$(command -v swiftc) lipo=$tools/lipo
-    host_sdk=$(darwin_sdk macosx)
-    platform_cmake=(-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR="$host_arch"
-           -DCMAKE_OSX_SYSROOT="$host_sdk" -DCMAKE_OSX_ARCHITECTURES="$host_arch"
-           -DCMAKE_C_COMPILER_TARGET="$host_arch-apple-macosx13.0" -DCMAKE_CXX_COMPILER_TARGET="$host_arch-apple-macosx13.0"
-           -DCMAKE_Swift_COMPILER_TARGET="$host_arch-apple-macosx13.0" -DCMAKE_Swift_COMPILER_WORKS=YES
-           -DCMAKE_INSTALL_NAME_TOOL="$tools/install_name_tool"
-           -DCMAKE_AR="$(command -v llvm-ar)" -DCMAKE_RANLIB="$(command -v llvm-ranlib)"
-           "-DCMAKE_IGNORE_PATH=/usr/lib;/usr/local/lib;/lib")
-fi
+toolchain=$(dirname "$(darwin_find swiftc)")
+cc=$toolchain/clang cxx=$toolchain/clang++ swiftc=$toolchain/swiftc tools=$toolchain
+lipo=$toolchain/lipo host_cc=$cc host_cxx=$cxx
+# The toolchain's compilers, called by path rather than through xcrun,
+# find no SDK of their own: CMake gives them the host's, and checks
+# only its C compilers (the standard library's Swift is compiled by
+# the build's own rules, with each target's SDK).
+platform_cmake=(-DCMAKE_OSX_SYSROOT="$(darwin_sdk macosx)" -DCMAKE_OSX_ARCHITECTURES="$host_arch"
+       -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_Swift_COMPILER_WORKS=YES)
 
 # LLVM, for the host.
 if [ ! -f "$build/llvm/build.ninja" ]; then
