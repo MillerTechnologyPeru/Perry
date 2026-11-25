@@ -199,6 +199,10 @@ enum CFMacURLKeyNames {
     static let kCFURLApplicationIsScriptableKey = "NSURLApplicationIsScriptableKey"
     static let kCFURLQuarantinePropertiesKey = "NSURLQuarantinePropertiesKey"
     static let kCFURLTagNamesKey = "NSURLTagNamesKey"
+    /// Foundation's names for them, the same objects. A file has neither
+    /// here (no quarantine, no Finder tags): reading one gives nil.
+    static let NSURLQuarantinePropertiesKey = kCFURLQuarantinePropertiesKey
+    static let NSURLTagNamesKey = kCFURLTagNamesKey
 }
 
 /// CFString's format configuration keys and rule types.
