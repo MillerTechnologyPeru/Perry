@@ -774,6 +774,11 @@ extension NSObject {
     @ObjCMethod("decodeSizeForKey:") func sendDecodeSize(forKey key: String) -> CGSize
     @ObjCMethod("decodeBytesForKey:returnedLength:")
     func sendDecodeBytes(forKey key: String, returnedLength: UnsafeMutablePointer<UInt>?) -> UnsafeRawPointer?
+    // Unkeyed coders' (NSUnarchiver's typed streams).
+    @ObjCMethod("allowsKeyedCoding") func sendAllowsKeyedCoding() -> Bool
+    @ObjCMethod("decodeObject") func sendDecodeObject() -> NSObject?
+    @ObjCMethod("decodeValueOfObjCType:at:")
+    func sendDecodeValue(ofObjCType type: UnsafePointer<CChar>, at address: UnsafeMutableRawPointer)
 }
 
 /// What every object a nib makes can be sent, as AppKit adds it to NSObject:
@@ -920,6 +925,21 @@ open class NSNibDecoder: NSObject {
 /// Keyed decoding from any coder, for AppKit's -initWithCoder:.
 struct Coder {
     let coder: NSObject
+
+    /// Whether the coder reads keys: NSUnarchiver's typed streams don't,
+    /// and raise if asked.
+    var isKeyed: Bool { coder.sendAllowsKeyedCoding() }
+
+    /// An unkeyed coder's next value of a one-type encoding ("c", "f"),
+    /// in order: a group written together is read one type a call.
+    func value<T>(_ type: String, _ initial: T) -> T {
+        var value = initial
+        type.withCString { type in withUnsafeMutableBytes(of: &value) { coder.sendDecodeValue(ofObjCType: type, at: $0.baseAddress!) } }
+        return value
+    }
+
+    /// An unkeyed coder's next object.
+    func nextObject() -> NSObject? { coder.sendDecodeObject() }
 
     var nib: NibUnarchiving? { coder.as(NSNibDecoder.self)?.nib }
 
