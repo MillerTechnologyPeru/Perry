@@ -1117,16 +1117,24 @@ open class NSImage: NSObject {
     @ObjCMethod("setFlipped:") func setFlipped(_ value: Bool) { flippedImage = value }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
-    /// Draws the bitmap in `rect` of the current context, upright in a
-    /// flipped view as AppKit draws images whose -respectFlipped is set.
+    /// Draws the bitmap in `rect` of the current context. Respecting the
+    /// context's flippedness (as AppKit's own drawing, -drawInRect: and
+    /// -respectFlipped: do), it's upright in a flipped view. Not respecting
+    /// it (-drawInRect:fromRect:operation:fraction:, -drawAtPoint:…), it's
+    /// upside down there unless the image itself is flipped, which is how
+    /// apps before Mac OS X 10.6 drew upright, and they flip it themselves.
     /// A template bitmap (one Perry doesn't draw itself) takes the tint
     /// color, the label color by default, through its alpha.
-    func draw(in rect: CGRect, fraction: CGFloat = 1, tint: NSColor? = nil) {
+    func draw(in rect: CGRect, fraction: CGFloat = 1, tint: NSColor? = nil, respectFlipped: Bool = true) {
         guard let context = NSGraphicsContext.currentCG, let image = bitmap() else { return }
         CG.saveGState(context)
         if fraction < 1 { CG.setAlpha(context, fraction) }
         var target = rect
-        if NSGraphicsContext.current?.flipped == true {
+        let contextFlipped = NSGraphicsContext.current?.flipped == true
+        let upright = (contextFlipped && !respectFlipped) == flippedImage
+        // CoreGraphics draws an image upright in an unflipped context and
+        // upside down in a flipped one.
+        if contextFlipped == upright {
             CG.translateCTM(context, rect.minX, rect.maxY)
             CG.scaleCTM(context, 1, -1)
             target = CGRect(origin: .zero, size: rect.size)
@@ -1143,14 +1151,16 @@ open class NSImage: NSObject {
 
     @ObjCMethod("drawInRect:") func draw(inRect rect: CGRect) { draw(in: rect) }
     @ObjCMethod("drawInRect:fromRect:operation:fraction:")
-    func draw(in rect: CGRect, from source: CGRect, operation: UInt, fraction: CGFloat) { draw(in: rect, fraction: fraction) }
+    func draw(in rect: CGRect, from source: CGRect, operation: UInt, fraction: CGFloat) {
+        draw(in: rect, fraction: fraction, respectFlipped: false)
+    }
     @ObjCMethod("drawInRect:fromRect:operation:fraction:respectFlipped:hints:")
     func draw(in rect: CGRect, from source: CGRect, operation: UInt, fraction: CGFloat, respectFlipped: Bool, hints: NSObject?) {
-        draw(in: rect, fraction: fraction)
+        draw(in: rect, fraction: fraction, respectFlipped: respectFlipped)
     }
     @ObjCMethod("drawAtPoint:fromRect:operation:fraction:")
     func draw(at point: CGPoint, from source: CGRect, operation: UInt, fraction: CGFloat) {
-        draw(in: CGRect(origin: point, size: size), fraction: fraction)
+        draw(in: CGRect(origin: point, size: size), fraction: fraction, respectFlipped: false)
     }
     // Compositing, before -drawAtPoint:…: the point is the image's lower
     // left corner, and the image is upright, in a flipped view too (where
