@@ -175,9 +175,9 @@ reports:
       - "PERRY_UNIMPLEMENTED=continue"
       - "PERRY_OBJC_UNRECOGNIZED=continue"
       - "BOX86_MMAP_BASE=0x48000000"
-    level: 3
-    source: body
-    notes: Under box86 it runs full screen without gamescope, Perry scaling the mode it switches to onto the screen, and the maintainer reached the first level with the pad through gptokeyb (D-pad and Start in menus, the right stick as the mouse). Touch doesn't place its pointer; sound and longer play weren't checked here.
+    level: 4
+    source: maintainer
+    notes: Under box86 it plays full screen without gamescope, Perry scaling the mode it switches to onto the screen. The maintainer played it with the pad through gptokeyb (D-pad and Start in menus, the right stick as the mouse) and found sound and play working. Touch doesn't place its pointer.
     screenshots:
       - url: https://github.com/user-attachments/assets/1a311782-dab1-473e-b62f-d9e95fed30a1
         caption: The first level on the Retroid Pocket 5
