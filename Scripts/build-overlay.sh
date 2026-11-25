@@ -8,10 +8,9 @@
 # up a framework's Swift symbols.
 #
 # An overlay of additions (Darwin/<Name>/module-name names the module it
-# adds to, say UIKit for Darwin/UIKitAdditions) is Swift API newer than
-# that module's overlay: it is compiled as that module, for its symbols,
-# and linked as libswift<Name>.dylib, which the loader looks in after the
-# module's overlay.
+# adds to) is Swift API newer than that module's overlay: it is compiled
+# as that module, for its symbols, and linked as libswift<Name>.dylib,
+# which the loader looks in after the module's overlay.
 #
 # Usage: [PERRY_OVERLAY_PLATFORM=macosx] [PERRY_OVERLAY_TARGET=<triple>] Scripts/build-overlay.sh <Module> [output directory]
 #   default output: .build/perry-swift-runtime
