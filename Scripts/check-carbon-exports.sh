@@ -44,8 +44,9 @@ if [ -s "$work/unlisted" ]; then
     sed 's/^/  /' "$work/unlisted" >&2
     status=1
 fi
+# Every provider has an entry point of its own.
 for other; do
-    exported "$other" | comm -12 "$work/listed" - > "$work/both"
+    exported "$other" | grep -vx perry_provider_startup | comm -12 "$work/listed" - > "$work/both"
     if [ -s "$work/both" ]; then
         echo "$other also exports $(wc -l < "$work/both") of Carbon's names:" >&2
         sed 's/^/  /' "$work/both" >&2
