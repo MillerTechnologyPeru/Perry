@@ -16,6 +16,25 @@ struct ObjectKey: Hashable {
     }
 }
 
+// The app's code may raise an Objective-C exception, which unwinds through
+// Swift without ending the accesses its frames have open. A mutating call
+// on a stored property or a global (sort(by:), removeAll(where:)) keeps
+// one open while its closure runs, and one left behind stays in Swift's
+// record of accesses after its frame is gone, for the next one to trip on.
+// Code that calls the app (a comparator, a block, -isEqual:) works on a
+// copy, and the result is assigned back once the app has returned.
+extension Array {
+    /// The elements `matches` keeps, and the ones it takes out, in order.
+    /// `matches` runs once for each, with no access to the array open.
+    func split(removing matches: (Element) throws -> Bool) rethrows -> (kept: [Element], removed: [Element]) {
+        var kept: [Element] = [], removed: [Element] = []
+        for element in self {
+            if try matches(element) { removed.append(element) } else { kept.append(element) }
+        }
+        return (kept, removed)
+    }
+}
+
 /// Blocks: the invoke function is the word after isa, flags and reserved,
 /// callable from Linux code (darwinCallable).
 enum Blocks {
