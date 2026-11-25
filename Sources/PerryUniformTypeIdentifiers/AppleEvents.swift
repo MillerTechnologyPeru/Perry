@@ -744,6 +744,11 @@ public func AEGetSpecialHandler(_ functionClass: UInt32, _ handler: UnsafeMutabl
     return AE.handlerNotFound
 }
 
+/// OSErr AEInstallSpecialHandler(AEKeyword, AEEventHandlerUPP, Boolean):
+/// accepted and not kept, as AEGetSpecialHandler says.
+@c(_AEInstallSpecialHandler)
+public func AEInstallSpecialHandler(_ functionClass: UInt32, _ handler: UnsafeRawPointer?, _ system: UInt8) -> Int16 { AE.noErr }
+
 @c(_AERemoveSpecialHandler)
 public func AERemoveSpecialHandler(_ functionClass: UInt32, _ handler: UnsafeRawPointer?, _ system: UInt8) -> Int16 { AE.noErr }
 

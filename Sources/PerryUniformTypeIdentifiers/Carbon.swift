@@ -147,6 +147,50 @@ public func SetHandleSize(_ handle: UnsafeMutableRawPointer?, _ size: Int) {
     lastMemoryError = 0
 }
 
+/// OSErr PtrAndHand(const void *, Handle, long): appends the bytes to the
+/// handle's block.
+@c(_PtrAndHand)
+public func PtrAndHand(_ bytes: UnsafeRawPointer?, _ handle: UnsafeMutableRawPointer?, _ size: Int) -> Int16 {
+    guard let entry = master(handle), size >= 0 else { return handle == nil ? -109 : -50 }
+    let old = entry.pointee.size
+    SetHandleSize(handle, old + size)
+    guard lastMemoryError == 0 else { return lastMemoryError }
+    if let bytes, size > 0, let block = entry.pointee.block { (block + old).copyMemory(from: bytes, byteCount: size) }
+    return 0
+}
+
+/// OSErr PtrToHand(const void *, Handle *, long): a new handle holding a
+/// copy of the bytes.
+@c(_PtrToHand)
+public func PtrToHand(_ bytes: UnsafeRawPointer?, _ result: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, _ size: Int) -> Int16 {
+    guard let result, size >= 0 else { return -50 }
+    guard let handle = NewHandle(size) else {
+        result.pointee = nil
+        return -108   // memFullErr
+    }
+    if let bytes, size > 0, let block = master(handle)?.pointee.block { block.copyMemory(from: bytes, byteCount: size) }
+    result.pointee = handle
+    return 0
+}
+
+/// OSErr PtrToXHand(const void *, Handle, long): the handle's block replaced
+/// by a copy of the bytes.
+@c(_PtrToXHand)
+public func PtrToXHand(_ bytes: UnsafeRawPointer?, _ handle: UnsafeMutableRawPointer?, _ size: Int) -> Int16 {
+    guard let entry = master(handle), size >= 0 else { return handle == nil ? -109 : -50 }
+    SetHandleSize(handle, size)
+    guard lastMemoryError == 0 else { return lastMemoryError }
+    if let bytes, size > 0, let block = entry.pointee.block { block.copyMemory(from: bytes, byteCount: size) }
+    return 0
+}
+
+/// OSErr HandAndHand(Handle a, Handle b): appends a's bytes to b's.
+@c(_HandAndHand)
+public func HandAndHand(_ source: UnsafeMutableRawPointer?, _ destination: UnsafeMutableRawPointer?) -> Int16 {
+    guard let from = master(source) else { return -109 }
+    return PtrAndHand(from.pointee.block, destination, from.pointee.size)
+}
+
 /// Size MaxBlock(void): the largest block that could be had, for programs
 /// sizing their buffers by it: 64 MB, which malloc gives as it's used.
 @c(_MaxBlock) public func MaxBlock() -> Int { 64 << 20 }

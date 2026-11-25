@@ -304,8 +304,72 @@ const void *darwin_dyld_image_header_containing_address(const void *address) {
     return header;
 }
 
-// Dl_info has the same layout on both. Mach-O images are named by path,
-// without their symbols; anything else is glibc's to describe.
+// The defined symbol nearest at or below an address in a Mach-O image, as
+// dyld's dladdr finds it: from the image's symbol table (LC_SYMTAB), whose
+// file offsets are in __LINKEDIT. External and private symbols both count;
+// stabs and undefined ones don't. Names keep their leading underscore off,
+// as Darwin gives them ("_mh_execute_header" for __mh_execute_header).
+static void nearest_symbol(const void *header, intptr_t slide, const void *address, const char **name, void **symbol) {
+    const uint32_t *mach = header;
+    bool wide = mach[0] == 0xfeedfacf;
+    const uint8_t *command = (const uint8_t *)header + (wide ? 32 : 28);
+    const uint32_t *symtab = NULL;
+    uint64_t linkedit_address = 0, linkedit_offset = 0;
+    bool linkedit = false;
+    for (uint32_t i = 0; i < mach[4]; i++) {
+        const uint32_t *words = (const uint32_t *)command;
+        if (words[0] == 0x2 /* LC_SYMTAB */)
+            symtab = words;
+        if (words[0] == 0x19 /* LC_SEGMENT_64 */ && strncmp((const char *)command + 8, "__LINKEDIT", 16) == 0) {
+            memcpy(&linkedit_address, command + 24, 8);
+            memcpy(&linkedit_offset, command + 40, 8);
+            linkedit = true;
+        }
+        if (words[0] == 0x1 /* LC_SEGMENT */ && strncmp((const char *)command + 8, "__LINKEDIT", 16) == 0) {
+            linkedit_address = words[6];
+            linkedit_offset = words[8];
+            linkedit = true;
+        }
+        command += words[1];
+    }
+    if (!symtab || !linkedit)
+        return;
+    const uint8_t *base = (const uint8_t *)(uintptr_t)(linkedit_address - linkedit_offset + (uint64_t)slide);
+    const uint8_t *entries = base + symtab[2];
+    const char *strings = (const char *)(base + symtab[4]);
+    size_t entry_size = wide ? 16 : 12;
+    uintptr_t target = (uintptr_t)address, best = 0;
+    const char *best_name = NULL;
+    for (uint32_t i = 0; i < symtab[3]; i++) {
+        const uint8_t *entry = entries + (size_t)i * entry_size;
+        uint32_t string;
+        memcpy(&string, entry, 4);
+        uint8_t type = entry[4];
+        if ((type & 0xe0) /* N_STAB */ || (type & 0x0e) != 0x0e /* N_SECT */)
+            continue;
+        uint64_t value = 0;
+        if (wide)
+            memcpy(&value, entry + 8, 8);
+        else {
+            uint32_t narrow;
+            memcpy(&narrow, entry + 8, 4);
+            value = narrow;
+        }
+        uintptr_t location = (uintptr_t)(value + (uint64_t)slide);
+        if (location <= target && location >= best && string < symtab[5]) {
+            best = location;
+            best_name = strings + string;
+        }
+    }
+    if (!best_name)
+        return;
+    *name = best_name[0] == '_' ? best_name + 1 : best_name;
+    *symbol = (void *)best;
+}
+
+// Dl_info has the same layout on both. A Mach-O image is named by its path,
+// with the nearest symbol from its symbol table; anything else is glibc's to
+// describe.
 int darwin_dladdr(const void *address, Dl_info *info) DARWIN_SYMBOL(dladdr);
 int darwin_dladdr(const void *address, Dl_info *info) {
     pthread_mutex_lock(&lock);
@@ -315,6 +379,7 @@ int darwin_dladdr(const void *address, Dl_info *info) {
         info->dli_fbase = (void *)images[index].header;
         info->dli_sname = NULL;
         info->dli_saddr = NULL;
+        nearest_symbol(images[index].header, images[index].slide, address, &info->dli_sname, &info->dli_saddr);
     }
     pthread_mutex_unlock(&lock);
     return index >= 0 ? 1 : dladdr(address, info);

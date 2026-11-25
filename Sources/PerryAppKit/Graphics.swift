@@ -1232,6 +1232,11 @@ open class NSGraphicsContext: NSObject {
     static func graphicsContext(cgContext: UnsafeMutableRawPointer?, flipped: Bool) -> NSGraphicsContext? {
         NSGraphicsContext(cgContext: cgContext, flipped: flipped)
     }
+    /// The same, by its name before 10.10, where the port is a CGContextRef.
+    @ObjCClassMethod("graphicsContextWithGraphicsPort:flipped:")
+    static func graphicsContext(graphicsPort: UnsafeMutableRawPointer?, flipped: Bool) -> NSGraphicsContext? {
+        NSGraphicsContext(cgContext: graphicsPort, flipped: flipped)
+    }
     @ObjCClassMethod("graphicsContextWithBitmapImageRep:") static func graphicsContext(bitmapImageRep: NSObject?) -> NSGraphicsContext? { nil }
     @ObjCClassMethod("saveGraphicsState")
     static func classSaveGraphicsState() {
