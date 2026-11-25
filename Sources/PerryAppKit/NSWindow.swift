@@ -414,6 +414,9 @@ open class NSWindow: NSResponder {
     func backingAlignedRect(_ rect: CGRect, options: UInt64) -> CGRect { Backing.aligned(rect, scale: backingScale) }
 
     /// The mouse in the window's base coordinates.
+    /// The event the application is handling, which a window gives too.
+    @ObjCMethod("currentEvent") func windowCurrentEvent() -> NSEvent? { App.shared?.currentEvent }
+
     @ObjCMethod("mouseLocationOutsideOfEventStream")
     func mouseLocationOutsideOfEventStream() -> CGPoint { convertPoint(fromScreen: NSEvent.mouseLocation()) }
 

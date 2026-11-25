@@ -223,6 +223,26 @@ open class NSEvent: NSObject {
     @ObjCMethod("trackingArea") func eventTrackingArea() -> NSObject? { trackingArea }
     @ObjCMethod("userData") func userData() -> UnsafeMutableRawPointer? { nil }
     @ObjCMethod("CGEvent") func cgEvent() -> UnsafeMutableRawPointer? { nil }
+
+    /// An event for a Core Graphics event, with no window: its type and
+    /// modifier flags, whose numbers the two share, and its place, which
+    /// Core Graphics gives from the main screen's top left, in screen
+    /// coordinates. Apps make one of CGEventCreate(NULL) to read the mouse
+    /// and the modifier keys.
+    @ObjCClassMethod("eventWithCGEvent:")
+    static func event(cgEvent: UnsafeMutableRawPointer?) -> NSEvent? {
+        guard let cgEvent else { return nil }
+        typealias GetType = @convention(c) (UnsafeMutableRawPointer?) -> UInt32
+        typealias GetFlags = @convention(c) (UnsafeMutableRawPointer?) -> UInt64
+        typealias GetLocation = @convention(c) (UnsafeMutableRawPointer?) -> CGPoint
+        let coreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+        func function<T>(_ name: String, _ type: T.Type) -> T? { Symbols.symbol(coreGraphics, name).map { unsafeBitCast($0, to: T.self) } }
+        let location = function("_CGEventGetLocation", GetLocation.self)?(cgEvent) ?? .zero
+        let type = function("_CGEventGetType", GetType.self).flatMap { EventType(rawValue: UInt($0(cgEvent))) } ?? .applicationDefined
+        let event = NSEvent(type, window: nil, location: CGPoint(x: location.x, y: Screens.height - location.y))
+        if let flags = function("_CGEventGetFlags", GetFlags.self)?(cgEvent) { event.modifierFlags = UInt(truncatingIfNeeded: flags) }
+        return event
+    }
     @ObjCMethod("isSwipeTrackingFromScrollEventsEnabled") func swipeTracking() -> Bool { false }
     @ObjCMethod("allTouches") func allTouches() -> NSObject? { nil }
 
