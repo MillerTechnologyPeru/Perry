@@ -1,5 +1,5 @@
 {
-  "originHash" : "1bd256974971bc4263f655702355a617b3abdaf411bbca1f0bce4f921561b06d",
+  "originHash" : "6faeb860bde8d2e38cb6fc1035db3410be2057c80a1a5701493ab2ffcf9d8d78",
   "pins" : [
     {
       "identity" : "android",
@@ -62,6 +62,15 @@
       "state" : {
         "branch" : "master",
         "revision" : "02b7b628cfff1406731dde5e912e020f0f6f00c1"
+      }
+    },
+    {
+      "identity" : "graphite",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/PureSwift/Graphite.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "e6e7b8ffd729631f7b25ca2a06fa4e7daee1865c"
       }
     },
     {

@@ -1,13 +1,14 @@
 import Glibc
+import GraphiteBase
 import PerryObjCInterop
 
 // Mac apps' alone: armv7 runs only iOS apps, so it has none of this.
 #if !arch(arm)
 // The rest of CoreServices that Mac apps call: UCKeyTranslate with the U.S.
 // keyboard layout (the one AppKit's text input source names), Gestalt's
-// system version (macOS 14), Launch Services, which finds no other apps
-// and opens nothing, its long date-times, characters' Unicode
-// properties and collation.
+// answers (the system version, macOS 14, its memory and QuickTime's),
+// Launch Services, which finds no other apps and opens nothing, its long
+// date-times, characters' Unicode properties and collation.
 
 /// The characters the U.S. layout types for a Mac virtual key code: plain
 /// and with shift.
@@ -79,19 +80,45 @@ private func systemVersion() -> (Int32, Int32, Int32) {
     return (major, numbers.count > 1 ? numbers[1] : 0, numbers.count > 2 ? numbers[2] : 0)
 }
 
-/// OSErr Gestalt(OSType selector, SInt32 *response): the system version
-/// NSProcessInfo reports (Mac OS X 10.5.8 to a program from before 10.7),
-/// as 'sysv' (in BCD, capped at 10.9.3 as Apple's is) and 'sys1' to
-/// 'sys3'; other selectors aren't known.
+/// Gestalt's answers: Graphite's table for the system version NSProcessInfo
+/// reports (Mac OS X 10.5.8 to a program from before 10.7) as 'sysv' (in
+/// BCD, capped at 10.9.3 as Apple's is) and 'sys1' to 'sys3', the physical
+/// memory as 'ram ' and 'lram' (at most 2 GB), and the processor as 'sysa'
+/// (but for an arm64 program); and QuickTime 7.6.4's 'qtim' and 'qtfs' when
+/// QuickTime's provider is there, as QuickTime registers them on a Mac.
+/// Carbon's provider answered the memory, the processor and QuickTime's
+/// until this one did.
+private let gestaltAnswers: GraphiteBase.Gestalt = {
+    let (major, minor, patch) = systemVersion()
+    #if arch(powerpc)
+    var table = GraphiteBase.Gestalt.standard(systemVersion: (major, minor, patch), architecture: .powerPC)
+    #else
+    var table = GraphiteBase.Gestalt.standard(systemVersion: (major, minor, patch), architecture: .intel)
+    #endif
+    #if arch(arm64)
+    // An arm64 program's Mac has no 'sysa' of Intel's.
+    try? table.remove("sysa")
+    #endif
+    let quickTime = "/System/Library/Frameworks/QuickTime.framework/Versions/A/QuickTime"
+    if let lookup = providerSymbolLookup, quickTime.withCString({ library in lookup(library, "_EnterMovies") }) != nil {
+        table.replace("qtim", with: .value(0x0764_8000))
+        table.replace("qtfs", with: .value(0x3f))
+    }
+    return table
+}()
+
+/// OSErr Gestalt(OSType selector, SInt32 *response): CoreServices' answer,
+/// Carbon's and QuickTime's, from one table; gestaltUndefSelectorErr for
+/// the rest.
 @c(_Gestalt)
 public func Gestalt(_ selector: UInt32, _ response: UnsafeMutablePointer<Int32>?) -> Int16 {
-    func code(_ text: String) -> UInt32 { text.utf8.reduce(0) { $0 << 8 | UInt32($1) } }
-    let (major, minor, patch) = systemVersion()
-    let bcd: Int32 = major == 10 && minor <= 9 ? 0x1000 | minor << 4 | min(patch, 9) : 0x1093
-    let answers: [UInt32: Int32] = [code("sysv"): bcd, code("sys1"): major, code("sys2"): minor, code("sys3"): patch]
-    guard let answer = answers[selector] else { return -5551 }    // gestaltUndefSelectorErr
-    response?.pointee = answer
-    return 0
+    guard let response else { return -50 }    // paramErr
+    do throws(MacError) {
+        response.pointee = try gestaltAnswers.response(for: FourCharCode(rawValue: selector))
+        return 0
+    } catch {
+        return Int16(truncatingIfNeeded: error.code)
+    }
 }
 
 /// cpu_type_t _CSGetProcessorArchitecture(void): the processor the program

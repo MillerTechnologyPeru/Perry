@@ -17,6 +17,7 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
 #define LIBSYSTEM "/usr/lib/libSystem.B.dylib"
 
 enum { kMPTimeoutErr = -29296, kMPDeletedErr = -29295, kMPInsufficientResourcesErr = -29298, kMPInvalidIDErr = -29299 };
@@ -331,3 +332,4 @@ void carbon_MPExit(OSStatus status) {
 
 void carbon_MPYield(void) CARBON_SYMBOL(MPYield);
 void carbon_MPYield(void) { sched_yield(); }
+#endif  // PERRY_CARBON_SWIFT
