@@ -13,9 +13,9 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /pe
     # 64-bit inodes. The 32-bit one fails on file systems with larger inode
     # numbers, and under box86 gives every file inode 0, by which Carbon
     # tells folders apart. FreeType measures and draws the text of ATSUI.
-    cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -freg-struct-return -Wall -Wno-unused-function -ISources/PerryCarbon/include -ISources/PerryInterface/include -I$sysroot/usr/include/freetype2"
+    cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -freg-struct-return -Wall -Wno-unused-function -ISources/CPerryCarbon/include -ISources/PerryInterface/include -I$sysroot/usr/include/freetype2"
     objects=""
-    for source in Sources/PerryCarbon/*.c; do
+    for source in Sources/CPerryCarbon/*.c; do
         name=$(basename "$source")
         object=$out/obj/carbon-$name.o
         clang $cflags -c "$source" -o "$object" || failed=1
