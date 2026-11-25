@@ -408,6 +408,10 @@ enum HTTPAuthenticationSchemes {
     static let kCFHTTPAuthenticationSchemeNegotiate = "Negotiate"
     static let kCFHTTPAuthenticationSchemeNegotiate2 = "Negotiate2"
     static let kCFHTTPAuthenticationSchemeXMobileMeAuthToken = "XMobileMeAuthToken"
+    // CFHTTPMessageApplyCredentialDictionary's keys.
+    static let kCFHTTPAuthenticationUsername = "kCFHTTPAuthenticationUsername"
+    static let kCFHTTPAuthenticationPassword = "kCFHTTPAuthenticationPassword"
+    static let kCFHTTPAuthenticationAccountDomain = "kCFHTTPAuthenticationAccountDomain"
 }
 
 @ObjCConstants
