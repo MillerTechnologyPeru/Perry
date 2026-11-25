@@ -136,6 +136,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
         // Silica: CoreGraphics' drawing model in Swift, and its Cairo renderer.
         .package(url: "https://github.com/PureSwift/Silica.git", branch: "master"),
+        // Graphite: the Mac Toolbox in Swift, which Carbon's provider is moving onto.
+        .package(url: "https://github.com/PureSwift/Graphite.git", branch: "master"),
         // Cairo and FontConfig, which Silica renders with, and CoreGraphics
         // and CoreText use directly.
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
@@ -321,14 +323,19 @@ let package = Package(
         // Carbon's provider. CPerryCarbon is its C, which Scripts/build-i386-carbon.sh and
         // build-ppc-carbon.sh also build alone; PerryCarbon is the Swift its parts move to.
         .systemLibrary(name: "CPerryFreeType", pkgConfig: "freetype2"),
+        // PERRY_CARBON_SWIFT leaves out of CPerryCarbon the parts PerryCarbon exports.
         .target(
             name: "CPerryCarbon",
             dependencies: ["CPerryFreeType", "PerryInterface"],
+            cSettings: [.define("PERRY_CARBON_SWIFT")],
             linkerSettings: [.linkedLibrary("m"), .linkedLibrary("pthread")]
         ),
         .target(
             name: "PerryCarbon",
-            dependencies: ["CPerryCarbon"],
+            dependencies: [
+                "CPerryCarbon", "PerryObjCInterop",
+                .product(name: "GraphiteBase", package: "Graphite"),
+            ],
             exclude: ["exports.txt"]
         ),
         // WebKitGTK's JavaScriptCore, whose C API is Apple's, and the
