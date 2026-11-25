@@ -43,6 +43,9 @@ else
         exit 1
     }
     darwin_resources=$darwin_developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift
+    # Xcode's clang's resources, for compiler-rt's libclang_rt.<os>.a, which
+    # clang links (availability checks): the image's clang has none for Darwin.
+    darwin_clang_resources=$(ls -d "$darwin_developer"/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/[0-9]* | head -1)
     darwin_ld=${PERRY_LLVM_BIN:-/usr/lib/llvm-19/bin}/ld64.lld
     darwin_module_cache=${PERRY_MODULE_CACHE:-/module-cache}
     # The platform directory's name for an SDK name.
@@ -64,10 +67,19 @@ else
     darwin_swiftc() {
         shift
         swiftc -resource-dir "$darwin_resources" -module-cache-path "$darwin_module_cache" \
-            -ld-path="$darwin_ld" -Xclang-linker -mlinker-version=1100 "$@"
+            -ld-path="$darwin_ld" -Xclang-linker -mlinker-version=1100 \
+            -Xclang-linker -resource-dir -Xclang-linker "$darwin_clang_resources" "$@"
     }
-    darwin_clang() { shift; clang --ld-path="$darwin_ld" -mlinker-version=1100 -Wno-unused-command-line-argument "$@"; }
-    darwin_clangxx() { shift; clang++ --ld-path="$darwin_ld" -mlinker-version=1100 -Wno-unused-command-line-argument "$@"; }
+    darwin_clang() {
+        shift
+        clang --ld-path="$darwin_ld" -mlinker-version=1100 -resource-dir "$darwin_clang_resources" \
+            -Wno-unused-command-line-argument "$@"
+    }
+    darwin_clangxx() {
+        shift
+        clang++ --ld-path="$darwin_ld" -mlinker-version=1100 -resource-dir "$darwin_clang_resources" \
+            -Wno-unused-command-line-argument "$@"
+    }
     darwin_find() {
         case $1 in
         ld) echo "$darwin_ld" ;;
