@@ -1,6 +1,5 @@
 #!/bin/bash
-# Builds a Swift overlay of Perry's on a Mac with Xcode, or in perry-dev with
-# its SDKs (Scripts/docker-darwin.sh): Darwin/<Module>/Sources
+# Builds a Swift overlay of Perry's on a Mac with Xcode: Darwin/<Module>/Sources
 # compiled as the Swift module <Module> over the SDK's Objective-C or C
 # headers of the same name, as Apple builds its overlays, for iOS arm64 with
 # library evolution, and linked as libswift<Module>.dylib in the directory
