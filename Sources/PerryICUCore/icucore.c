@@ -5,8 +5,8 @@
 // libicui18n with the version in each name (uregex_open_76). The C API's
 // types are the same (UChar is 16 bits, UErrorCode an int), so each
 // function here calls ICU's, found the first time it's needed. What Mac
-// programs use: regular expressions (Xcode's build output parsing) and
-// error names.
+// programs use: regular expressions (Xcode's build output parsing), error
+// names and combining classes.
 
 #define _GNU_SOURCE
 #include "PerryICUCore.h"
@@ -141,4 +141,12 @@ int32_t darwin_uregex_end(URegularExpression *regex, int32_t group, UErrorCode *
     if (real) return real(regex, group, status);
     if (status) *status = unsupported;
     return -1;
+}
+
+// A code point's canonical combining class (0 for none), which text editors
+// read to keep accents with their base characters.
+uint8_t darwin_u_getCombiningClass(int32_t c) DARWIN_SYMBOL(u_getCombiningClass);
+uint8_t darwin_u_getCombiningClass(int32_t c) {
+    RESOLVE(uint8_t (*)(int32_t), u_getCombiningClass);
+    return real ? real(c) : 0;
 }

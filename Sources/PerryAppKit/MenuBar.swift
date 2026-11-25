@@ -75,8 +75,7 @@ enum MenuBar {
             let index = appMenu.index(of: item)
             appMenu.removeItem(item)
             var separator: NSMenuItem?
-            if let last = destination.items.last, !last.separator {
-                let added = NSMenuItem.separatorItem()
+            if let last = destination.items.last, !last.separator, let added = NSMenuItem.separatorItem(NSMenuItem.objCClass) {
                 destination.addItem(added)
                 separator = added
             }

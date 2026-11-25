@@ -139,6 +139,20 @@ static void print_registers(const mcontext_t *machine) {
 }
 #endif
 
+// The signals' names, without strsignal: it translates them through
+// gettext, which can allocate, and a heap check's abort holds malloc's lock.
+static const char *signal_name(int signal) {
+    switch (signal) {
+    case SIGSEGV: return "Segmentation fault";
+    case SIGBUS: return "Bus error";
+    case SIGILL: return "Illegal instruction";
+    case SIGFPE: return "Floating point exception";
+    case SIGTRAP: return "Trace/breakpoint trap";
+    case SIGABRT: return "Aborted";
+    default: return "?";
+    }
+}
+
 static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
     ucontext_t *context = raw_context;
 #if defined(__powerpc__)
@@ -146,7 +160,7 @@ static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
 #else
     mcontext_t *machine = &context->uc_mcontext;
 #endif
-    crash_print("perry: crash: signal %d (%s) at 0x%lx, thread %ld\n", signal, strsignal(signal),
+    crash_print("perry: crash: signal %d (%s) at 0x%lx, thread %ld\n", signal, signal_name(signal),
                 (unsigned long)(uintptr_t)info->si_addr, (long)gettid());
     print_registers(machine);
     // Frame records are {previous fp, return address}, ascending the stack

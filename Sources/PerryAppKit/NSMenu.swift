@@ -198,6 +198,14 @@ open class NSMenuItem: NSObject {
     /// Whether the key equivalent works while the item is hidden: kept, as
     /// hidden items' equivalents are matched anyway.
     var allowsKeyEquivalentWhenHidden = false
+    /// macOS 14's localization and mirroring of key equivalents for other
+    /// keyboard layouts and right-to-left languages: kept, as there is only
+    /// the U.S. layout here.
+    var allowsAutomaticKeyEquivalentLocalization = true
+    var allowsAutomaticKeyEquivalentMirroring = true
+    /// macOS 27's NSMenuItemImageVisibility (0 automatic, 1 visible, 2
+    /// hidden): kept; items draw the image they have.
+    var preferredImageVisibility = 0
     /// Not retained.
     var target: UnsafeMutableRawPointer?
     var submenu: NSMenu?
@@ -303,10 +311,26 @@ open class NSMenuItem: NSObject {
         encoder.object(submenu, "NSSubmenu")
     }
 
+    /// A new item of the class the message was sent to: a subclass's
+    /// +separatorItem sends it to super and sets its own instance variables
+    /// in what comes back, which must be big enough to have them.
+    static func make(_ cls: ObjCClass) -> NSMenuItem? {
+        cls.object.allocated().initialized().as(NSMenuItem.self)
+    }
+
     @ObjCClassMethod("separatorItem")
-    static func separatorItem() -> NSMenuItem {
-        let item = NSMenuItem()
+    static func separatorItem(_ cls: ObjCClass) -> NSMenuItem? {
+        guard let item = make(cls) else { return nil }
         item.separator = true
+        item.enabled = false
+        return item
+    }
+
+    /// macOS 14's section header: a title that can't be chosen.
+    @ObjCClassMethod("sectionHeaderWithTitle:")
+    static func sectionHeader(_ cls: ObjCClass, title: String?) -> NSMenuItem? {
+        guard let item = make(cls) else { return nil }
+        item.title = title ?? ""
         item.enabled = false
         return item
     }
@@ -325,6 +349,16 @@ open class NSMenuItem: NSObject {
     @ObjCMethod("setKeyEquivalentModifierMask:") func setKeyEquivalentModifierMask(_ mask: UInt) { keyEquivalentModifierMask = mask }
     @ObjCMethod("allowsKeyEquivalentWhenHidden") func itemAllowsKeyEquivalentWhenHidden() -> Bool { allowsKeyEquivalentWhenHidden }
     @ObjCMethod("setAllowsKeyEquivalentWhenHidden:") func setAllowsKeyEquivalentWhenHidden(_ value: Bool) { allowsKeyEquivalentWhenHidden = value }
+    @ObjCMethod("allowsAutomaticKeyEquivalentLocalization")
+    func itemAllowsAutomaticKeyEquivalentLocalization() -> Bool { allowsAutomaticKeyEquivalentLocalization }
+    @ObjCMethod("setAllowsAutomaticKeyEquivalentLocalization:")
+    func setAllowsAutomaticKeyEquivalentLocalization(_ value: Bool) { allowsAutomaticKeyEquivalentLocalization = value }
+    @ObjCMethod("allowsAutomaticKeyEquivalentMirroring")
+    func itemAllowsAutomaticKeyEquivalentMirroring() -> Bool { allowsAutomaticKeyEquivalentMirroring }
+    @ObjCMethod("setAllowsAutomaticKeyEquivalentMirroring:")
+    func setAllowsAutomaticKeyEquivalentMirroring(_ value: Bool) { allowsAutomaticKeyEquivalentMirroring = value }
+    @ObjCMethod("preferredImageVisibility") func itemPreferredImageVisibility() -> Int { preferredImageVisibility }
+    @ObjCMethod("setPreferredImageVisibility:") func setPreferredImageVisibility(_ value: Int) { preferredImageVisibility = value }
     @ObjCMethod("submenu") func itemSubmenu() -> NSMenu? { submenu }
     @ObjCMethod("setSubmenu:")
     func setSubmenu(_ menu: NSMenu?) {

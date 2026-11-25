@@ -6,7 +6,8 @@ import PerryObjCInterop
 // The rest of CoreServices that Mac apps call: UCKeyTranslate with the U.S.
 // keyboard layout (the one AppKit's text input source names), Gestalt's
 // system version (macOS 14), Launch Services, which finds no other apps
-// and opens nothing, and its long date-times.
+// and opens nothing, its long date-times and characters' Unicode
+// properties.
 
 /// The characters the U.S. layout types for a Mac virtual key code: plain
 /// and with shift.
@@ -131,6 +132,133 @@ public func UCConvertCFAbsoluteTimeToLongDateTime(_ time: Double, _ longDate: Un
 public func UCConvertLongDateTimeToCFAbsoluteTime(_ longDate: Int64, _ time: UnsafeMutablePointer<Double>?) -> Int32 {
     time?.pointee = Double(longDate) - 3_061_152_000
     return 0
+}
+
+/// OSStatus UCGetCharProperty(const UniChar *, UniCharCount,
+/// UCCharPropertyType, UCCharPropertyValue *): a property of the first
+/// character (a surrogate pair is one), from Swift's Unicode tables. The
+/// bidirectional class, which Swift has no table for, is read from the
+/// general category and the right-to-left scripts' blocks.
+@c(_UCGetCharProperty)
+public func UCGetCharProperty(_ characters: UnsafePointer<UInt16>?, _ length: Int, _ type: Int32,
+                              _ value: UnsafeMutablePointer<UInt32>?) -> Int32 {
+    let paramErr: Int32 = -50
+    guard let characters, length > 0, let value else { return paramErr }
+    // A lone surrogate is kUCGenlCatOtherSurrogate, with no other property.
+    guard let scalar = UnicodeCharacterProperties.scalar(UnsafeBufferPointer(start: characters, count: length)) else {
+        guard (1...3).contains(type) else { return paramErr }
+        value.pointee = type == 1 ? 3 : 0
+        return 0
+    }
+    switch type {
+    case 1: value.pointee = UnicodeCharacterProperties.category(scalar)
+    case 2: value.pointee = UInt32(scalar.properties.canonicalCombiningClass.rawValue)
+    case 3: value.pointee = UnicodeCharacterProperties.bidiCategory(scalar)
+    case 4:
+        guard scalar.properties.numericType == .decimal, let digit = scalar.properties.numericValue else { return paramErr }
+        value.pointee = UInt32(digit)
+    default: return paramErr
+    }
+    return 0
+}
+
+/// UCGetCharProperty's values: Carbon's general and bidirectional categories.
+private enum UnicodeCharacterProperties {
+    /// The first character: a surrogate pair's scalar; nil for a lone
+    /// surrogate.
+    static func scalar(_ units: UnsafeBufferPointer<UInt16>) -> Unicode.Scalar? {
+        let first = units[0]
+        if UTF16.isLeadSurrogate(first), units.count > 1, UTF16.isTrailSurrogate(units[1]) {
+            return Unicode.Scalar(0x10000 + (UInt32(first - 0xD800) << 10) + UInt32(units[1] - 0xDC00))
+        }
+        return Unicode.Scalar(first)
+    }
+
+    /// kUCGenlCat*.
+    static func category(_ scalar: Unicode.Scalar) -> UInt32 {
+        switch scalar.properties.generalCategory {
+        case .unassigned: 0
+        case .control: 1
+        case .format: 2
+        case .surrogate: 3
+        case .privateUse: 4
+        case .nonspacingMark: 5
+        case .spacingMark: 6
+        case .enclosingMark: 7
+        case .decimalNumber: 8
+        case .letterNumber: 9
+        case .otherNumber: 10
+        case .spaceSeparator: 11
+        case .lineSeparator: 12
+        case .paragraphSeparator: 13
+        case .uppercaseLetter: 14
+        case .lowercaseLetter: 15
+        case .titlecaseLetter: 16
+        case .modifierLetter: 17
+        case .otherLetter: 18
+        case .connectorPunctuation: 20
+        case .dashPunctuation: 21
+        case .openPunctuation: 22
+        case .closePunctuation: 23
+        case .initialPunctuation: 24
+        case .finalPunctuation: 25
+        case .otherPunctuation: 26
+        case .mathSymbol: 28
+        case .currencySymbol: 29
+        case .modifierSymbol: 30
+        case .otherSymbol: 31
+        @unknown default: 0
+        }
+    }
+
+    /// kUCBidiCat*: the explicit formatting characters by code point,
+    /// Hebrew's and Arabic's blocks right to left, and the rest by category.
+    static func bidiCategory(_ scalar: Unicode.Scalar) -> UInt32 {
+        let value = scalar.value
+        switch value {
+        case 0x202A: return 13    // LRE
+        case 0x202B: return 14    // RLE
+        case 0x202C: return 17    // PDF
+        case 0x202D: return 15    // LRO
+        case 0x202E: return 16    // RLO
+        case 0x2066: return 20    // LRI
+        case 0x2067: return 21    // RLI
+        case 0x2068: return 22    // FSI
+        case 0x2069: return 23    // PDI
+        case 0x09, 0x0B, 0x1F: return 9    // S
+        case 0x0A, 0x0D, 0x1C...0x1E, 0x85: return 8    // B
+        case 0x0660...0x0669, 0x066B, 0x066C, 0x06DD, 0x0890, 0x0891, 0x08E2: return 6    // AN
+        case 0x2B, 0x2D: return 4    // ES
+        case 0x23...0x25, 0xA2...0xA5, 0xB0, 0xB1, 0x2030...0x2034: return 5    // ET
+        case 0x2C, 0x2E, 0x2F, 0x3A, 0xA0: return 7    // CS
+        default: break
+        }
+        let properties = scalar.properties
+        switch properties.generalCategory {
+        case .nonspacingMark, .enclosingMark: return 18    // NSM
+        case .spaceSeparator: return 10    // WS
+        case .lineSeparator: return 10
+        case .paragraphSeparator: return 8
+        case .control, .format: return 19    // BN
+        case .decimalNumber: return 3    // EN
+        case .currencySymbol: return 5
+        default: break
+        }
+        switch value {
+        case 0x0590...0x05FF, 0x07C0...0x085F, 0xFB1D...0xFB4F, 0x10800...0x10FFF, 0x1E800...0x1EDFF, 0x1EF00...0x1EFFF:
+            return 2    // R
+        case 0x0600...0x07BF, 0x0860...0x08FF, 0xFB50...0xFDFF, 0xFE70...0xFEFF, 0x1EE00...0x1EEFF:
+            return 12    // AL
+        default: break
+        }
+        switch properties.generalCategory {
+        case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .spacingMark, .letterNumber,
+             .privateUse, .unassigned:
+            return 1    // L
+        default:
+            return 11    // ON
+        }
+    }
 }
 
 extension NSObject {
