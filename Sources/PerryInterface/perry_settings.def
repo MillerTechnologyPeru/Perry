@@ -138,6 +138,7 @@ PERRY_SETTING(SCENEKIT_NO_OVERLAY, flag, "UIKit", detail, "don't show SceneKit v
 // MARK: AppKit
 PERRY_SETTING(APPKIT_DISPLAY, bool01, "AppKit", detail, "0: open no windows, even with a display")
 PERRY_SETTING(APPKIT_APPEARANCE, string, "AppKit", detail, "light or dark, in place of the desktop's")
+PERRY_SETTING(APPKIT_GLOBAL_MENU, bool01, "AppKit", detail, "0 serves no menus to the desktop's menu bar, so windows keep their own")
 PERRY_SETTING(APPKIT_MENUBAR, string, "AppKit", detail, "off: leave the main menu out of windows")
 PERRY_SETTING(APPKIT_QUIET_ALERTS, flag, "AppKit", detail, "only log alerts with no choice to make, so the app runs on")
 PERRY_SETTING(APPKIT_OPEN, list, "AppKit", detail, "files to open at launch, in place of an untitled document")
