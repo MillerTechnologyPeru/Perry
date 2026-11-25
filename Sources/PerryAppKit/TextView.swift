@@ -540,8 +540,21 @@ open class NSLayoutManager: NSObject {
     @ObjCMethod("addTextContainer:")
     func addTextContainer(_ container: NSTextContainer?) {
         guard let container else { return }
-        containers.append(container)
+        insertTextContainer(container, at: containers.count)
+    }
+
+    /// The container in the manager's list. A text view made on the
+    /// container before it joined a manager (-initWithFrame:textContainer:
+    /// first, as Bean makes its pages) now shows the manager's storage.
+    @ObjCMethod("insertTextContainer:atIndex:")
+    func insertTextContainer(_ container: NSTextContainer?, at index: Int) {
+        guard let container else { return }
+        containers.insert(container, at: min(max(index, 0), containers.count))
         container.layoutManagerObject = objcObject
+        if let view = container.textView, view.manager !== self {
+            view.manager = self
+            view.textChanged()
+        }
     }
     @ObjCMethod("removeTextContainerAtIndex:") func removeTextContainer(at index: Int) { if containers.indices.contains(index) { containers.remove(at: index) } }
     @ObjCMethod("delegate") func managerDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
