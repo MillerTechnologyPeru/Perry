@@ -84,7 +84,11 @@ id perry_CGLGetCurrentContext(void) { return send(context_class(), "currentConte
 CGLError perry_CGLFlushDrawable(id context) CGL_SYMBOL(CGLFlushDrawable);
 CGLError perry_CGLFlushDrawable(id context) {
     if (!context) return kCGLBadContext;
-    perry_aux_before_swap();
+    // The size the program draws at, where AppKit shows the window scaled
+    // to the screen from a display mode's.
+    int width = (int)(intptr_t)send(context, "_perryPresentationWidth");
+    int height = (int)(intptr_t)send(context, "_perryPresentationHeight");
+    perry_aux_before_swap(width, height);
     send(context, "flushBuffer");
     perry_aux_after_swap();
     return kCGLNoError;
