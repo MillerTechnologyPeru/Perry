@@ -221,7 +221,6 @@ PASSTHROUGH _localtime, localtime
 PASSTHROUGH _localtime_r, localtime_r
 PASSTHROUGH _gmtime, gmtime
 PASSTHROUGH _gmtime_r, gmtime_r
-PASSTHROUGH _strsignal, strsignal
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
@@ -388,12 +387,12 @@ PASSTHROUGH _arc4random_uniform, arc4random_uniform
 .endm
 
 OFFSET_THEN_INT _lseek, lseek64
-OFFSET_THEN_INT _fseeko, fseeko64
+// fseeko on a Darwin stream, which stands for a glibc one (darwin_file.c).
+OFFSET_THEN_INT _fseeko, perry_fseeko
 OFFSET_LAST _ftruncate, ftruncate64
 OFFSET_LAST _truncate, truncate64
 THREE_THEN_OFFSET _pread, pread64
 THREE_THEN_OFFSET _pwrite, pwrite64
-PASSTHROUGH _ftello, ftello64
 
 // mmap(addr, length, protection, flags, fd, off_t): fd, then the offset, on
 // the stack here; fd, padding, then the offset at an even slot there. The
