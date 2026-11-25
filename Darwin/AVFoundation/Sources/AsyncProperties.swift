@@ -356,9 +356,11 @@ extension AVPartialAsyncProperty where Root: AVAssetTrack {
 
 @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
 extension AVPartialAsyncProperty where Root: AVAssetTrack {
+    // The property is macOS's alone in the headers, and only this one
+    // elsewhere: it is read by its key.
     @available(macOS 12, iOS 16, tvOS 16, watchOS 9, visionOS 1, *)
     public static var canProvideSampleCursors: AVAsyncProperty<Root, Bool> {
-        AVAsyncProperty(key: "canProvideSampleCursors") { $0.canProvideSampleCursors }
+        AVAsyncProperty(key: "canProvideSampleCursors") { ($0.value(forKey: "canProvideSampleCursors") as? Bool) ?? false }
     }
 }
 
