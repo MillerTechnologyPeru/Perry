@@ -6,8 +6,8 @@ import PerryObjCInterop
 // The rest of CoreServices that Mac apps call: UCKeyTranslate with the U.S.
 // keyboard layout (the one AppKit's text input source names), Gestalt's
 // system version (macOS 14), Launch Services, which finds no other apps
-// and opens nothing, its long date-times and characters' Unicode
-// properties.
+// and opens nothing, its long date-times, characters' Unicode
+// properties and collation.
 
 /// The characters the U.S. layout types for a Mac virtual key code: plain
 /// and with shift.
@@ -160,6 +160,107 @@ public func UCGetCharProperty(_ characters: UnsafePointer<UInt16>?, _ length: In
     default: return paramErr
     }
     return 0
+}
+
+/// A CollatorRef: UCCollateOptions, kept for UCCompareText.
+final class Collator {
+    let options: UInt32
+    init(options: UInt32) { self.options = options }
+
+    /// kUCCollate options this compares by: case, diacritics and digits.
+    static let caseInsensitive: UInt32 = 1 << 3, diacriticInsensitive: UInt32 = 1 << 4, digitsAsNumber: UInt32 = 1 << 17
+
+    /// Folds what the options ignore: case, and diacritics (combining marks
+    /// after a base character and the Latin letters that carry them).
+    static func folded(_ text: String, _ options: UInt32) -> [Unicode.Scalar] {
+        var scalars = Array((options & caseInsensitive != 0 ? text.lowercased() : text).unicodeScalars)
+        if options & diacriticInsensitive != 0 {
+            scalars = scalars.compactMap { scalar in
+                if scalar.properties.canonicalCombiningClass.rawValue != 0 { return nil }
+                // A precomposed letter's base: its name's first word after
+                // "LATIN SMALL/CAPITAL LETTER".
+                if let name = scalar.properties.name, name.hasPrefix("LATIN "), name.contains(" WITH "),
+                   let letter = name.split(separator: " ").dropFirst(3).first, letter.count == 1, let base = letter.unicodeScalars.first {
+                    let lower = Unicode.Scalar(base.value | 0x20) ?? base
+                    return name.contains("SMALL") || options & caseInsensitive != 0 ? lower : base
+                }
+                return scalar
+            }
+        }
+        return scalars
+    }
+
+    /// -1, 0 or 1: by code point, with runs of digits compared as numbers
+    /// when asked.
+    static func compare(_ a: String, _ b: String, _ options: UInt32) -> Int32 {
+        let left = folded(a, options), right = folded(b, options)
+        var i = 0, j = 0
+        while i < left.count, j < right.count {
+            if options & digitsAsNumber != 0, left[i].properties.numericType == .decimal, right[j].properties.numericType == .decimal {
+                var x = i, y = j
+                while x < left.count, left[x].properties.numericType == .decimal { x += 1 }
+                while y < right.count, right[y].properties.numericType == .decimal { y += 1 }
+                let first = left[i..<x].map { Int($0.properties.numericValue ?? 0) }, second = right[j..<y].map { Int($0.properties.numericValue ?? 0) }
+                let trimmedFirst = Array(first.drop { $0 == 0 }), trimmedSecond = Array(second.drop { $0 == 0 })
+                if trimmedFirst.count != trimmedSecond.count { return trimmedFirst.count < trimmedSecond.count ? -1 : 1 }
+                if trimmedFirst != trimmedSecond { return trimmedFirst.lexicographicallyPrecedes(trimmedSecond) ? -1 : 1 }
+                i = x
+                j = y
+                continue
+            }
+            if left[i] != right[j] { return left[i].value < right[j].value ? -1 : 1 }
+            i += 1
+            j += 1
+        }
+        return left.count - i == right.count - j ? 0 : (left.count - i < right.count - j ? -1 : 1)
+    }
+
+    static func compare(_ options: UInt32, _ first: UnsafePointer<UInt16>?, _ firstLength: Int, _ second: UnsafePointer<UInt16>?,
+                        _ secondLength: Int, _ equivalent: UnsafeMutablePointer<UInt8>?, _ order: UnsafeMutablePointer<Int32>?) -> Int32 {
+        guard firstLength >= 0, secondLength >= 0, firstLength == 0 || first != nil, secondLength == 0 || second != nil else { return -50 }
+        let a = String(decoding: UnsafeBufferPointer(start: first, count: firstLength), as: UTF16.self)
+        let b = String(decoding: UnsafeBufferPointer(start: second, count: secondLength), as: UTF16.self)
+        let result = compare(a, b, options)
+        equivalent?.pointee = result == 0 ? 1 : 0
+        order?.pointee = result
+        return 0
+    }
+}
+
+/// OSStatus UCCreateCollator(LocaleRef, LocaleOperationVariant, UCCollateOptions,
+/// CollatorRef *): any locale's collator is this one.
+@c(_UCCreateCollator)
+public func UCCreateCollator(_ locale: UnsafeRawPointer?, _ variant: UInt32, _ options: UInt32,
+                             _ collator: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let collator else { return -50 }
+    collator.pointee = Unmanaged.passRetained(Collator(options: options)).toOpaque()
+    return 0
+}
+
+@c(_UCDisposeCollator)
+public func UCDisposeCollator(_ collator: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let collator, let reference = collator.pointee else { return -50 }
+    Unmanaged<Collator>.fromOpaque(reference).release()
+    collator.pointee = nil
+    return 0
+}
+
+/// OSStatus UCCompareText(CollatorRef, const UniChar *, UniCharCount, const
+/// UniChar *, UniCharCount, Boolean *equivalent, SInt32 *order).
+@c(_UCCompareText)
+public func UCCompareText(_ collator: UnsafeMutableRawPointer?, _ first: UnsafePointer<UInt16>?, _ firstLength: Int,
+                          _ second: UnsafePointer<UInt16>?, _ secondLength: Int, _ equivalent: UnsafeMutablePointer<UInt8>?,
+                          _ order: UnsafeMutablePointer<Int32>?) -> Int32 {
+    guard let collator else { return -50 }
+    let options = Unmanaged<Collator>.fromOpaque(collator).takeUnretainedValue().options
+    return Collator.compare(options, first, firstLength, second, secondLength, equivalent, order)
+}
+
+@c(_UCCompareTextDefault)
+public func UCCompareTextDefault(_ options: UInt32, _ first: UnsafePointer<UInt16>?, _ firstLength: Int,
+                                 _ second: UnsafePointer<UInt16>?, _ secondLength: Int, _ equivalent: UnsafeMutablePointer<UInt8>?,
+                                 _ order: UnsafeMutablePointer<Int32>?) -> Int32 {
+    Collator.compare(options, first, firstLength, second, secondLength, equivalent, order)
 }
 
 /// UCGetCharProperty's values: Carbon's general and bidirectional categories.
