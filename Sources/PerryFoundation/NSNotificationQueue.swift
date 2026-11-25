@@ -36,20 +36,32 @@ final class NotificationQueueStorage {
         }
     }
 
+    /// The queued notifications of one style or both, in the order
+    /// queued, retained and autoreleased: the caller sends them -object and
+    /// -name with the monitor unlocked. They may be the app's subclasses,
+    /// whose methods may raise, and an exception unwinds through Swift
+    /// without unlocking.
+    func queued(asap wantASAP: Bool = true, idle wantIdle: Bool = true) -> [id] {
+        let queued: [id] = monitor.locked {
+            ((wantASAP ? asap : []) + (wantIdle ? idle : [])).map { ObjC.retain($0)! }
+        }
+        return queued.map { ObjC.autorelease($0)! }
+    }
+
     /// Removes the queued notifications matching `notification`, of one
     /// style or both.
     func remove(matching notification: id, mask: UInt, fromASAP: Bool = true, fromIdle: Bool = true) {
+        let matching = queued(asap: fromASAP, idle: fromIdle).filter { NotificationQueues.matches($0, notification, mask: mask) }
+        guard !matching.isEmpty else { return }
         let removed: [id] = monitor.locked {
-            // The notifications are sent -object and -name with no access
-            // to the queues open (Array.split).
             var removed: [id] = []
             if fromASAP {
-                let split = asap.split { NotificationQueues.matches($0, notification, mask: mask) }
+                let split = asap.split { matching.contains($0) }
                 asap = split.kept
                 removed += split.removed
             }
             if fromIdle {
-                let split = idle.split { NotificationQueues.matches($0, notification, mask: mask) }
+                let split = idle.split { matching.contains($0) }
                 idle = split.kept
                 removed += split.removed
             }
@@ -140,9 +152,15 @@ enum NotificationQueues {
                 ObjC.release(notification)
             }
         }
-        lock.locked {
-            waiting[key]?.removeAll { queue in queue.monitor.locked { queue.asap.isEmpty && queue.idle.isEmpty } }
+        // A queue the app has let go of goes once the lock is open: its
+        // center may be the app's, whose -dealloc runs as it goes.
+        let finished: [NotificationQueueStorage] = lock.locked {
+            guard let queues = waiting[key] else { return [] }
+            let split = queues.split { queue in queue.monitor.locked { queue.asap.isEmpty && queue.idle.isEmpty } }
+            waiting[key] = split.kept
+            return split.removed
         }
+        withExtendedLifetime(finished) {}
     }
 }
 
@@ -191,15 +209,13 @@ public final class NSNotificationQueue: NSObject {
             storage.remove(matching: object, mask: coalesceMask)
             Notifications.post(object, from: storage.center)
         case PostingStyle.asap:
-            let queued = storage.monitor.locked { storage.asap.contains { NotificationQueues.matches($0, object, mask: coalesceMask) } }
+            let queued = storage.queued(idle: false).contains { NotificationQueues.matches($0, object, mask: coalesceMask) }
             guard !queued else { return }
             storage.remove(matching: object, mask: coalesceMask, fromASAP: false)
             storage.monitor.locked { storage.asap.append(ObjC.retain(object)!) }
             NotificationQueues.schedule(storage)
         default:
-            let queued = storage.monitor.locked {
-                (storage.asap + storage.idle).contains { NotificationQueues.matches($0, object, mask: coalesceMask) }
-            }
+            let queued = storage.queued().contains { NotificationQueues.matches($0, object, mask: coalesceMask) }
             guard !queued else { return }
             storage.monitor.locked { storage.idle.append(ObjC.retain(object)!) }
             NotificationQueues.schedule(storage)
