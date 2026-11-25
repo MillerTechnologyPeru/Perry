@@ -4,7 +4,7 @@
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$root/.build/i386/bin" "$root/.build/i386/obj"
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry --entrypoint sh perry-dev -euc '
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /perry --entrypoint sh "${PERRY_IMAGE:-perry-dev}" -euc '
     sysroot=/perry/.toolchains/i386-sdk/sysroot out=.build/i386
     gcc=$(dirname "$(find $sysroot -name crtbegin.o | head -1)")
     # -freg-struct-return: small structures come back in eax:edx, as Darwin
