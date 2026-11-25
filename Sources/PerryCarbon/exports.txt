@@ -206,7 +206,6 @@ _FlushEvents
 _ForeColor
 _FrontNonFloatingWindow
 _FrontWindow
-_Gestalt
 _Get1NamedResource
 _Get1Resource
 _GetAliasSize
