@@ -186,6 +186,31 @@ reports:
         caption: The first level on the Retroid Pocket 5
       - url: https://github.com/user-attachments/assets/23fc3df2-cf25-4c1e-bba7-b68c72ab8364
         caption: The main menu full screen on the Retroid Pocket 5
+  - pr: 407
+    date: 2026-11-24
+    perry: "6c6b6105"
+    platform: macos
+    cpu: i386
+    app_version: "2.0"
+    hardware: Retroid Pocket 5
+    os: ROCKNIX 20261101
+    packaging: Packaging/macos/com.macsoft.halo/portmaster
+    resolution: "1920x1080"
+    graphics: OpenGL
+    env:
+      - "PERRY_DISCS=Halo Universal=roms/ports/halo/disc"
+      - "PERRY_CONTAINER=roms/ports/halo/conf"
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "BOX86_MMAP_BASE=0x48000000"
+      - "vblank_mode=2"
+    fps: 60
+    level: 5
+    source: maintainer
+    notes: Under box86 it plays full screen at 1920x1080, synced to the display at 60 frames a second by MangoHud from the start. Every control the maintainer tried works with the pad through gptokeyb, crouch included, along with sound and play.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/e14d46ca-74e7-40ad-abc2-67aff0c5da08
+        caption: The first level at 1920x1080 and 60 FPS on the Retroid Pocket 5, with MangoHud's overlay
 ---
 
 A Carbon application for PowerPC and Intel, run with the 32-bit Perry. It
