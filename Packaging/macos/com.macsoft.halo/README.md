@@ -31,6 +31,12 @@ plus box86 built as [the runtime's README](../../shared/box86/README.md)
 says, as `/storage/perry-i386/box86`. Preferences, profiles and saved games
 are kept in `roms/ports/halo/conf`.
 
+The game plays full screen by switching the display to a resolution of its
+own, 800×600 at first. The launcher runs it in gamescope, where there is
+one, with a screen of that size scaled to the device's; `HALO_SCREEN` gives
+another size (`HALO_SCREEN=1024x768`), which the game's Video settings then
+offer, and `HALO_SCREEN=off` leaves gamescope out.
+
 | Control | |
 | --- | --- |
 | Left stick | walk (W A S D) |

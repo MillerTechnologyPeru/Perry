@@ -747,6 +747,51 @@ open class NSWindow: NSResponder {
     @ObjCMethod("toggleFullScreen:")
     func toggleFullScreen(_ sender: NSObject?) { setFullScreen(styleMask & StyleMask.fullScreen == 0) }
 
+    /// The size of the display mode the window covers a display in: the one
+    /// a program switched to, or the screen's own. The screen is to show
+    /// the window alone, at that resolution, as a Mac's did for a program
+    /// that captured the display (Carbon sends this for a window that is a
+    /// mode's size, and zeros once it no longer is).
+    private var displayModeSize: (width: Int, height: Int)?
+
+    @ObjCMethod("_perryShowInDisplayModeOfWidth:height:")
+    func showInDisplayMode(width: Int, height: Int) {
+        guard width > 0, height > 0 else {
+            guard displayModeSize != nil else { return }
+            displayModeSize = nil
+            Dispatch.onMainAndWait {
+                guard let sdlWindow = self.sdlWindow else { return }
+                _ = SDL_SetWindowFullscreen(sdlWindow.unsafePointer, false)
+                Trace.log("window \(self.windowNumber) no longer full screen in a display mode")
+            }
+            return
+        }
+        guard displayModeSize?.width != width || displayModeSize?.height != height else { return }
+        displayModeSize = (width, height)
+        Dispatch.onMainAndWait { self.enterDisplayMode() }
+    }
+
+    /// Full screen in SDL's mode of that size, if the display has one: the
+    /// screen keeps its own resolution where modes are only emulated, and
+    /// the window is scaled to it. With no such mode the window stays as
+    /// it is, since full screen at the desktop's size would leave the
+    /// program drawing into a corner.
+    private func enterDisplayMode() {
+        guard let size = displayModeSize, let sdlWindow else { return }
+        let window = sdlWindow.unsafePointer
+        var mode = SDL_DisplayMode()
+        guard SDL_GetClosestFullscreenDisplayMode(SDL_GetDisplayForWindow(window), Int32(size.width), Int32(size.height), 0, false, &mode),
+              mode.w == Int32(size.width), mode.h == Int32(size.height) else {
+            appKitWarning("the display has no \(size.width)×\(size.height) mode; window \(windowNumber) stays a window")
+            return
+        }
+        guard SDL_SetWindowFullscreenMode(window, &mode), SDL_SetWindowFullscreen(window, true) else {
+            appKitWarning("window \(windowNumber) could not be shown full screen at \(size.width)×\(size.height): \(String(cString: SDL_GetError()))")
+            return
+        }
+        Trace.log("window \(windowNumber) full screen in the display's \(size.width)×\(size.height) mode")
+    }
+
     func setFullScreen(_ on: Bool) {
         guard (styleMask & StyleMask.fullScreen != 0) != on else { return }
         if on {
@@ -885,6 +930,7 @@ open class NSWindow: NSResponder {
         defer {
             bordersWhileShown = borderLater
             if borderLater && !hidden { Self.removeBorder(window) }
+            if !hidden { enterDisplayMode() }
         }
         let top = Screens.flip(frame)
         try? window.setPosition(x: Int32(top.minX.rounded()), y: Int32(top.minY.rounded()))

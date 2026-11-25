@@ -55,6 +55,27 @@ static void place(WindowRef window, const Rect *bounds) {
     carbon_port_resize(window->port, bounds->right - bounds->left, bounds->bottom - bounds->top);
 }
 
+/// A window the size of a display mode is the program's full screen: of the
+/// mode the program switched to, which on the Mac the display it covered
+/// was in, or of the screen's own. The screen here keeps its mode, so AppKit
+/// shows the window alone at that resolution, and as a window again once it
+/// is another size.
+static void fit_display_mode(WindowRef window) {
+    if (!window->visible) return;
+    int32_t width = 0, height = 0;
+    void (*switched)(int32_t *, int32_t *) = (void (*)(int32_t *, int32_t *))carbon_function(
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", "_PerryCGDisplaySwitchedSize");
+    if (switched) switched(&width, &height);
+    if (width <= 0 || height <= 0) {
+        Rect screen = (*carbon_main_device())->gdRect;
+        width = screen.right - screen.left;
+        height = screen.bottom - screen.top;
+    }
+    if (width != window->bounds.right - window->bounds.left || height != window->bounds.bottom - window->bounds.top) width = height = 0;
+    if (width > 0) CARBON_TRACE("window %p: the size of a display mode, %d×%d", (void *)window, (int)width, (int)height);
+    ((void (*)(id, SEL, long, long))objc_send)(window->nswindow, SELECTOR("_perryShowInDisplayModeOfWidth:height:"), width, height);
+}
+
 static Rect content_bounds(WindowRef window) {
     // The bounds kept are the content's, global: the window's port's
     // bounds are those, from its own origin.
@@ -162,6 +183,7 @@ void carbon_ShowWindow(WindowRef window) {
     if (!(window = carbon_window_from(window))) return;
     window->visible = true;
     SEND1(window->nswindow, "makeKeyAndOrderFront:", NULL);
+    fit_display_mode(window);
 }
 
 void carbon_HideWindow(WindowRef window) CARBON_SYMBOL(HideWindow);
@@ -357,6 +379,7 @@ OSStatus carbon_SetWindowBounds(WindowRef window, uint16_t region, const Rect *b
     if (region == kWindowStructureRgn) content.top += titled(window->windowClass, window->attributes) ? 22 : 0;
     window->bounds = content;
     place(window, &content);
+    fit_display_mode(window);
     return noErr;
 }
 
