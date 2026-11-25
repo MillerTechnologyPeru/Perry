@@ -333,6 +333,22 @@ open class NSTextStorage: NSObject {
     }
 
     @ObjCMethod("string") func storageString() -> String { Send.object(contents.objcObject, "string").map { String(objCArgument: $0) } ?? "" }
+    /// NSAttributedString's word boundaries, which reach a storage only
+    /// here: it's an NSObject, forwarding the rest to its contents, which a
+    /// subclass keeping its own text leaves empty.
+    @ObjCMethod("nextWordFromIndex:forward:")
+    func nextWord(from index: UInt, forward: Bool) -> UInt {
+        let units = Array(string.utf16)
+        let start = index > UInt(units.count) ? units.count : Int(index)
+        return UInt(forward ? Words.next(units, from: start) : Words.previous(units, from: start))
+    }
+
+    @ObjCMethod("doubleClickAtIndex:")
+    func doubleClick(at index: UInt) -> NSRange {
+        let units = Array(string.utf16)
+        return Words.around(units, index > UInt(units.count) ? units.count : Int(index))
+    }
+
     /// The text's length: a subclass that keeps its own text (overrides
     /// -string, as Bean's word-counting storage does) has its string's, as
     /// NSAttributedString's -length is; Perry's own, the contents'.
