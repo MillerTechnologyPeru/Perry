@@ -185,17 +185,28 @@ static void serveStream(int fd) {
     close(fd);
 }
 
+// Connections a server has accepted and not yet finished with.
+static volatile long serving;
+
 static void serve(int listening, void (*handler)(int)) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         while (YES) {
             int fd = accept(listening, NULL, NULL);
             if (fd < 0) return;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{ handler(fd); });
+            __sync_fetch_and_add(&serving, 1);
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+                handler(fd);
+                __sync_fetch_and_sub(&serving, 1);
+            });
         }
     });
 }
 
+// The servers' notes so far, once each connection they accepted is done
+// (for up to five seconds): a server can still be reading a close when the
+// client has finished, which makes its notes late on some systems.
 static void printNotes(void) {
+    for (int i = 0; i < 500 && __sync_fetch_and_add(&serving, 0) > 0; i++) usleep(10000);
     @synchronized (serverNotes) {
         for (NSString *line in serverNotes) print(line);
         [serverNotes removeAllObjects];
@@ -382,11 +393,14 @@ static void webSockets(NSURLSession *session, Recorder *recorder) {
         dispatch_semaphore_signal(done);
     }];
     await(done);
+    // Its own semaphore: a stray signal on `done` has been seen to let the
+    // pong's line come after the next ones.
+    dispatch_semaphore_t ponged = dispatch_semaphore_create(0);
     [task sendPingWithPongReceiveHandler:^(NSError *error) {
         P(@"pong: %@", err(error));
-        dispatch_semaphore_signal(done);
+        dispatch_semaphore_signal(ponged);
     }];
-    await(done);
+    await(ponged);
     P(@"ws response %ld protocol=%@ state=%ld", (long)((NSHTTPURLResponse *)task.response).statusCode,
       [(NSHTTPURLResponse *)task.response valueForHTTPHeaderField:@"Sec-WebSocket-Protocol"], (long)task.state);
     [task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:[@"bye" dataUsingEncoding:NSUTF8StringEncoding]];
