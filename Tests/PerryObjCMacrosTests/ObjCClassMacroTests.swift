@@ -593,36 +593,27 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 }
 
                 public func windowScene() -> UIWindowScene {
-                    enum ObjCSelectorCache {
-                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("windowScene")
-                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UIWindowScene.ObjCResultType
                     let message = unsafeBitCast(ObjCRuntime.msgSend(returning: UIWindowScene.self), to: Message.self)
-                    return UIWindowScene.objCValue(returnValue: UIWindowScene.objCArgumentForm(ofResult: message(objcObject, ObjCSelectorCache.selector)))
+                    return UIWindowScene.objCValue(returnValue: UIWindowScene.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("windowScene"))))
                 }
 
                 public func sceneDidBecomeActive(_ scene: UIScene) {
                     guard responds(to: "sceneDidBecomeActive:") else {
                         return
                     }
-                    enum ObjCSelectorCache {
-                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("sceneDidBecomeActive:")
-                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UIScene.ObjCType) -> Void
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    message(objcObject, ObjCSelectorCache.selector, scene.objCArgument())
+                    message(objcObject, ObjCRuntime.selector("sceneDidBecomeActive:"), scene.objCArgument())
                 }
 
                 public func shouldConnect(_ scene: UIScene) -> Bool? {
                     guard responds(to: "shouldConnect:") else {
                         return nil
                     }
-                    enum ObjCSelectorCache {
-                        nonisolated(unsafe) static let selector = ObjCRuntime.selector("shouldConnect:")
-                    }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UIScene.ObjCType) -> Bool.ObjCResultType
                     let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Bool.self), to: Message.self)
-                    return objCOptionalResult(message(objcObject, ObjCSelectorCache.selector, scene.objCArgument()), as: Bool.self, owned: false)
+                    return objCOptionalResult(message(objcObject, ObjCRuntime.selector("shouldConnect:"), scene.objCArgument()), as: Bool.self, owned: false)
                 }
 
                 override public class func defineObjCProtocol() {
