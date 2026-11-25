@@ -163,11 +163,14 @@ public func NSIntersectionRange(_ a: NSRange, _ b: NSRange) -> NSRange {
     return end > start ? NSRange(location: start, length: end - start) : NSRange(location: 0, length: 0)
 }
 
-/// The physical memory, in bytes.
+/// The physical memory, in bytes: as much as an NSUInteger holds where it
+/// is more, as 4 GB is for a 32-bit program.
 @c(_NSRealMemoryAvailable)
 public func NSRealMemoryAvailable() -> UInt {
     let pages = sysconf(Int32(_SC_PHYS_PAGES)), size = sysconf(Int32(_SC_PAGESIZE))
-    return pages > 0 && size > 0 ? UInt(pages) * UInt(size) : 0
+    guard pages > 0, size > 0 else { return 0 }
+    let (bytes, overflowed) = UInt(pages).multipliedReportingOverflow(by: UInt(size))
+    return overflowed ? .max : bytes
 }
 
 @c(_NSPageSize)
