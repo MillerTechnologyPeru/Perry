@@ -134,6 +134,7 @@ if [ "$arch" = arm64 ]; then
     step _MapKit_SwiftUI Scripts/build-mapkit-swiftui.sh "$out"
     step _StoreKit_SwiftUI Scripts/build-storekit-swiftui.sh "$out"
     step _AuthenticationServices_SwiftUI Scripts/build-authenticationservices-swiftui.sh "$out"
+    step _AVKit_SwiftUI Scripts/build-avkit-swiftui.sh "$out"
 else
     for module in "${overlays[@]}" "${mac_overlays[@]}"; do
         macos "$module" Scripts/build-overlay.sh "$module" "$out"
