@@ -297,10 +297,22 @@ __attribute__((constructor)) static void own_illegal_instruction(void) {
 }
 #endif
 
+// The handlers for SIGEMT (7) and SIGINFO (29), which Linux has no signal
+// for. Nothing raises them there, so a handler is recorded and never called:
+// xz sets one for SIGINFO, to report its progress, and stops if that fails.
+static darwin_sigaction unmapped_handlers[32];
+
 // An app's handler is installed behind a translation of the signal frame.
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) DARWIN_SYMBOL(sigaction);
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) {
     int linux_signal = perry_signal_to_linux(signal);
+    if (linux_signal < 0 && (signal == 7 || signal == 29)) {
+        if (previous)
+            *previous = unmapped_handlers[signal];
+        if (action)
+            unmapped_handlers[signal] = *action;
+        return 0;
+    }
     if (linux_signal <= 0) {
         errno = EINVAL;
         return -1;
