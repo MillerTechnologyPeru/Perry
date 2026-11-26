@@ -60,6 +60,14 @@ JSON
     # loader binds where the library is loaded.
     catalyst=(-Fsystem "$frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift" -L "$support/usr/lib"
               -Xlinker -U -Xlinker __AXSHoverTextEnabled) ;;
+arm64-*)
+    # An arm64 target's code is for apple-a7, plain Armv8.0, as
+    # Scripts/darwin-toolchain.sh builds the overlays SwiftUI imports
+    # (Scripts/check-armv8.sh), so that the modules SwiftPM precompiles agree
+    # with theirs. SwiftPM's default build system gives these to the
+    # target's compiles alone, not the host tools' (a destination file
+    # would be taken for a macOS build there).
+    spm_target+=(-Xswiftc -target-cpu -Xswiftc apple-a7 -Xcc -mcpu=apple-a7 -Xcxx -mcpu=apple-a7) ;;
 esac
 packages=$root/Darwin/SwiftUI
 mkdir -p "$work" "$out/SwiftUI.framework"
