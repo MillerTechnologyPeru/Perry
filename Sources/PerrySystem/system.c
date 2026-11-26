@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
@@ -465,6 +466,102 @@ long darwin_sysconf(int name) {
     if (linux_name == _SC_PHYS_PAGES || linux_name == _SC_AVPHYS_PAGES)
         return (long)((uint64_t)sysconf(linux_name) * (uint64_t)sysconf(_SC_PAGESIZE) / DARWIN_PAGE_SIZE);
     return sysconf(linux_name);
+}
+
+// Darwin's pathconf names as glibc's, or -1 for those Linux has no limit
+// for (_PC_MIN_HOLE_SIZE, _PC_XATTR_SIZE_BITS and the _NP ones, which are
+// answered in pathconf_value).
+static int pathconf_name_to_linux(int name) {
+    switch (name) {
+    case 1: return _PC_LINK_MAX;
+    case 2: return _PC_MAX_CANON;
+    case 3: return _PC_MAX_INPUT;
+    case 4: return _PC_NAME_MAX;
+    case 5: return _PC_PATH_MAX;
+    case 6: return _PC_PIPE_BUF;
+    case 7: return _PC_CHOWN_RESTRICTED;
+    case 8: return _PC_NO_TRUNC;
+    case 15: return _PC_2_SYMLINKS;
+    case 16: return _PC_ALLOC_SIZE_MIN;
+    case 17: return _PC_ASYNC_IO;
+    case 18: return _PC_FILESIZEBITS;
+    case 19: return _PC_PRIO_IO;
+    case 20: return _PC_REC_INCR_XFER_SIZE;
+    case 21: return _PC_REC_MAX_XFER_SIZE;
+    case 22: return _PC_REC_MIN_XFER_SIZE;
+    case 23: return _PC_REC_XFER_ALIGN;
+    case 24: return _PC_SYMLINK_MAX;
+    case 25: return _PC_SYNC_IO;
+    default: return -1;
+    }
+}
+
+// The answers that are Darwin's own: a path is at most 1024 bytes there,
+// and the files here are case sensitive and keep their case, without ACLs.
+// *handled says whether the name was one of them. (_PC_VDISABLE, 0xff for a
+// terminal and EINVAL for any other file, is in the callers.)
+static long pathconf_value(int name, int *handled) {
+    *handled = 1;
+    switch (name) {
+    case 5: return 1024;        // _PC_PATH_MAX
+    case 10: return 255;        // _PC_NAME_CHARS_MAX
+    case 11: return 1;          // _PC_CASE_SENSITIVE
+    case 12: return 1;          // _PC_CASE_PRESERVING
+    case 13: return 0;          // _PC_EXTENDED_SECURITY_NP
+    case 14: return 0;          // _PC_AUTH_OPAQUE_NP
+    default: *handled = 0; return 0;
+    }
+}
+
+long darwin_pathconf(const char *path, int name) DARWIN_SYMBOL(pathconf);
+long darwin_pathconf(const char *path, int name) {
+    if (name == 9) {
+        struct stat status;
+        if (stat(path, &status) != 0)
+            return -1;
+        if (!S_ISCHR(status.st_mode)) {
+            errno = EINVAL;
+            return -1;
+        }
+        return 0xff;
+    }
+    int handled;
+    long value = pathconf_value(name, &handled);
+    int linux_name = pathconf_name_to_linux(name);
+    if (!handled && linux_name < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    // The path is still checked, as Darwin's does: ENOENT, EACCES.
+    errno = 0;
+    long limit = pathconf(path, linux_name >= 0 ? linux_name : _PC_NAME_MAX);
+    if (handled)
+        return limit < 0 && errno ? -1 : value;
+    return limit;
+}
+
+long darwin_fpathconf(int fd, int name) DARWIN_SYMBOL(fpathconf);
+long darwin_fpathconf(int fd, int name) {
+    if (name == 9) {
+        if (!isatty(fd)) {
+            if (errno != EBADF)
+                errno = EINVAL;
+            return -1;
+        }
+        return 0xff;
+    }
+    int handled;
+    long value = pathconf_value(name, &handled);
+    int linux_name = pathconf_name_to_linux(name);
+    if (!handled && linux_name < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    errno = 0;
+    long limit = fpathconf(fd, linux_name >= 0 ? linux_name : _PC_NAME_MAX);
+    if (handled)
+        return limit < 0 && errno ? -1 : value;
+    return limit;
 }
 
 int darwin_getpagesize(void) DARWIN_SYMBOL(getpagesize);
