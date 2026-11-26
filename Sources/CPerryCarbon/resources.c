@@ -18,8 +18,6 @@
 
 enum { resFNotFound = -193, mapReadErr = -199, eofErr = -39, fnfErr = -43 };
 
-typedef struct { uint8_t hidden[80]; } FSRef;
-
 typedef struct resource_file {
     int16_t reference;
     uint8_t *data;

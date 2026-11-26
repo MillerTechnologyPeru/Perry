@@ -22,11 +22,13 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # Darwin's names (one leading underscore) and perry_ entry points, with a
-# moved function under its own name, less the linker's own symbols.
+# moved function under its own name, less the linker's own symbols and
+# swift-system's C helpers (_system_get_ST_RDONLY and the like), which
+# Graphite's File Manager links and no program binds to.
 exported() {
     "$nm" -D --defined-only "$1" | awk 'NF >= 3 { print $3 }' |
         sed -n -e 's/^perry_ppc_moved_/_/p' -e '/^_[A-Za-z]/p' -e '/^perry_provider_startup$/p' |
-        grep -vx -e _edata -e _end -e _etext | sort -u
+        grep -vx -e _edata -e _end -e _etext | grep -v '^_system_' | sort -u
 }
 
 sed -e '/^#/d' -e '/^$/d' "$root/Sources/PerryCarbon/exports.txt" | sort -u > "$work/listed"

@@ -164,7 +164,6 @@ _FSCreateFileUnicode
 _FSCreateFork
 _FSDeleteObject
 _FSFlushFork
-_FSGetCatalogInfo
 _FSGetCatalogInfoBulk
 _FSGetDataForkName
 _FSGetForkPosition
@@ -173,8 +172,6 @@ _FSGetResourceForkName
 _FSIterateForks
 _FSMakeFSSpec
 _FSMoveObject
-_FSNewAlias
-_FSNewAliasMinimal
 _FSOpenFork
 _FSOpenIterator
 _FSOpenResFile
@@ -182,8 +179,6 @@ _FSOpenResourceFile
 _FSRead
 _FSReadFork
 _FSRenameUnicode
-_FSResolveAlias
-_FSResolveAliasWithMountFlags
 _FSSetCatalogInfo
 _FSSetForkPosition
 _FSSetForkSize
@@ -208,7 +203,6 @@ _FrontNonFloatingWindow
 _FrontWindow
 _Get1NamedResource
 _Get1Resource
-_GetAliasSize
 _GetApplicationEventTarget
 _GetBackColor
 _GetCTable

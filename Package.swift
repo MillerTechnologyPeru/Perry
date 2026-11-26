@@ -323,6 +323,7 @@ let package = Package(
             dependencies: [
                 "CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop",
                 .product(name: "GraphiteBase", package: "Graphite"),
+                .product(name: "GraphiteFiles", package: "Graphite"),
             ],
             plugins: ["PerryProviderPlugin"]
         ),
@@ -342,6 +343,7 @@ let package = Package(
                 "CPerryCarbon", "PerryObjCInterop",
                 .product(name: "GraphiteBase", package: "Graphite"),
                 .product(name: "GraphiteTasks", package: "Graphite"),
+                .product(name: "GraphiteFiles", package: "Graphite"),
             ],
             exclude: ["exports.txt"]
         ),

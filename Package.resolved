@@ -1,5 +1,5 @@
 {
-  "originHash" : "6faeb860bde8d2e38cb6fc1035db3410be2057c80a1a5701493ab2ffcf9d8d78",
+  "originHash" : "3cc984d98774f2b57a326f84f5d262d047465fa2614938858ac7fc958ba6539e",
   "pins" : [
     {
       "identity" : "android",
@@ -70,7 +70,7 @@
       "location" : "https://github.com/PureSwift/Graphite.git",
       "state" : {
         "branch" : "master",
-        "revision" : "e6e7b8ffd729631f7b25ca2a06fa4e7daee1865c"
+        "revision" : "2de7838871ff34535987601e2fc82acf0ed267e4"
       }
     },
     {
@@ -267,8 +267,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
       "state" : {
-        "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
-        "version" : "1.8.1"
+        "revision" : "640e5755b5826f4437eaeedd366fd776737db62c",
+        "version" : "1.9.0"
       }
     },
     {

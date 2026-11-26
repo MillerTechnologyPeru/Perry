@@ -2,7 +2,8 @@
 // paths): FSSpecs, which name an item by its volume, its folder's ID and its
 // name; files opened by reference number and read and written through it,
 // as forks or the original way; folders' items, one by one or in bulk; and
-// the parameter-block calls of the original File Manager. There is one
+// the parameter-block calls of the original File Manager. Aliases and
+// catalog information are CoreServices'. There is one
 // volume, "Macintosh HD" (-100), the root of the file system, and folder
 // IDs are folders' inodes, as CoreServices' catalog information gives them
 // (the root's is 2, as HFS's is). There are no resource forks: a resource
@@ -24,6 +25,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
+
 enum {
     dirFulErr = -33, dskFulErr = -34, nsvErr = -35, ioErr = -36, bdNamErr = -37, fnOpnErr = -38, eofErr = -39,
     posErr = -40, tmfoErr = -42, fnfErr = -43, wPrErr = -44, fLckdErr = -45, fBsyErr = -47, dupFNErr = -48,
@@ -34,20 +37,6 @@ enum {
 #define ROOT_VOLUME (-100)
 #define ROOT_DIRECTORY 2
 
-#pragma pack(push, 2)
-typedef struct {
-    int16_t vRefNum;
-    int32_t parID;
-    unsigned char name[64];
-} FSSpec;
-
-typedef struct {
-    uint16_t length;
-    uint16_t unicode[255];
-} HFSUniStr255;
-#pragma pack(pop)
-
-typedef struct { uint8_t hidden[80]; } FSRef;
 
 // CoreServices' FSRef functions.
 static int32_t make_ref(const char *path, FSRef *ref, Boolean *isDirectory) {
@@ -151,8 +140,7 @@ static const char *directory_path(uint32_t identifier) {
             for (char *slash; (directory_id(here), (slash = strrchr(here, '/'))) && slash != here;) *slash = 0;
         // The bundle's: programs find their data beside it by its parent's
         // ID, from GetProcessBundleLocation and FSGetCatalogInfo.
-        id bundle_path = SEND(SEND(CLASS("NSBundle"), "mainBundle"), "bundlePath");
-        const char *bundle = bundle_path ? ((const char *(*)(id, SEL))objc_send)(bundle_path, SELECTOR("UTF8String")) : NULL;
+        const char *bundle = carbon_bundle_path();
         if (bundle && snprintf(here, sizeof here, "%s", bundle) < (int)sizeof here)
             for (char *slash; (directory_id(here), (slash = strrchr(here, '/'))) && slash != here;) *slash = 0;
         const char *home = getenv("HOME");
@@ -189,8 +177,7 @@ static const char *folder_of(int16_t volume, int32_t directory) {
             // Contents/MacOS, as Mac OS X starts one: Pangea's games find
             // "::Resources:Data:" from it. Others, in the working folder.
             static char here[PATH_MAX];
-            id executable = SEND(SEND(CLASS("NSBundle"), "mainBundle"), "executablePath");
-            const char *path = executable ? ((const char *(*)(id, SEL))objc_send)(executable, SELECTOR("UTF8String")) : NULL;
+            const char *path = carbon_executable_path();
             char *slash = path && strstr(path, "/Contents/MacOS/") && snprintf(here, sizeof here, "%s", path) < (int)sizeof here
                 ? strrchr(here, '/') : NULL;
             if (slash && slash != here) *slash = 0;
@@ -517,22 +504,6 @@ static off_t seek(int descriptor, uint16_t mode, int64_t offset) {
 
 // MARK: - Reads by parameter block
 
-#pragma pack(push, 2)
-typedef struct io_block {
-    struct io_block *qLink;
-    int16_t qType, ioTrap;
-    void *ioCmdAddr;
-    void (*ioCompletion)(struct io_block *);
-    volatile int16_t ioResult;
-    unsigned char *ioNamePtr;
-    int16_t ioVRefNum, ioRefNum;
-    int8_t ioVersNum, ioPermssn;
-    void *ioMisc, *ioBuffer;
-    int32_t ioReqCount, ioActCount;
-    int16_t ioPosMode;
-    int32_t ioPosOffset;
-} IOParam;
-#pragma pack(pop)
 
 static off_t seek(int descriptor, uint16_t mode, int64_t offset);
 
@@ -710,12 +681,6 @@ OSErr carbon_FSSetForkSize(int16_t reference, uint16_t mode, int64_t offset) {
     return ftruncate(descriptor, size) == 0 ? noErr : error_for(errno);
 }
 
-/// Where FSIterateForks is in an item's forks: initialize is 0 before the
-/// first call.
-typedef struct {
-    int32_t initialize;
-    int16_t priv[6];
-} CatPositionRec;
 
 /// An item's forks: a file's data fork alone, since resource forks are not
 /// kept here; a folder has none.
@@ -1008,120 +973,6 @@ OSErr carbon_FindFolder(int16_t volume, OSType type, Boolean create, int16_t *fo
 
 // MARK: - Parameter blocks
 
-// The original File Manager's parameter blocks, 2-byte packed: the common
-// header (qLink, qType, ioTrap, ioCmdAddr, ioCompletion, ioResult,
-// ioNamePtr, ioVRefNum) is 24 bytes.
-#pragma pack(push, 2)
-typedef struct {
-    void *qLink;
-    int16_t qType;
-    int16_t ioTrap;
-    void *ioCmdAddr;
-    void *ioCompletion;
-    OSErr ioResult;
-    unsigned char *ioNamePtr;
-    int16_t ioVRefNum;
-} ParamHeader;
-
-typedef struct {
-    ParamHeader header;
-    int16_t ioFRefNum;
-    int8_t ioFVersNum;
-    int8_t filler1;
-    int16_t ioFDirIndex;
-    int8_t ioFlAttrib;
-    int8_t ioACUser;
-    // A file's: Finder info, then its ID and its forks' sizes; a folder's
-    // the same 16 bytes of Finder info, its ID and its count of items.
-    uint8_t ioFlFndrInfo[16];
-    int32_t ioDirID;            // ioDrDirID for a folder
-    uint16_t ioFlStBlk;         // ioDrNmFls for a folder
-    int32_t ioFlLgLen;
-    int32_t ioFlPyLen;
-    uint16_t ioFlRStBlk;
-    int32_t ioFlRLgLen;
-    int32_t ioFlRPyLen;
-    uint32_t ioFlCrDat;
-    uint32_t ioFlMdDat;
-    uint32_t ioFlBkDat;
-    uint8_t ioFlXFndrInfo[16];
-    int32_t ioFlParID;          // ioDrParID for a folder
-    int32_t ioFlClpSiz;
-} CInfoPB;
-
-typedef struct {
-    ParamHeader header;
-    int32_t filler1;
-    int16_t ioVolIndex;
-    uint32_t ioVCrDate;
-    uint32_t ioVLsMod;
-    int16_t ioVAtrb;
-    uint16_t ioVNmFls;
-    uint16_t ioVBitMap;
-    uint16_t ioAllocPtr;
-    uint16_t ioVNmAlBlks;
-    uint32_t ioVAlBlkSiz;
-    uint32_t ioVClpSiz;
-    uint16_t ioAlBlSt;
-    uint32_t ioVNxtCNID;
-    uint16_t ioVFrBlk;
-    uint16_t ioVSigWord;
-    int16_t ioVDrvInfo;
-    int16_t ioVDRefNum;
-    int16_t ioVFSID;
-    uint32_t ioVBkUp;
-    int16_t ioVSeqNum;
-    uint32_t ioVWrCnt;
-    uint32_t ioVFilCnt;
-    uint32_t ioVDirCnt;
-    int32_t ioVFndrInfo[8];
-} HVolumeParam;
-
-typedef struct {
-    ParamHeader header;
-    int16_t ioRefNum;
-    int8_t ioVersNum;
-    int8_t ioPermssn;
-    void *ioMisc;
-    void *ioBuffer;
-    int32_t ioReqCount;
-    int32_t ioActCount;
-} HIOParam;
-
-typedef struct {
-    ParamHeader header;
-    int16_t ioDTRefNum;
-    int16_t ioIndex;
-    int32_t ioTagInfo;
-    void *ioDTBuffer;
-    int32_t ioDTReqCount;
-    int32_t ioDTActCount;
-    int8_t ioFiller1;
-    uint8_t ioIconType;
-    int16_t ioFiller2;
-    int32_t ioDirID;
-    OSType ioFileCreator;
-    OSType ioFileType;
-    int32_t ioFiller3;
-    int32_t ioDTLgLen;
-    int32_t ioDTPyLen;
-    int16_t ioFiller4[14];
-    int32_t ioAPPLParID;
-} DTPB;
-
-/// A working directory's parameters, for PBHSetVol and PBHGetVol.
-typedef struct {
-    ParamHeader header;
-    int16_t filler1;
-    int16_t ioWDIndex;
-    int32_t ioWDProcID;
-    int16_t ioWDVRefNum;
-    int16_t filler2[7];
-    int32_t reserved1;
-    int32_t ioWDDirID;
-    int32_t reserved2;
-} WDPBRec;
-#pragma pack(pop)
 
 static uint32_t mac_time(time_t seconds) { return (uint32_t)((int64_t)seconds + 2082844800LL); }
 
@@ -1196,40 +1047,7 @@ OSErr carbon_PBGetCatInfoSync(CInfoPB *block) {
 OSErr carbon_PBGetCatInfoAsync(CInfoPB *block) CARBON_SYMBOL(PBGetCatInfoAsync);
 OSErr carbon_PBGetCatInfoAsync(CInfoPB *block) { return carbon_PBGetCatInfoSync(block); }
 
-// The discs mounted are volumes after the first, numbered -101 and down, as
-// CoreServices' FSGetVolumeInfo numbers them: libPerrySystem finds them, for
-// getmntinfo, and its perry_disc_volume is found in that library as it is
-// loaded here (by its path, from this process's mappings).
 #define FIRST_DISC_VOLUME (-101)
-
-static int disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size) {
-    static int (*volume)(int, char *, size_t, char *, size_t);
-    static bool looked, looked_in_maps;
-    if (!looked) {
-        looked = true;
-        // Through the loader, which has the library open; opening it again
-        // by its path finds nothing under box86, and a program saw no disc.
-        volume = (int (*)(int, char *, size_t, char *, size_t))carbon_function("/usr/lib/libSystem.B.dylib", "perry_disc_volume");
-    }
-    if (!looked_in_maps && !volume) {
-        looked_in_maps = true;
-        FILE *maps = fopen("/proc/self/maps", "r");
-        char line[4096];
-        while (maps && fgets(line, sizeof line, maps)) {
-            char *path = strchr(line, '/');
-            size_t length = path ? strcspn(path, "\n") : 0;
-            static const char library[] = "/libPerrySystem.so";
-            if (length < sizeof library - 1 || strncmp(path + length - (sizeof library - 1), library, sizeof library - 1) != 0)
-                continue;
-            path[length] = '\0';
-            void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
-            if (handle) volume = (int (*)(int, char *, size_t, char *, size_t))dlsym(handle, "perry_disc_volume");
-            break;
-        }
-        if (maps) fclose(maps);
-    }
-    return volume ? volume(index, name, name_size, mount, mount_size) : 0;
-}
 
 /// The disc a volume number or a volume index (from 1; the discs from 2)
 /// names, from 0, or -1 for the first volume; -2 if there is no such volume.
@@ -1239,24 +1057,7 @@ static int disc_for(int16_t volume, int index, char *name, size_t name_size, cha
     else if (index <= 0 && volume <= FIRST_DISC_VOLUME) disc = FIRST_DISC_VOLUME - volume;
     else if (index <= 0 && volume != 0 && volume != ROOT_VOLUME && volume != -1) return -2;
     if (disc < 0) return -1;
-    return disc < disc_volume(disc, name, name_size, mount, mount_size) ? disc : -2;
-}
-
-/// Where the startup volume's space is counted: the file system the
-/// program's home folder is on, which is where it writes. The root may be
-/// another, with no room at all (a read-only system image, as ROCKNIX's
-/// is), and a program that checks for room before it starts would stop.
-static const char *startup_volume_path(void) {
-    static char home[PATH_MAX];
-    if (!home[0]) {
-        id (*home_directory)(void) = (id (*)(void))carbon_function(
-            "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation", "_NSHomeDirectory");
-        id folder = home_directory ? home_directory() : NULL;
-        const char *path = folder ? ((const char *(*)(id, SEL))objc_send)(folder, SELECTOR("UTF8String")) : NULL;
-        struct stat info;
-        snprintf(home, sizeof home, "%s", path && stat(path, &info) == 0 ? path : "/");
-    }
-    return home;
+    return disc < carbon_disc_volume(disc, name, name_size, mount, mount_size) ? disc : -2;
 }
 
 /// A volume, by its number, its name or its index (from 1): the first, and
@@ -1269,7 +1070,7 @@ OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     if (disc == -2) return block->header.ioResult = nsvErr;
     struct statvfs stats;
     uint64_t total = 0, available = 0;
-    if (statvfs(disc >= 0 ? disc_mount : startup_volume_path(), &stats) == 0) {
+    if (statvfs(disc >= 0 ? disc_mount : carbon_startup_volume_path(), &stats) == 0) {
         total = (uint64_t)stats.f_blocks * stats.f_frsize;
         available = (uint64_t)stats.f_bavail * stats.f_frsize;
     }
@@ -1330,21 +1131,6 @@ OSErr carbon_PBHGetVolSync(WDPBRec *block) {
 /// removable one. Its device ID is the volume's BSD name ("disk2s1" for the
 /// first disc, as IOKit's media and getmntinfo name it), which a program
 /// matches with the media it found.
-/// A shared folder's access rights: AccessParam's fields after the header.
-#pragma pack(push, 2)
-typedef struct {
-    ParamHeader header;
-    int16_t ioRefNum;
-    int16_t ioDenyModes;
-    int8_t filler4;
-    int8_t ioACUser;
-    int32_t filler5;
-    int32_t ioACOwnerID;
-    int32_t ioACGroupID;
-    int32_t ioACAccess;
-    int32_t ioDirID;
-} AccessParam;
-#pragma pack(pop)
 
 /// A folder's access, as a local volume's: the user owns it, with every
 /// right (a set bit in ioACUser is one the user lacks), and it is not
@@ -1462,97 +1248,4 @@ OSStatus carbon_LSOpenFSRef(const FSRef *ref, FSRef *launched) {
     return child > 0 ? noErr : -10810;   // kLSUnknownErr
 }
 
-// MARK: - Catalog information
-
-/// CoreServices' catalog information, with the item's FSSpec, whose folder
-/// is kept by its ID here so that the spec names it again.
-OSErr carbon_FSGetCatalogInfo(const FSRef *ref, uint32_t which, void *info, HFSUniStr255 *name, FSSpec *spec, FSRef *parent)
-    CARBON_SYMBOL(FSGetCatalogInfo);
-OSErr carbon_FSGetCatalogInfo(const FSRef *ref, uint32_t which, void *info, HFSUniStr255 *name, FSSpec *spec, FSRef *parent) {
-    static catalog_function catalog;
-    if (!catalog) catalog = (catalog_function)carbon_function(CORESERVICES, "_FSGetCatalogInfo");
-    if (!catalog) return unimpErr;
-    OSErr error = catalog(ref, which, info, name, NULL, parent);
-    char path[PATH_MAX];
-    if (error == noErr && ref_path(ref, path, sizeof path)) {
-        // The IDs given (a folder's own, its parent's) name it again: as
-        // an FSSpec's folder, which programs make of them.
-        struct stat item;
-        if (stat(path, &item) == 0 && S_ISDIR(item.st_mode)) directory_id(path);
-        char folder[PATH_MAX];
-        snprintf(folder, sizeof folder, "%s", path);
-        char *slash = strrchr(folder, '/');
-        if (slash && slash != folder) {
-            *slash = 0;
-            directory_id(folder);
-        }
-        if (spec) spec_for(path, spec);
-    }
-    return error;
-}
-
-
-// MARK: - Aliases
-
-// An alias record is opaque past its user type and size: Perry's keeps
-// the item's path after them, which FSResolveAlias makes an FSRef of again.
-#pragma pack(push, 2)
-typedef struct {
-    OSType userType;
-    uint16_t aliasSize;
-    char magic[4];   // 'PRRY'
-    char path[];
-} alias_record;
-#pragma pack(pop)
-
-typedef alias_record **AliasHandle;
-
-static OSErr new_alias(const FSRef *target, AliasHandle *alias) {
-    if (!alias) return paramErr;
-    *alias = NULL;
-    char path[PATH_MAX];
-    if (!ref_path(target, path, sizeof path)) return fnfErr;
-    size_t size = sizeof(alias_record) + strlen(path) + 1;
-    if (size > 0xffff) return paramErr;
-    Handle (*new_handle)(long) = (Handle (*)(long))carbon_function(CORESERVICES, "_NewHandleClear");
-    Handle made = new_handle ? new_handle((long)size) : NULL;
-    if (!made || !*made) return memFullErr;
-    alias_record *record = (alias_record *)*made;
-    record->aliasSize = (uint16_t)size;
-    memcpy(record->magic, "PRRY", 4);
-    strcpy(record->path, path);
-    *alias = (AliasHandle)made;
-    return noErr;
-}
-
-/// OSErr FSNewAlias(const FSRef *fromFile, const FSRef *target, AliasHandle *):
-/// an alias of the target, by its path whatever it is relative to.
-OSErr carbon_FSNewAlias(const FSRef *from, const FSRef *target, AliasHandle *alias) CARBON_SYMBOL(FSNewAlias);
-OSErr carbon_FSNewAlias(const FSRef *from, const FSRef *target, AliasHandle *alias) {
-    (void)from;
-    return new_alias(target, alias);
-}
-
-OSErr carbon_FSNewAliasMinimal(const FSRef *target, AliasHandle *alias) CARBON_SYMBOL(FSNewAliasMinimal);
-OSErr carbon_FSNewAliasMinimal(const FSRef *target, AliasHandle *alias) { return new_alias(target, alias); }
-
-/// The item an alias of Perry's names, if it is there.
-OSErr carbon_FSResolveAliasWithMountFlags(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed,
-                                          unsigned long flags) CARBON_SYMBOL(FSResolveAliasWithMountFlags);
-OSErr carbon_FSResolveAliasWithMountFlags(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed,
-                                          unsigned long flags) {
-    (void)from; (void)flags;
-    if (changed) *changed = false;
-    if (!alias || !*alias || !target) return paramErr;
-    alias_record *record = *alias;
-    if (record->aliasSize <= sizeof(alias_record) || memcmp(record->magic, "PRRY", 4) != 0) return paramErr;
-    return make_ref(record->path, target, NULL) == noErr ? noErr : fnfErr;
-}
-
-OSErr carbon_FSResolveAlias(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed) CARBON_SYMBOL(FSResolveAlias);
-OSErr carbon_FSResolveAlias(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed) {
-    return carbon_FSResolveAliasWithMountFlags(from, alias, target, changed, 0);
-}
-
-uint16_t carbon_GetAliasSize(AliasHandle alias) CARBON_SYMBOL(GetAliasSize);
-uint16_t carbon_GetAliasSize(AliasHandle alias) { return alias && *alias ? (*alias)->aliasSize : 0; }
+#endif  // PERRY_CARBON_SWIFT
