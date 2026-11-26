@@ -25,6 +25,20 @@ open class NSFontDescriptor: NSObject {
         attributes = fontAttributes.flatMap { Send.object($0.objcObject, "copy") }.map { NSObject(objcObject: $0, ownership: .adopt) }
     }
 
+    /// A descriptor's archive: its attributes ("NSAttributes"), as AppKit's.
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        attributes = Coder(coder: coder).object("NSAttributes")
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        Encoder(coder: coder).object(attributes, "NSAttributes")
+    }
+
     @ObjCClassMethod("fontDescriptorWithFontAttributes:")
     static func descriptor(_ cls: ObjCClass, fontAttributes: NSObject?) -> NSObject? { make(cls, fontAttributes) }
 
