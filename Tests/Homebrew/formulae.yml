@@ -1,25 +1,182 @@
 # Tests for Homebrew formulae, run by Scripts/homebrew/run-cli.rb. Each
 # formula has a list of tests:
 #   args, command (default: the formula's name), stdin, files (written to the
-#   test's directory first), match (a regex the stdout must match, instead of
-#   the Mac's output) and ignore_stdout.
+#   test's directory first, in subdirectories if the name has any), match (a
+#   regex the stdout must match, instead of the Mac's output) and
+#   ignore_stdout.
+# The exit status always has to match the Mac's.
+
+# C
 jq:
   - args: [--version]
   - args: [-c, .a]
     stdin: '{"a":[1,2]}'
+  - args: [-r, .name]
+    stdin: '{"name":"perry","n":3}'
+  - args: [-n, '[range(5)] | add']
+  - args: [-c, 'map(select(. > 1)) | sort | reverse']
+    stdin: '[3,1,2,5,4]'
+  - args: [-c, 'group_by(.k) | map({k: .[0].k, n: length})']
+    stdin: '[{"k":"a"},{"k":"b"},{"k":"a"}]'
+  - args: [-n, -r, '"perry" | @base64']
+  - args: [-n, --arg, x, '41', '$x | tonumber + 1']
+  - args: [-e, .ok]
+    stdin: '{"ok":false}'
+  - args: [.]
+    stdin: '{"broken'
 xz:
   - args: [--version]
+  - args: [-t, missing.xz]
+  - args: [--no-such-option]
 zstd:
   - args: [--version]
+  - args: [-t, missing.zst]
 # tree writes (c) for a codeset that isn't UTF-8, and a copyright sign for
 # one that is. Perry's nl_langinfo always says UTF-8, and a Mac's C locale
 # says US-ASCII.
 tree:
   - args: [--version]
     match: '\Atree v2\.3\.2 (\(c\)|©) 1996 - \d{4} by '
+  - args: [--charset, ascii, --noreport]
+    files: { a/one.txt: "1", a/two.txt: "2", b/three.txt: "3", top.txt: "t" }
+  - args: [--charset, ascii, -L, '1']
+    files: { a/one.txt: "1", b/two.txt: "2", top.txt: "t" }
+  - args: [--charset, ascii, -a, -I, '*.log']
+    files: { .hidden: "h", app.log: "l", app.txt: "t" }
+  - args: [--charset, ascii, -s, --noreport]
+    files: { five.txt: "12345", ten.txt: "1234567890" }
+  - args: [-J]
+    files: { a/one.txt: "1", top.txt: "t" }
+    match: '"type":"directory"'
+ninja:
+  - args: [--version]
+  - args: [-C, '.']
+    files:
+      build.ninja: |
+        rule copy
+          command = cp $in $out
+        build out.txt: copy in.txt
+      in.txt: "copied\n"
+  - args: [-n, -C, '.']
+    files:
+      build.ninja: |
+        rule copy
+          command = cp $in $out
+        build out.txt: copy in.txt
+      in.txt: "copied\n"
+  - args: [-C, '.', missing]
+    files:
+      build.ninja: |
+        rule copy
+          command = cp $in $out
+        build out.txt: copy in.txt
+      in.txt: "x\n"
+lua:
+  - args: [-v]
+  - args: [-e, 'print(1 + 1)']
+  - args: [-e, 'print(string.format("%5.2f|%d|%s", math.pi, 42, "perry"))']
+  - args: [-e, 'local t = {} for i = 1, 5 do t[#t + 1] = i * i end print(table.concat(t, ","))']
+  - args: [-e, 'print(("perry"):upper(), #"perry", ("a,b,c"):gsub(",", ";"))']
+  - args: [-e, 'print(os.time{year=2020, month=1, day=1, hour=0} ~= nil, os.date("!%Y-%m-%d", 86400))']
+  - args: [-e, 'print(pcall(error, "boom"))']
+  - args: [-e, 'error("fails")']
+  - args: [script.lua]
+    files:
+      script.lua: |
+        local function fib(n) if n < 2 then return n end return fib(n - 1) + fib(n - 2) end
+        print(fib(20))
+        io.write(string.format("%x\n", 255))
+        print(math.maxinteger, math.mininteger)
+sqlite:
+  - command: sqlite3
+    args: [--version]
+    match: '\A3\.\d+\.\d+ '
+  - command: sqlite3
+    args: [':memory:', 'select 1 + 1']
+  - command: sqlite3
+    args: [':memory:']
+    stdin: |
+      create table t (id integer primary key, name text);
+      insert into t (name) values ('a'), ('b'), ('c');
+      select id, name from t order by id desc;
+      select count(*), group_concat(name) from t;
+  - command: sqlite3
+    args: [-json, ':memory:', "select 1 as one, 'x' as two"]
+  - command: sqlite3
+    args: [-csv, -header, ':memory:', "select 1 as a, 'b,c' as b"]
+  - command: sqlite3
+    args: [':memory:', 'select upper(''perry''), length(''perry''), abs(-3), round(2.567, 1)']
+  - command: sqlite3
+    args: [db.sqlite]
+    stdin: |
+      create table t (x);
+      insert into t values (1), (2);
+      .quit
+    files: {}
+  - command: sqlite3
+    args: [':memory:', 'select * from nope']
+# Rust
 ripgrep:
   - command: rg
     args: [-c, foo, fixture.txt]
     files: { fixture.txt: "foo\nbar\nfoo\n" }
+  - command: rg
+    args: [-n, foo, fixture.txt]
+    files: { fixture.txt: "foo\nbar\nfoo bar\n" }
+  - command: rg
+    args: [-i, -o, 'p[a-z]+y', fixture.txt]
+    files: { fixture.txt: "Perry\nperry\nPERRY\n" }
+  - command: rg
+    args: [-v, foo, fixture.txt]
+    files: { fixture.txt: "foo\nbar\nbaz\n" }
+  - command: rg
+    args: [-w, cat, fixture.txt]
+    files: { fixture.txt: "cat\ncats\nthe cat sat\n" }
+  - command: rg
+    args: [--sort, path, -c, x, .]
+    files: { a.txt: "x\nx\n", b/c.txt: "x\n", d.txt: "y\n" }
+  - command: rg
+    args: [--sort, path, --files]
+    files: { z.txt: "", a/b.txt: "", m.md: "" }
+  - command: rg
+    args: [-P, '(?<=a)b', fixture.txt]
+    files: { fixture.txt: "ab\ncb\n" }
+  - command: rg
+    args: [--json, foo, fixture.txt]
+    files: { fixture.txt: "foo\n" }
+    match: '"type":"match"'
+  - command: rg
+    args: [nothing, fixture.txt]
+    files: { fixture.txt: "foo\n" }
 fd:
   - args: [--version]
+  - args: ['-e', 'txt', '.']
+    files: { a.txt: "", b/c.txt: "", d.md: "" }
+  - args: [-t, d, '.']
+    files: { a/x: "", b/y: "", f: "" }
+  - args: [-H, hidden]
+    files: { .hidden: "", visible: "", dir/.hidden2: "" }
+  - args: [-g, '*.rs']
+    files: { main.rs: "", lib.rs: "", notes.md: "" }
+bat:
+  - args: [--version]
+  - args: [--plain, --color, never, file.txt]
+    files: { file.txt: "one\ntwo\n" }
+  - args: [--style, numbers, --color, never, file.txt]
+    files: { file.txt: "one\ntwo\n" }
+  - args: [--language, json, --plain, --color, never, f]
+    files: { f: '{"a": 1}' }
+  - args: [--list-languages]
+    ignore_stdout: true
+  - args: [--plain, missing.txt]
+# Go
+gh:
+  - args: [--version]
+  - args: [help]
+    ignore_stdout: true
+  - args: [--no-such-flag]
+hugo:
+  - args: [version]
+    ignore_stdout: true
+  - args: [--help]
+    ignore_stdout: true
