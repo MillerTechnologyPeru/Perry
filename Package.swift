@@ -344,6 +344,7 @@ let package = Package(
                 .product(name: "GraphiteBase", package: "Graphite"),
                 .product(name: "GraphiteTasks", package: "Graphite"),
                 .product(name: "GraphiteFiles", package: "Graphite"),
+                .product(name: "GraphiteResources", package: "Graphite"),
             ],
             exclude: ["exports.txt"]
         ),
