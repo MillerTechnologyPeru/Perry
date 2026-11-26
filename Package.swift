@@ -324,6 +324,7 @@ let package = Package(
                 "CPerryUniformTypeIdentifiers", "PerryInterface", "PerryObjCInterop",
                 .product(name: "GraphiteBase", package: "Graphite"),
                 .product(name: "GraphiteFiles", package: "Graphite"),
+                .product(name: "GraphiteAppleEvents", package: "Graphite"),
             ],
             plugins: ["PerryProviderPlugin"]
         ),
