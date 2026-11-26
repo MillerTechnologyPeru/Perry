@@ -1,0 +1,4 @@
+{
+  "stdout": ".\n|-- a\n|   |-- one.txt\n|   `-- two.txt\n|-- b\n|   `-- three.txt\n|-- container\n|-- home\n`-- top.txt\n",
+  "status": 0
+}
