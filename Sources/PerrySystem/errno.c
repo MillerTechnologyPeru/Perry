@@ -63,15 +63,18 @@ static _Thread_local struct {
 } state;
 
 int *darwin_error(void) {
-    if (errno != state.published_linux) {
+    // glibc's errno is cleared each time (below), so a nonzero one is a
+    // failure since: even one with the value of the last failure, after
+    // Darwin code cleared its own errno, which would look unchanged.
+    if (errno != 0 && errno != state.published_linux) {
         // glibc changed errno since the last call: it wins.
         state.darwin = perry_darwin_errno_from_linux(errno);
-    } else if (state.darwin != state.published_darwin) {
-        // Darwin code wrote errno (typically `errno = 0`): propagate it.
-        errno = perry_linux_errno_from_darwin(state.darwin);
     }
+    // Otherwise Darwin code's own writes (typically `errno = 0`) stand, as
+    // does the last failure's value after a call that succeeded.
     state.published_darwin = state.darwin;
-    state.published_linux = errno;
+    errno = 0;
+    state.published_linux = 0;
     return &state.darwin;
 }
 
