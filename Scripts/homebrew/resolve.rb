@@ -3,12 +3,15 @@
 # each one's version, bottle URL and SHA-256, and its runtime dependencies,
 # from https://formulae.brew.sh/api (docs/homebrew-testing.md).
 #
-# Usage: ruby Scripts/homebrew/resolve.rb [--top N] [--tag TAG] [--out FILE] [NAME...]
+# Usage: ruby Scripts/homebrew/resolve.rb [--top N] [--tag TAG] [--out FILE] [--cask TOKEN]... [NAME...]
 #
 # Without names, takes the N most installed formulae (default: those that
 # Tests/Homebrew/formulae.yml has tests for). A formula is left out when it
 # has no bottle for TAG (default arm64_tahoe), has a service, or depends on
-# one that doesn't qualify. Uses only Ruby's standard library.
+# one that doesn't qualify. Each --cask adds a cask to the lock's "casks":
+# its version, download URL and SHA-256, the container's extension and the
+# apps and binaries it installs; without --cask, the casks already in the
+# output file stay. Uses only Ruby's standard library.
 
 require "json"
 require "net/http"
@@ -18,11 +21,12 @@ require "yaml"
 ROOT = File.expand_path("../..", __dir__)
 API = "https://formulae.brew.sh/api"
 
-options = { tag: "arm64_tahoe", top: nil, out: File.join(ROOT, "Tests/Homebrew/homebrew.lock.json") }
+options = { tag: "arm64_tahoe", top: nil, casks: [], out: File.join(ROOT, "Tests/Homebrew/homebrew.lock.json") }
 OptionParser.new do |o|
   o.on("--top N", Integer) { |n| options[:top] = n }
   o.on("--tag TAG") { |t| options[:tag] = t }
   o.on("--out FILE") { |f| options[:out] = f }
+  o.on("--cask TOKEN") { |t| options[:casks] << t }
 end.parse!
 
 def get_json(path)
@@ -97,6 +101,25 @@ closure.keys.sort.each do |name|
   }
 end
 
+# A cask's download, which a vendor serves: pinned by the SHA-256 the API
+# gives, so a cask with :no_check has none to pin.
+casks = options[:casks].empty? && File.exist?(options[:out]) ? JSON.parse(File.read(options[:out])).fetch("casks", {}) : {}
+options[:casks].sort.each do |token|
+  c = get_json("cask/#{token}.json")
+  abort "resolve: #{token} is disabled or deprecated" if c["disabled"] || c["deprecated"]
+  abort "resolve: #{token} has no SHA-256 to pin" unless c["sha256"] =~ /\A\h{64}\z/
+  artifacts = c["artifacts"].flat_map { |a| a.is_a?(Hash) ? a.to_a : [] }
+  casks[token] = {
+    "version" => c["version"],
+    "url" => c["url"],
+    "sha256" => c["sha256"],
+    "container" => File.basename(URI(c["url"]).path)[/\.(tar\.\w+|t\w+|\w+)\z/, 1],
+    "apps" => artifacts.select { |k, _| k == "app" }.flat_map { |_, v| v.grep(String) },
+    "binaries" => artifacts.select { |k, _| k == "binary" }.flat_map { |_, v| v.grep(String) }
+  }
+end
+
 lock = { "tag" => tag, "requested" => requested.sort, "formulae" => entries }
+lock["casks"] = casks.sort.to_h unless casks.empty?
 File.write(options[:out], JSON.pretty_generate(lock) + "\n")
-puts "#{options[:out]}: #{requested.size} requested, #{entries.size} with dependencies"
+puts "#{options[:out]}: #{requested.size} requested, #{entries.size} with dependencies, #{casks.size} casks"
