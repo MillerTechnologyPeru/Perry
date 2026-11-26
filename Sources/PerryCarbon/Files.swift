@@ -132,7 +132,7 @@ private func fileSpec(_ spec: UnsafePointer<FSSpec>) -> FileSpec {
     return FileSpec(volume: record.vRefNum, parent: DirectoryID(UInt32(bitPattern: record.parID)), name: name)
 }
 
-private func store(_ spec: FileSpec, in record: UnsafeMutablePointer<FSSpec>?) {
+func store(_ spec: FileSpec, in record: UnsafeMutablePointer<FSSpec>?) {
     guard let record else { return }
     record.pointee.vRefNum = spec.volume
     record.pointee.parID = Int32(bitPattern: spec.parent.rawValue)
@@ -145,7 +145,7 @@ private func store(_ spec: FileSpec, in record: UnsafeMutablePointer<FSSpec>?) {
 }
 
 /// The path an FSSpec names, whether or not the item is there.
-private func path(of spec: UnsafePointer<FSSpec>?) -> String? {
+func path(of spec: UnsafePointer<FSSpec>?) -> String? {
     spec.flatMap { fileSystem.path(of: fileSpec($0)) }
 }
 
