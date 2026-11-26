@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -23,7 +24,7 @@
 // An XPC object is an Objective-C object, as Darwin's are: Swift retains and
 // releases them as it does any other, so each is an instance of a class
 // made here, its state in the instance's extra bytes.
-enum xpc_kind { Null, Bool, Int64, UInt64, Double, String, Data, Array, Dictionary, Error, Uuid, Fd };
+enum xpc_kind { Null, Bool, Int64, UInt64, Double, String, Data, Array, Dictionary, Error, Uuid, Fd, Date };
 
 struct xpc_type { const char *name; };
 
@@ -148,11 +149,11 @@ struct xpc_type darwin_xpc_type_dictionary DARWIN_SYMBOL(_xpc_type_dictionary) =
 struct xpc_type darwin_xpc_type_error DARWIN_SYMBOL(_xpc_type_error) = { "error" };
 struct xpc_type darwin_xpc_type_uuid DARWIN_SYMBOL(_xpc_type_uuid) = { "uuid" };
 struct xpc_type darwin_xpc_type_fd DARWIN_SYMBOL(_xpc_type_fd) = { "fd" };
+struct xpc_type darwin_xpc_type_date DARWIN_SYMBOL(_xpc_type_date) = { "date" };
 // The types of objects made only by what isn't here (connections, services,
 // shared memory…): programs compare with them, and no object has them.
 struct xpc_type darwin_xpc_type_connection DARWIN_SYMBOL(_xpc_type_connection) = { "connection" };
 struct xpc_type darwin_xpc_type_endpoint DARWIN_SYMBOL(_xpc_type_endpoint) = { "endpoint" };
-struct xpc_type darwin_xpc_type_date DARWIN_SYMBOL(_xpc_type_date) = { "date" };
 struct xpc_type darwin_xpc_type_shmem DARWIN_SYMBOL(_xpc_type_shmem) = { "shmem" };
 struct xpc_type darwin_xpc_type_activity DARWIN_SYMBOL(_xpc_type_activity) = { "activity" };
 struct xpc_type darwin_xpc_type_rich_error DARWIN_SYMBOL(_xpc_type_rich_error) = { "rich_error" };
@@ -271,6 +272,7 @@ const struct xpc_type *darwin_xpc_get_type(xpc_object_t object) {
     case Error: return &darwin_xpc_type_error;
     case Uuid: return &darwin_xpc_type_uuid;
     case Fd: return &darwin_xpc_type_fd;
+    case Date: return &darwin_xpc_type_date;
     }
     return NULL;
 }
@@ -321,6 +323,25 @@ xpc_object_t darwin_xpc_double_create(double value) {
 
 double darwin_xpc_double_get_value(xpc_object_t object) DARWIN_SYMBOL(xpc_double_get_value);
 double darwin_xpc_double_get_value(xpc_object_t object) { return object && body(object)->kind == Double ? body(object)->real : 0; }
+
+// A date is nanoseconds since 1970.
+xpc_object_t darwin_xpc_date_create(int64_t interval) DARWIN_SYMBOL(xpc_date_create);
+xpc_object_t darwin_xpc_date_create(int64_t interval) {
+    xpc_object_t object = make(Date);
+    if (object)
+        body(object)->int64 = interval;
+    return object;
+}
+
+xpc_object_t darwin_xpc_date_create_from_current(void) DARWIN_SYMBOL(xpc_date_create_from_current);
+xpc_object_t darwin_xpc_date_create_from_current(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    return darwin_xpc_date_create((int64_t)now.tv_sec * 1000000000 + now.tv_nsec);
+}
+
+int64_t darwin_xpc_date_get_value(xpc_object_t object) DARWIN_SYMBOL(xpc_date_get_value);
+int64_t darwin_xpc_date_get_value(xpc_object_t object) { return object && body(object)->kind == Date ? body(object)->int64 : 0; }
 
 xpc_object_t darwin_xpc_string_create(const char *string) DARWIN_SYMBOL(xpc_string_create);
 xpc_object_t darwin_xpc_string_create(const char *string) {
@@ -671,6 +692,7 @@ bool darwin_xpc_equal(xpc_object_t a, xpc_object_t b) {
     case Int64: return x->int64 == y->int64;
     case UInt64: return x->uint64 == y->uint64;
     case Double: return x->real == y->real;
+    case Date: return x->int64 == y->int64;
     case String: return x->string.length == y->string.length && memcmp(x->string.chars, y->string.chars, x->string.length) == 0;
     case Data: return x->data.length == y->data.length && (x->data.length == 0 || memcmp(x->data.bytes, y->data.bytes, x->data.length) == 0);
     case Uuid: return memcmp(x->uuid, y->uuid, 16) == 0;
@@ -712,6 +734,7 @@ size_t darwin_xpc_hash(xpc_object_t object) {
     case Int64: return (size_t)state->int64;
     case UInt64: return (size_t)state->uint64;
     case Double: return hash_bytes(&state->real, sizeof(state->real), Double);
+    case Date: return (size_t)state->int64;
     case String: return hash_bytes(state->string.chars, state->string.length, String);
     case Data: return hash_bytes(state->data.bytes, state->data.length, Data);
     case Uuid: return hash_bytes(state->uuid, 16, Uuid);
@@ -764,6 +787,7 @@ static void describe(struct text *text, xpc_object_t object, int depth) {
     case Int64: append(text, "<int64: %lld>", (long long)state->int64); break;
     case UInt64: append(text, "<uint64: %llu>", (unsigned long long)state->uint64); break;
     case Double: append(text, "<double: %g>", state->real); break;
+    case Date: append(text, "<date: %lld>", (long long)state->int64); break;
     case String: append(text, "<string: { length = %zu, contents = \"%s\" }>", state->string.length, state->string.chars ? state->string.chars : ""); break;
     case Data: append(text, "<data: { length = %zu bytes }>", state->data.length); break;
     case Fd: append(text, "<fd: %d>", state->fd); break;
