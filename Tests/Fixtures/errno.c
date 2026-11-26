@@ -13,6 +13,11 @@ int main(void) {
     FILE *f = fopen("/nonexistent/perry/fixture", "r");
     printf("fopen null=%d errno=%d (ENOENT=%d) message=%s\n", f == NULL, errno, ENOENT, strerror(errno));
 
+    // The same failure again, after the program cleared errno.
+    errno = 0;
+    fopen("/nonexistent/perry/fixture", "r");
+    printf("repeated failure errno=%d\n", errno);
+
     errno = 35; // Darwin EAGAIN
     printf("darwin EAGAIN message=%s\n", strerror(errno));
     return 0;
