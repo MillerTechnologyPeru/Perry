@@ -1,8 +1,8 @@
 import Glibc
 import PerryObjCInterop
 
-// 64-bit Mac apps' alone, as the rest of the Apple Event Manager here is.
-#if arch(x86_64) || arch(arm64)
+// Mac apps' alone, as the rest of the Apple Event Manager here is.
+#if !arch(arm)
 // AEBuild: descriptors and Apple events from a format string, as TN2045
 // describes it. A value is an integer ('long'), a quoted string (“…” or
 // "…", 'TEXT'), a type code (an identifier or 'quoted', 'type'), a list

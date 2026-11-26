@@ -1,11 +1,12 @@
 import Glibc
+import GraphiteBase
+import GraphiteAppleEvents
 import PerryObjCInterop
 
-// 64-bit Mac apps' alone: 32-bit ones bind the Apple Event Manager to the
-// Carbon provider, whose handlers they share, and armv7 runs only iOS apps.
-#if arch(x86_64) || arch(arm64)
-// The Apple Event Manager, which 64-bit Mac apps bind to CoreServices (its
-// AE subframework): descriptors, lists, records and Apple events, their
+// Mac apps' alone: armv7 runs only iOS apps.
+#if !arch(arm)
+// The Apple Event Manager, which Mac apps bind to CoreServices (its AE
+// subframework), and 32-bit ones to Carbon too, which re-exports it here: descriptors, lists, records and Apple events, their
 // coercions, the application's handlers, and events it sends itself, which
 // go straight to those handlers. No other process sends or receives them
 // here, so events for another application fail as one that isn't running
@@ -93,7 +94,7 @@ enum AE {
         bytes.withUnsafeBytes { buffer.copyMemory(from: $0.baseAddress!, byteCount: min(maximum, $0.count)) }
     }
 
-    // MARK: Coercion
+    // MARK: Coercion, Graphite's
 
     static func number<T: FixedWidthInteger>(_ value: T) -> [UInt8] { withUnsafeBytes(of: value) { Array($0) } }
     static func number(_ value: Double) -> [UInt8] { withUnsafeBytes(of: value) { Array($0) } }
@@ -104,109 +105,43 @@ enum AE {
         return bytes.withUnsafeBytes { $0.loadUnaligned(as: T.self) }
     }
 
-    static let textTypes: Set<UInt32> = [typeChar, typeUTF8Text, typeUnicodeText]
+    /// The four-character code types, which coerce to one another.
     static let codeTypes: Set<UInt32> = [typeType, typeEnumerated, typeKeyword, typeProperty]
 
+    /// An item as Graphite's descriptor.
+    static func descriptor(_ item: AEItem) -> Descriptor {
+        Descriptor(
+            type: GraphiteBase.FourCharCode(rawValue: item.type),
+            bytes: item.value.bytes,
+            items: item.value.items.map { Descriptor.Item(keyword: GraphiteBase.FourCharCode(rawValue: $0.keyword), descriptor: descriptor($0)) },
+            attributes: item.value.attributes.map { Descriptor.Item(keyword: GraphiteBase.FourCharCode(rawValue: $0.keyword), descriptor: descriptor($0)) },
+            isKeyed: item.value.keyed
+        )
+    }
+
+    /// Graphite's descriptor as an item of a keyword.
+    static func item(from descriptor: Descriptor, keyword: UInt32) -> AEItem {
+        AEItem(keyword: keyword, type: descriptor.type.rawValue, value: AEValue(
+            bytes: descriptor.bytes,
+            items: descriptor.items.map { item(from: $0.descriptor, keyword: $0.keyword.rawValue) },
+            attributes: descriptor.attributes.map { item(from: $0.descriptor, keyword: $0.keyword.rawValue) },
+            keyed: descriptor.isKeyed
+        ))
+    }
+
     static func text(_ type: UInt32, _ bytes: [UInt8]) -> String? {
-        switch type {
-        case typeUTF8Text: return String(validating: bytes, as: UTF8.self)
-        case typeUnicodeText:
-            // Native byte order, after a byte order mark if there is one.
-            var units = stride(from: 0, to: bytes.count - 1, by: 2).map { UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 }
-            if units.first == 0xFEFF { units.removeFirst() }
-            return String(validating: units, as: UTF16.self)
-        case typeChar: return bytes.withUnsafeBytes { TextEncodings.decode($0, 0) }   // Mac OS Roman
-        default: return nil
-        }
+        Coercion.text(Descriptor(type: GraphiteBase.FourCharCode(rawValue: type), bytes: bytes))
     }
 
     static func textBytes(_ text: String, as type: UInt32) -> [UInt8]? {
-        switch type {
-        case typeUTF8Text: return Array(text.utf8)
-        case typeUnicodeText: return text.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] }
-        case typeChar: return TextEncodings.encode(text[...], 0, lossByte: UInt8(ascii: "?"))
-        default: return nil
-        }
+        Coercion.textBytes(text, as: GraphiteBase.FourCharCode(rawValue: type))
     }
-
-    /// A number's value, from a numeric, boolean or text descriptor.
-    static func double(_ type: UInt32, _ bytes: [UInt8]) -> Double? {
-        switch type {
-        case typeSInt16: return load(bytes, as: Int16.self).map(Double.init)
-        case typeSInt32: return load(bytes, as: Int32.self).map(Double.init)
-        case typeSInt64: return load(bytes, as: Int64.self).map(Double.init)
-        case typeUInt32: return load(bytes, as: UInt32.self).map(Double.init)
-        case typeFloat: return load(bytes, as: Float.self).map(Double.init)
-        case typeDouble: return load(bytes, as: Double.self)
-        case typeBoolean: return bytes.first.map { $0 == 0 ? 0 : 1 }
-        case typeTrue: return 1
-        case typeFalse: return 0
-        default: return text(type, bytes).flatMap { Double($0.trimmingCharacters(in: " \t\r\n")) }
-        }
-    }
-
-    static func numberBytes(_ value: Double, as type: UInt32) -> [UInt8]? {
-        func integer<T: FixedWidthInteger>(_: T.Type) -> [UInt8]? {
-            guard value.rounded() == value, let exact = T(exactly: value) else { return nil }
-            return number(exact)
-        }
-        switch type {
-        case typeSInt16: return integer(Int16.self)
-        case typeSInt32: return integer(Int32.self)
-        case typeSInt64: return integer(Int64.self)
-        case typeUInt32: return integer(UInt32.self)
-        case typeFloat: return number(Float(value))
-        case typeDouble: return number(value)
-        case typeBoolean: return value == 0 || value == 1 ? [UInt8(value)] : nil
-        default: return nil
-        }
-    }
-
-    static let numericTypes: Set<UInt32> = [typeSInt16, typeSInt32, typeSInt64, typeUInt32, typeFloat, typeDouble, typeBoolean, typeTrue, typeFalse]
 
     /// The item as `to`: itself for the same type or typeWildCard, else the
-    /// standard coercions between text, numbers, four-character codes and
-    /// lists.
+    /// Apple Event Manager's standard coercions between text, numbers,
+    /// booleans, four-character codes, lists and records.
     static func coerce(_ item: AEItem, to: UInt32) -> AEItem? {
-        if to == typeWildCard || to == item.type { return item }
-        var result = AEItem(keyword: item.keyword, type: to, value: AEValue())
-        if to == typeAEList {
-            if item.type == typeAERecord || item.value.keyed { return nil }
-            result.value.items = [AEItem(keyword: 0, type: item.type, value: item.value)]
-            return result
-        }
-        if to == typeAERecord, item.value.keyed {
-            result.value = item.value
-            return result
-        }
-        if codeTypes.contains(to), codeTypes.contains(item.type), item.value.bytes.count == 4 {
-            result.value.bytes = item.value.bytes
-            return result
-        }
-        if textTypes.contains(to) {
-            if let text = text(item.type, item.value.bytes), let bytes = textBytes(text, as: to) {
-                result.value.bytes = bytes
-                return result
-            }
-            if numericTypes.contains(item.type), let value = double(item.type, item.value.bytes),
-               let bytes = textBytes(value.rounded() == value && abs(value) < 1e15 ? String(Int64(value)) : String(value), as: to) {
-                result.value.bytes = bytes
-                return result
-            }
-            if codeTypes.contains(item.type), let value = load(item.value.bytes, as: UInt32.self),
-               let bytes = textBytes(fourCharacters(value), as: to) {
-                result.value.bytes = bytes
-                return result
-            }
-            return nil
-        }
-        if numericTypes.contains(to), let value = double(item.type, item.value.bytes) {
-            if to == typeTrue || to == typeFalse { return (value != 0) == (to == typeTrue) ? result : nil }
-            guard let bytes = numberBytes(value, as: to) else { return nil }
-            result.value.bytes = bytes
-            return result
-        }
-        return nil
+        Coercion.standard(descriptor(item), to: GraphiteBase.FourCharCode(rawValue: to)).map { self.item(from: $0, keyword: item.keyword) }
     }
 
     // MARK: Handlers
@@ -254,7 +189,7 @@ enum AE {
         let value = value(event)
         let eventClass = code(of: attribute(value, keyEventClassAttr)), eventID = code(of: attribute(value, keyEventIDAttr))
         guard let handler = handler(eventClass, eventID), let procedure = handler.procedure else { return eventNotHandled }
-        let function = unsafeBitCast(procedure, to: EventHandler.self)
+        let function = darwinCallable(unsafeBitCast(procedure, to: EventHandler.self))
         if let reply { return function(event, reply, handler.refCon) }
         var unused = (UInt32(0), UInt16(0), UInt16(0), UInt16(0), UInt16(0))   // a 12-byte typeNull AEDesc
         return withUnsafeMutableBytes(of: &unused) { buffer in
@@ -285,37 +220,37 @@ enum AE {
         return wantsReply && error == eventNotHandled ? eventNotHandled : noErr
     }
 
-    /// A four-character code's characters.
-    static func fourCharacters(_ value: UInt32) -> String {
-        String(decoding: [UInt8(value >> 24), UInt8((value >> 16) & 0xFF), UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)], as: UTF8.self)
-    }
-
     /// A descriptor's text, as AEPrintDescToHandle shows it.
-    static func describe(_ item: AEItem) -> String {
-        func code(_ value: UInt32) -> String { fourCharacters(value) }
-        func items(_ list: [AEItem], keyed: Bool) -> String {
-            list.map { keyed ? "\(code($0.keyword)):\(describe($0))" : describe($0) }.joined(separator: ", ")
+    static func describe(_ item: AEItem) -> String { descriptor(item).description }
+
+    /// Carbon's event loop's: one of the required events ('oapp', 'quit')
+    /// to the application, from the system. False if it has no handler for
+    /// it, so the loop can do what the system does without one.
+    static func sendCore(_ eventID: UInt32) -> Bool {
+        guard handler(kCoreEventClass, eventID) != nil else { return false }
+        var self_ = AEValue()
+        self_.bytes = number(UInt32(0)) + number(UInt32(2))   // kCurrentProcess
+        var event = AEValue(keyed: true)
+        event.attributes = [
+            AEItem(keyword: keyEventClassAttr, type: typeType, value: AEValue(bytes: number(kCoreEventClass))),
+            AEItem(keyword: keyEventIDAttr, type: typeType, value: AEValue(bytes: number(eventID))),
+            AEItem(keyword: keyAddressAttr, type: typeProcessSerialNumber, value: self_),
+        ]
+        var storage = (UInt32(0), UInt16(0), UInt16(0), UInt16(0), UInt16(0))   // a 12-byte AEDesc
+        return withUnsafeMutableBytes(of: &storage) { buffer in
+            set(buffer.baseAddress!, typeAppleEvent, event)
+            defer { dispose(buffer.baseAddress!) }
+            _ = dispatch(buffer.baseAddress!, nil)
+            return true
         }
-        if item.type == typeAppleEvent {
-            let event = item.value
-            return "'\(code(AE.code(of: attribute(event, keyEventClassAttr))))'\\'\(code(AE.code(of: attribute(event, keyEventIDAttr))))'{ \(items(event.items, keyed: true)) }"
-        }
-        if item.type == typeAEList { return "[\(items(item.value.items, keyed: false))]" }
-        if item.value.keyed { return (item.type == typeAERecord ? "" : "'\(code(item.type))'") + "{ \(items(item.value.items, keyed: true)) }" }
-        if let text = text(item.type, item.value.bytes) { return "'\(code(item.type))'(\"\(text)\")" }
-        if numericTypes.contains(item.type), let value = double(item.type, item.value.bytes) { return "\(value)" }
-        if codeTypes.contains(item.type), item.value.bytes.count == 4 { return "'\(code(load(item.value.bytes, as: UInt32.self)!))'" }
-        return "'\(code(item.type))'(\(item.value.bytes.map { String($0, radix: 16) }.joined()))"
     }
 }
 
-private extension String {
-    func trimmingCharacters(in set: String) -> String {
-        var view = Substring(self)
-        while let first = view.first, set.contains(first) { view.removeFirst() }
-        while let last = view.last, set.contains(last) { view.removeLast() }
-        return String(view)
-    }
+/// Carbon's: sends the application 'oapp' or 'quit' through its handlers
+/// here, which it installed with either framework's AEInstallEventHandler.
+@c(perry_apple_event_send_core)
+public func perry_apple_event_send_core(_ eventID: UInt32) -> Bool {
+    AE.sendCore(eventID)
 }
 
 // MARK: - Descriptors
@@ -671,7 +606,7 @@ public func AEResumeTheCurrentEvent(_ event: UnsafeRawPointer?, _ reply: UnsafeM
     guard let event else { return AE.paramErr }
     guard let dispatcher else { return AE.noErr }
     if UInt(bitPattern: dispatcher) == UInt.max { return AE.dispatch(event, reply) }
-    return unsafeBitCast(dispatcher, to: AE.EventHandler.self)(event, reply, refCon)
+    return darwinCallable(unsafeBitCast(dispatcher, to: AE.EventHandler.self))(event, reply, refCon)
 }
 
 /// OSStatus AEPrintDescToHandle(const AEDesc *, Handle *): the descriptor
@@ -832,8 +767,8 @@ extension AE {
             }
             guard let accessor, let procedure = accessor.procedure else { return accessorNotFound }
             return withDesc(selection) { selectionData in
-                unsafeBitCast(procedure, to: Accessor.self)(desiredClass, containerToken, containerClass, form, selectionData, token,
-                                                            accessor.refCon)
+                darwinCallable(unsafeBitCast(procedure, to: Accessor.self))(desiredClass, containerToken, containerClass, form, selectionData,
+                                                                            token, accessor.refCon)
             }
         }
     }
