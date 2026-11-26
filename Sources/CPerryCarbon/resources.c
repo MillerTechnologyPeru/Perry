@@ -16,6 +16,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifndef PERRY_CARBON_SWIFT  // PerryCarbon's Swift exports these
+
+#define FOUR_STR 0x53545223   // 'STR#'
+
 enum { resFNotFound = -193, mapReadErr = -199, eofErr = -39, fnfErr = -43 };
 
 typedef struct resource_file {
@@ -390,3 +394,199 @@ Handle carbon_GetIntlResource(int16_t identifier) {
 
 void carbon_SetResLoad(Boolean load) CARBON_SYMBOL(SetResLoad);
 void carbon_SetResLoad(Boolean load) { (void)load; }
+
+// What PerryCarbon's Swift adds, as the C build has it: nothing written back
+// and no file made; the indexed calls and strings over what it has.
+
+static void read_only(void) { last_error = -61; }   // wrPermErr
+
+void carbon_AddResource(Handle handle, OSType type, int16_t identifier, const unsigned char *name) CARBON_SYMBOL(AddResource);
+void carbon_AddResource(Handle handle, OSType type, int16_t identifier, const unsigned char *name) {
+    (void)handle; (void)type; (void)identifier; (void)name;
+    read_only();
+}
+
+void carbon_ChangedResource(Handle handle) CARBON_SYMBOL(ChangedResource);
+void carbon_ChangedResource(Handle handle) { (void)handle; read_only(); }
+
+void carbon_WriteResource(Handle handle) CARBON_SYMBOL(WriteResource);
+void carbon_WriteResource(Handle handle) { (void)handle; read_only(); }
+
+void carbon_RemoveResource(Handle handle) CARBON_SYMBOL(RemoveResource);
+void carbon_RemoveResource(Handle handle) { (void)handle; read_only(); }
+
+void carbon_UpdateResFile(int16_t reference) CARBON_SYMBOL(UpdateResFile);
+void carbon_UpdateResFile(int16_t reference) { last_error = file_for(reference) ? noErr : resFNotFound; }
+
+void carbon_SetResInfo(Handle handle, int16_t identifier, const unsigned char *name) CARBON_SYMBOL(SetResInfo);
+void carbon_SetResInfo(Handle handle, int16_t identifier, const unsigned char *name) {
+    (void)handle; (void)identifier; (void)name;
+    read_only();
+}
+
+int16_t carbon_GetResAttrs(Handle handle) CARBON_SYMBOL(GetResAttrs);
+int16_t carbon_GetResAttrs(Handle handle) {
+    (void)handle;
+    last_error = noErr;
+    return 0;
+}
+
+void carbon_SetResAttrs(Handle handle, int16_t attributes) CARBON_SYMBOL(SetResAttrs);
+void carbon_SetResAttrs(Handle handle, int16_t attributes) { (void)handle; (void)attributes; read_only(); }
+
+void carbon_FSCreateResFile(const FSRef *parent, size_t length, const uint16_t *name, uint32_t which, const void *info, FSRef *ref,
+                            void *spec) CARBON_SYMBOL(FSCreateResFile);
+void carbon_FSCreateResFile(const FSRef *parent, size_t length, const uint16_t *name, uint32_t which, const void *info, FSRef *ref,
+                            void *spec) {
+    (void)parent; (void)length; (void)name; (void)which; (void)info; (void)ref; (void)spec;
+    read_only();
+}
+
+void carbon_FSpCreateResFile(const void *spec, OSType creator, OSType type, int16_t script) CARBON_SYMBOL(FSpCreateResFile);
+void carbon_FSpCreateResFile(const void *spec, OSType creator, OSType type, int16_t script) {
+    (void)spec; (void)creator; (void)type; (void)script;
+    read_only();
+}
+
+long carbon_GetResourceSizeOnDisk(Handle handle) CARBON_SYMBOL(GetResourceSizeOnDisk);
+long carbon_GetResourceSizeOnDisk(Handle handle) {
+    long (*size)(Handle) = (long (*)(Handle))carbon_function(CORESERVICES, "_GetHandleSize");
+    return handle && size ? size(handle) : -1;
+}
+
+long carbon_GetMaxResourceSize(Handle handle) CARBON_SYMBOL(GetMaxResourceSize);
+long carbon_GetMaxResourceSize(Handle handle) { return carbon_GetResourceSizeOnDisk(handle); }
+
+/// The types of a file, each once.
+static int file_types(resource_file *file, OSType *types, int capacity) {
+    const uint8_t *map = file->data + file->mapOffset;
+    const uint8_t *list = map + big16(map + 24);
+    int count = (big16(list) + 1) & 0xffff, found = 0;
+    for (int index = 0; index < count && found < capacity; index++) {
+        const uint8_t *entry = list + 2 + index * 8;
+        if ((size_t)(entry + 8 - file->data) > file->size) break;
+        types[found++] = big32(entry);
+    }
+    return found;
+}
+
+static int chain_types(bool one_file, OSType *types, int capacity) {
+    int found = 0;
+    for (resource_file *file = file_for(current); file && found < capacity; file = one_file ? NULL : file->next) {
+        OSType mine[256];
+        int count = file_types(file, mine, 256);
+        for (int index = 0; index < count && found < capacity; index++) {
+            bool seen = false;
+            for (int other = 0; other < found; other++) seen = seen || types[other] == mine[index];
+            if (!seen) types[found++] = mine[index];
+        }
+    }
+    return found;
+}
+
+int16_t carbon_CountTypes(void) CARBON_SYMBOL(CountTypes);
+int16_t carbon_CountTypes(void) {
+    OSType types[1024];
+    return (int16_t)chain_types(false, types, 1024);
+}
+
+int16_t carbon_Count1Types(void) CARBON_SYMBOL(Count1Types);
+int16_t carbon_Count1Types(void) {
+    OSType types[1024];
+    return (int16_t)chain_types(true, types, 1024);
+}
+
+static void indexed_type(OSType *type, int16_t index, bool one_file) {
+    OSType types[1024];
+    int count = chain_types(one_file, types, 1024);
+    if (type) *type = index >= 1 && index <= count ? types[index - 1] : 0;
+    last_error = index >= 1 && index <= count ? noErr : resNotFound;
+}
+
+void carbon_GetIndType(OSType *type, int16_t index) CARBON_SYMBOL(GetIndType);
+void carbon_GetIndType(OSType *type, int16_t index) { indexed_type(type, index, false); }
+
+void carbon_Get1IndType(OSType *type, int16_t index) CARBON_SYMBOL(Get1IndType);
+void carbon_Get1IndType(OSType *type, int16_t index) { indexed_type(type, index, true); }
+
+/// The index-th resource of a type in a file, by its ID.
+static bool indexed_id(resource_file *file, OSType type, int index, int16_t *identifier) {
+    const uint8_t *map = file->data + file->mapOffset;
+    const uint8_t *list = map + big16(map + 24);
+    int count = (big16(list) + 1) & 0xffff;
+    for (int at = 0; at < count; at++) {
+        const uint8_t *entry = list + 2 + at * 8;
+        if ((size_t)(entry + 8 - file->data) > file->size || big32(entry) != type) continue;
+        int resources = big16(entry + 4) + 1;
+        if (index > resources) return false;
+        const uint8_t *reference = list + big16(entry + 6) + (index - 1) * 12;
+        if ((size_t)(reference + 12 - file->data) > file->size) return false;
+        *identifier = (int16_t)big16(reference);
+        return true;
+    }
+    return false;
+}
+
+static Handle indexed_resource(OSType type, int16_t index, bool one_file) {
+    int remaining = index;
+    int16_t saved = current;
+    for (resource_file *file = file_for(current); file && remaining >= 1; file = one_file ? NULL : file->next) {
+        current = file->reference;
+        int16_t count = carbon_Count1Resources(type), identifier;
+        if (remaining <= count && indexed_id(file, type, remaining, &identifier)) {
+            Handle handle = get(type, identifier, NULL, true);
+            current = saved;
+            return handle;
+        }
+        remaining -= count;
+    }
+    current = saved;
+    last_error = resNotFound;
+    return NULL;
+}
+
+Handle carbon_GetIndResource(OSType type, int16_t index) CARBON_SYMBOL(GetIndResource);
+Handle carbon_GetIndResource(OSType type, int16_t index) { return indexed_resource(type, index, false); }
+
+Handle carbon_Get1IndResource(OSType type, int16_t index) CARBON_SYMBOL(Get1IndResource);
+Handle carbon_Get1IndResource(OSType type, int16_t index) { return indexed_resource(type, index, true); }
+
+static int16_t unique_id(OSType type) {
+    for (int16_t identifier = 128; identifier < 32767; identifier++) {
+        bool taken = false;
+        for (resource_file *file = file_for(current); file && !taken; file = file->next) {
+            const uint8_t *bytes;
+            uint32_t length;
+            int16_t found;
+            taken = find_in(file, type, identifier, NULL, &bytes, &length, &found);
+        }
+        if (!taken) return identifier;
+    }
+    return 32767;
+}
+
+int16_t carbon_UniqueID(OSType type) CARBON_SYMBOL(UniqueID);
+int16_t carbon_UniqueID(OSType type) { return unique_id(type); }
+
+int16_t carbon_Unique1ID(OSType type) CARBON_SYMBOL(Unique1ID);
+int16_t carbon_Unique1ID(OSType type) { return unique_id(type); }
+
+void carbon_GetIndString(unsigned char *string, int16_t list, int16_t index) CARBON_SYMBOL(GetIndString);
+void carbon_GetIndString(unsigned char *string, int16_t list, int16_t index) {
+    if (!string) return;
+    string[0] = 0;
+    Handle handle = get(FOUR_STR, list, NULL, false);
+    long (*size)(Handle) = (long (*)(Handle))carbon_function(CORESERVICES, "_GetHandleSize");
+    if (!handle || !size) return;
+    const uint8_t *bytes = (const uint8_t *)*handle;
+    long length = size(handle), offset = 2;
+    if (length < 2 || index < 1 || index > big16(bytes)) return;
+    for (int at = 1; at < index && offset < length; at++) offset += 1 + bytes[offset];
+    if (offset >= length || offset + 1 + bytes[offset] > length) return;
+    memcpy(string, bytes + offset, (size_t)bytes[offset] + 1);
+}
+
+Handle carbon_GetString(int16_t identifier) CARBON_SYMBOL(GetString);
+Handle carbon_GetString(int16_t identifier) { return get(0x53545220, identifier, NULL, false); }   // 'STR '
+
+#endif  // PERRY_CARBON_SWIFT
