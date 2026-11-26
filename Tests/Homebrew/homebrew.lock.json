@@ -1,0 +1,95 @@
+{
+  "tag": "arm64_tahoe",
+  "requested": [
+    "fd",
+    "jq",
+    "ripgrep",
+    "tree",
+    "xz",
+    "zstd"
+  ],
+  "formulae": {
+    "fd": {
+      "version": "10.5.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/fd/blobs/sha256:a8696259e252df9394e6f06488fde396b26caa14b4475e4c19074147031c99db",
+      "sha256": "a8696259e252df9394e6f06488fde396b26caa14b4475e4c19074147031c99db",
+      "dependencies": [
+
+      ]
+    },
+    "jq": {
+      "version": "1.8.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/jq/blobs/sha256:ca67c64d0aaf1e5472790ec2cc081ff7972316f27095d8a8aab81b3321247036",
+      "sha256": "ca67c64d0aaf1e5472790ec2cc081ff7972316f27095d8a8aab81b3321247036",
+      "dependencies": [
+        "oniguruma"
+      ]
+    },
+    "lz4": {
+      "version": "1.11.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/lz4/blobs/sha256:9ab0175d769ca830f573defafb22b020f3e9b4e0862ee6ee9f47e0b46a29468d",
+      "sha256": "9ab0175d769ca830f573defafb22b020f3e9b4e0862ee6ee9f47e0b46a29468d",
+      "dependencies": [
+
+      ]
+    },
+    "oniguruma": {
+      "version": "6.9.10",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/oniguruma/blobs/sha256:eb6bda3b333f497b5d294388f39fd0902a5c79a52ae16858eff711d2d104cc4d",
+      "sha256": "eb6bda3b333f497b5d294388f39fd0902a5c79a52ae16858eff711d2d104cc4d",
+      "dependencies": [
+
+      ]
+    },
+    "pcre2": {
+      "version": "10.49",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/pcre2/blobs/sha256:475d36ffae1f472554eac1fd96ca3ead3840c3d8fd2d34b257d2d7c4c1e5a17f",
+      "sha256": "475d36ffae1f472554eac1fd96ca3ead3840c3d8fd2d34b257d2d7c4c1e5a17f",
+      "dependencies": [
+
+      ]
+    },
+    "ripgrep": {
+      "version": "16.0.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/ripgrep/blobs/sha256:15e2b23e8774d6876b857705bb8bc2ac94d8694aaea8dd61895e4a66b4d4a319",
+      "sha256": "15e2b23e8774d6876b857705bb8bc2ac94d8694aaea8dd61895e4a66b4d4a319",
+      "dependencies": [
+        "pcre2"
+      ]
+    },
+    "tree": {
+      "version": "2.3.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/tree/blobs/sha256:d1967d2ed08717f963addb249ea6b8ca11c26ecb59efba34f2860853a06bedc7",
+      "sha256": "d1967d2ed08717f963addb249ea6b8ca11c26ecb59efba34f2860853a06bedc7",
+      "dependencies": [
+
+      ]
+    },
+    "xz": {
+      "version": "5.8.4",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/xz/blobs/sha256:d291ad2277682238329b0e4d249e5e2c948c4b10cd64dba1963d897330ad88dd",
+      "sha256": "d291ad2277682238329b0e4d249e5e2c948c4b10cd64dba1963d897330ad88dd",
+      "dependencies": [
+
+      ]
+    },
+    "zstd": {
+      "version": "1.6.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/zstd/blobs/sha256:406c93bb4ed7d09e857ba4d00e30fb72c2f6e7d610bd5e888a498b9269c957c4",
+      "sha256": "406c93bb4ed7d09e857ba4d00e30fb72c2f6e7d610bd5e888a498b9269c957c4",
+      "dependencies": [
+        "lz4",
+        "xz"
+      ]
+    }
+  }
+}
