@@ -1,8 +1,8 @@
 import Glibc
 import PerryObjCInterop
 
-// 64-bit Mac apps' alone, as the rest of the Apple Event Manager here is.
-#if arch(x86_64) || arch(arm64)
+// Mac apps' alone, as the rest of the Apple Event Manager here is.
+#if !arch(arm)
 // AEStream: a descriptor or Apple event written piece by piece. A stream
 // keeps a stack of what is open: the root (one value), an event's
 // parameters, lists, records and a descriptor whose data is being written;
