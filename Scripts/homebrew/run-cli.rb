@@ -90,7 +90,10 @@ names.each do |name|
     started = Time.now
     outcome, detail = nil
     Dir.mktmpdir("perry-homebrew") do |directory|
-      (test["files"] || {}).each { |file, text| File.write(File.join(directory, file), text) }
+      (test["files"] || {}).each do |file, text|
+        FileUtils.mkdir_p(File.dirname(File.join(directory, file)))
+        File.write(File.join(directory, file), text)
+      end
       stdout, stderr, status = execute(options[:runner] + [program] + (test["args"] || []).map(&:to_s), test["stdin"], directory, options[:timeout])
       golden = File.join(options[:goldens], "#{id}.json")
       if options[:record]
