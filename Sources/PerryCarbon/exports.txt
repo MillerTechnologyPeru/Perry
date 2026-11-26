@@ -3,27 +3,7 @@
 # from CPerryCarbon's C to PerryCarbon's Swift, none may be lost, and none
 # added unless it is added here. Darwin's names, with their leading
 # underscore, and the provider's entry point.
-_AECountItems
-_AECreateAppleEvent
-_AECreateDesc
-_AECreateList
-_AEDisposeDesc
-_AEDuplicateDesc
-_AEGetAttributePtr
-_AEGetDescData
-_AEGetDescDataSize
-_AEGetNthDesc
-_AEGetNthPtr
-_AEGetParamDesc
-_AEGetParamPtr
-_AEInitializeDesc
-_AEInstallEventHandler
 _AEProcessAppleEvent
-_AEPutParamDesc
-_AEPutParamPtr
-_AEPutPtr
-_AERemoveEventHandler
-_AESend
 _ATSFontActivateFromMemory
 _ATSFontFamilyFindFromName
 _ATSFontFindFromContainer
