@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
-# Downloads the bottles in a lock (Scripts/homebrew/resolve.rb) into a
-# cache, as <cache>/<sha256>, and refuses any file whose hash doesn't match.
-# Bottles are anonymous pulls from ghcr.io with the bearer token Homebrew
-# itself sends.
+# Downloads the bottles and casks in a lock (Scripts/homebrew/resolve.rb)
+# into a cache, as <cache>/<sha256>, and refuses any file whose hash doesn't
+# match. Bottles are anonymous pulls from ghcr.io with the bearer token
+# Homebrew itself sends; casks come from their vendors' URLs.
 #
 # Usage: ruby Scripts/homebrew/fetch.rb [--lock FILE] [--cache DIR]
 #
@@ -49,7 +49,9 @@ end
 lock = JSON.parse(File.read(options[:lock]))
 FileUtils.mkdir_p(options[:cache])
 failed = []
-lock["formulae"].each do |name, entry|
+downloads = lock["formulae"].map { |name, entry| [name, entry, "QQ=="] } +
+            lock.fetch("casks", {}).map { |name, entry| ["#{name} (cask)", entry, nil] }
+downloads.each do |name, entry, token|
   cached = File.join(options[:cache], entry["sha256"])
   if File.exist?(cached)
     next if Digest::SHA256.file(cached).hexdigest == entry["sha256"]
@@ -59,7 +61,7 @@ lock["formulae"].each do |name, entry|
   attempt = 0
   begin
     attempt += 1
-    download(entry["url"], partial, "QQ==")
+    download(entry["url"], partial, token)
     actual = Digest::SHA256.file(partial).hexdigest
     raise "SHA-256 is #{actual}" unless actual == entry["sha256"]
     File.rename(partial, cached)

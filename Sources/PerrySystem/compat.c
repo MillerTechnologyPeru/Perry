@@ -88,6 +88,60 @@ int darwin_sigprocmask(int how, const uint32_t *set, uint32_t *old) {
     return 0;
 }
 
+// A signal set is a word, bit n-1 for signal n.
+int darwin_sigemptyset(uint32_t *set) DARWIN_SYMBOL(sigemptyset);
+int darwin_sigemptyset(uint32_t *set) {
+    *set = 0;
+    return 0;
+}
+
+int darwin_sigfillset(uint32_t *set) DARWIN_SYMBOL(sigfillset);
+int darwin_sigfillset(uint32_t *set) {
+    *set = ~0u;
+    return 0;
+}
+
+int darwin_sigaddset(uint32_t *set, int signal) DARWIN_SYMBOL(sigaddset);
+int darwin_sigaddset(uint32_t *set, int signal) {
+    if (signal < 1 || signal > 31) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set |= 1u << (signal - 1);
+    return 0;
+}
+
+int darwin_sigdelset(uint32_t *set, int signal) DARWIN_SYMBOL(sigdelset);
+int darwin_sigdelset(uint32_t *set, int signal) {
+    if (signal < 1 || signal > 31) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set &= ~(1u << (signal - 1));
+    return 0;
+}
+
+int darwin_sigismember(const uint32_t *set, int signal) DARWIN_SYMBOL(sigismember);
+int darwin_sigismember(const uint32_t *set, int signal) {
+    if (signal < 1 || signal > 31) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (*set >> (signal - 1)) & 1;
+}
+
+int darwin_sigpending(uint32_t *set) DARWIN_SYMBOL(sigpending);
+int darwin_sigpending(uint32_t *set) {
+    sigset_t linux_set;
+    if (sigpending(&linux_set) != 0)
+        return -1;
+    *set = 0;
+    for (int signal = 1; signal < 32; signal++)
+        if (sigismember(&linux_set, signal) == 1 && signal_to_darwin(signal) > 0)
+            *set |= 1u << (signal_to_darwin(signal) - 1);
+    return 0;
+}
+
 int darwin_pthread_sigmask(int how, const uint32_t *set, uint32_t *old) DARWIN_SYMBOL(pthread_sigmask);
 int darwin_pthread_sigmask(int how, const uint32_t *set, uint32_t *old) {
     return darwin_sigprocmask(how, set, old) == 0 ? 0 : EINVAL;
@@ -631,6 +685,9 @@ size_t darwin_mbrlen_l(const char *s, size_t n, mbstate_t *state, locale_t local
 size_t darwin_mbrlen_l(const char *s, size_t n, mbstate_t *state, locale_t locale) {
     return IN_LOCALE(locale, mbrlen(s, n, state));
 }
+
+size_t darwin_mbrtowc(wchar_t *out, const char *s, size_t n, mbstate_t *state) DARWIN_SYMBOL(mbrtowc);
+size_t darwin_mbrtowc(wchar_t *out, const char *s, size_t n, mbstate_t *state) { return mbrtowc(out, s, n, state); }
 
 size_t darwin_mbrtowc_l(wchar_t *out, const char *s, size_t n, mbstate_t *state, locale_t locale) DARWIN_SYMBOL(mbrtowc_l);
 size_t darwin_mbrtowc_l(wchar_t *out, const char *s, size_t n, mbstate_t *state, locale_t locale) {
@@ -1688,6 +1745,11 @@ uint32_t darwin_notify_register_check(const char *name, int *token) {
         *token = atomic_fetch_add(&notify_tokens, 1) + 1;
     return 0;
 }
+
+// Whether a token was handed out by a registration above, which never
+// forgets one.
+bool darwin_notify_is_valid_token(int token) DARWIN_SYMBOL(notify_is_valid_token);
+bool darwin_notify_is_valid_token(int token) { return token > 0 && token <= atomic_load(&notify_tokens); }
 
 uint32_t darwin_notify_check(int token, int *check) DARWIN_SYMBOL(notify_check);
 uint32_t darwin_notify_check(int token, int *check) {

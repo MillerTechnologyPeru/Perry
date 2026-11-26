@@ -1,0 +1,4 @@
+{
+  "stdout": "[\n    {\"type\":\"directory\",\"name\":\".\",\"contents\":[\n        {\"type\":\"directory\",\"name\":\"a\",\"contents\":[\n            {\"type\":\"file\",\"name\":\"one.txt\"}\n        ]},\n        {\"type\":\"directory\",\"name\":\"container\"},\n        {\"type\":\"directory\",\"name\":\"home\"},\n        {\"type\":\"file\",\"name\":\"top.txt\"}\n    ]}\n,    {\"type\":\"report\",\"directories\":4,\"files\":2}\n]\n",
+  "status": 0
+}

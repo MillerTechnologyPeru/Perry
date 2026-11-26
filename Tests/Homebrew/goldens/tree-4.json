@@ -1,0 +1,4 @@
+{
+  "stdout": "[        192]  .\n|-- [         64]  container\n|-- [          5]  five.txt\n|-- [         64]  home\n`-- [         10]  ten.txt\n",
+  "status": 0
+}

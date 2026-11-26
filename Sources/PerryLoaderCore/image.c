@@ -1712,6 +1712,32 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
     main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
                                      : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
+#if defined(__LP64__)
+    // argv, the environment and the apple strings in one block, each ended by
+    // a NULL, as the kernel leaves them above argc. Go's runtime finds the
+    // apple strings by walking on from argv's end and the environment's,
+    // rather than by the pointers main gets.
+    {
+        size_t envc = 0, applec = 0;
+        while (envp && envp[envc]) envc++;
+        while (apple && apple[applec]) applec++;
+        char **block = calloc((size_t)argc + 1 + envc + 1 + applec + 1, sizeof(char *));
+        if (!block) perry_fatal("out of memory");
+        size_t n = 0;
+        char **block_argv = block;
+        for (int i = 0; i < argc; i++) block[n++] = argv[i];
+        block[n++] = NULL;
+        char **block_envp = block + n;
+        for (size_t i = 0; i < envc; i++) block[n++] = envp[i];
+        block[n++] = NULL;
+        char **block_apple = block + n;
+        for (size_t i = 0; i < applec; i++) block[n++] = apple[i];
+        block[n++] = NULL;
+        argv = block_argv;
+        envp = block_envp;
+        apple = block_apple;
+    }
+#endif
     int status;
     PERRY_DARWIN_CALL(status = PERRY_DARWIN_FUNCTION(entry)(argc, argv, envp, apple));
     exit(status);

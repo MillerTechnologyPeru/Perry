@@ -658,6 +658,14 @@ public func NSApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
     return 0
 }
 
+/// AppKit's Swift NSApplicationMain(_:_:), which apps built with a recent
+/// SDK import from AppKit.framework by its mangled name: it takes and
+/// returns what the C function does.
+@c(_$s6AppKit17NSApplicationMainys5Int32VAD_SpySpys4Int8VGSgGtF)
+public func NSApplicationMainSwift(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32 {
+    NSApplicationMain(argc, argv)
+}
+
 /// NSBeep: nothing to hear.
 @c(_NSBeep)
 public func NSBeep() {}

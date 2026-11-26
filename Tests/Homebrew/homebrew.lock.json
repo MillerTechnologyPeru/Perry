@@ -1,19 +1,62 @@
 {
   "tag": "arm64_tahoe",
   "requested": [
+    "bat",
     "fd",
+    "gh",
+    "hugo",
     "jq",
+    "lua",
+    "ninja",
     "ripgrep",
+    "sqlite",
     "tree",
     "xz",
     "zstd"
   ],
   "formulae": {
+    "bat": {
+      "version": "0.26.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/bat/blobs/sha256:19c6976b3466dadae4cc2538dd9f5795d0b1eb9c65136aa7f58cf1e3852ce7c7",
+      "sha256": "19c6976b3466dadae4cc2538dd9f5795d0b1eb9c65136aa7f58cf1e3852ce7c7",
+      "dependencies": [
+        "libgit2",
+        "oniguruma"
+      ]
+    },
+    "ca-certificates": {
+      "version": "2026-11-05",
+      "tag": "all",
+      "url": "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:8a5a35e1a3223e6bc6ca7c853e0ac3d2568de2cc329b61688682bdf57165dab9",
+      "sha256": "8a5a35e1a3223e6bc6ca7c853e0ac3d2568de2cc329b61688682bdf57165dab9",
+      "dependencies": [
+
+      ]
+    },
     "fd": {
       "version": "10.5.2",
       "tag": "arm64_tahoe",
       "url": "https://ghcr.io/v2/homebrew/core/fd/blobs/sha256:a8696259e252df9394e6f06488fde396b26caa14b4475e4c19074147031c99db",
       "sha256": "a8696259e252df9394e6f06488fde396b26caa14b4475e4c19074147031c99db",
+      "dependencies": [
+
+      ]
+    },
+    "gh": {
+      "version": "2.105.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/gh/blobs/sha256:37b15d760c279e04215c5a6ec2b43e7a2cb2fc5b60158b58c2658ac81af90b9c",
+      "sha256": "37b15d760c279e04215c5a6ec2b43e7a2cb2fc5b60158b58c2658ac81af90b9c",
+      "dependencies": [
+
+      ]
+    },
+    "hugo": {
+      "version": "0.170.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/hugo/blobs/sha256:8322c83fe03457f067cc2bfab88e348ff76f4e89a1691ae849dc1fa0674f20fc",
+      "sha256": "8322c83fe03457f067cc2bfab88e348ff76f4e89a1691ae849dc1fa0674f20fc",
       "dependencies": [
 
       ]
@@ -27,11 +70,58 @@
         "oniguruma"
       ]
     },
+    "libgit2": {
+      "version": "1.9.7_2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/libgit2/blobs/sha256:61cc4d0d03f5a400cede72fb57609df07909725a3f8cb6a1f75b2edaec3ddf85",
+      "sha256": "61cc4d0d03f5a400cede72fb57609df07909725a3f8cb6a1f75b2edaec3ddf85",
+      "dependencies": [
+        "libssh2",
+        "llhttp",
+        "openssl@4"
+      ]
+    },
+    "libssh2": {
+      "version": "1.11.1_7",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/libssh2/blobs/sha256:d51f26fef662c9f562f8d6bee348c9e9fdd2a917cc96bb1b26aa53116b9e7481",
+      "sha256": "d51f26fef662c9f562f8d6bee348c9e9fdd2a917cc96bb1b26aa53116b9e7481",
+      "dependencies": [
+        "openssl@4"
+      ]
+    },
+    "llhttp": {
+      "version": "9.4.4",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/llhttp/blobs/sha256:f10729546842aeb4a2a3103e59ee508759f4a6f05229c31c8361ec0e18adfe14",
+      "sha256": "f10729546842aeb4a2a3103e59ee508759f4a6f05229c31c8361ec0e18adfe14",
+      "dependencies": [
+
+      ]
+    },
+    "lua": {
+      "version": "5.5.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/lua/blobs/sha256:494c75d37ed889cd4deaf7cb40613e8ba2206b53af68a5ab3d47167c22138b50",
+      "sha256": "494c75d37ed889cd4deaf7cb40613e8ba2206b53af68a5ab3d47167c22138b50",
+      "dependencies": [
+
+      ]
+    },
     "lz4": {
       "version": "1.11.1",
       "tag": "arm64_tahoe",
       "url": "https://ghcr.io/v2/homebrew/core/lz4/blobs/sha256:9ab0175d769ca830f573defafb22b020f3e9b4e0862ee6ee9f47e0b46a29468d",
       "sha256": "9ab0175d769ca830f573defafb22b020f3e9b4e0862ee6ee9f47e0b46a29468d",
+      "dependencies": [
+
+      ]
+    },
+    "ninja": {
+      "version": "1.13.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/ninja/blobs/sha256:7bb261a70d9337d765956329580e10f16a0d1ea4eef5a106db39c9e1f8917f00",
+      "sha256": "7bb261a70d9337d765956329580e10f16a0d1ea4eef5a106db39c9e1f8917f00",
       "dependencies": [
 
       ]
@@ -45,11 +135,29 @@
 
       ]
     },
+    "openssl@4": {
+      "version": "4.1.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/openssl/4/blobs/sha256:382f63e829b116d5fb9a2b186147e489631b5bbbb06ac0089f795a3fed1085c4",
+      "sha256": "382f63e829b116d5fb9a2b186147e489631b5bbbb06ac0089f795a3fed1085c4",
+      "dependencies": [
+        "ca-certificates"
+      ]
+    },
     "pcre2": {
       "version": "10.49",
       "tag": "arm64_tahoe",
       "url": "https://ghcr.io/v2/homebrew/core/pcre2/blobs/sha256:475d36ffae1f472554eac1fd96ca3ead3840c3d8fd2d34b257d2d7c4c1e5a17f",
       "sha256": "475d36ffae1f472554eac1fd96ca3ead3840c3d8fd2d34b257d2d7c4c1e5a17f",
+      "dependencies": [
+
+      ]
+    },
+    "readline": {
+      "version": "8.3.6",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/readline/blobs/sha256:15cdd69af824537192843db389cbfd2459b3797cf4f36c906f8f8ab617d7d59f",
+      "sha256": "15cdd69af824537192843db389cbfd2459b3797cf4f36c906f8f8ab617d7d59f",
       "dependencies": [
 
       ]
@@ -61,6 +169,15 @@
       "sha256": "15e2b23e8774d6876b857705bb8bc2ac94d8694aaea8dd61895e4a66b4d4a319",
       "dependencies": [
         "pcre2"
+      ]
+    },
+    "sqlite": {
+      "version": "3.54.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/sqlite/blobs/sha256:813f7e1a708d256259a07a0aa113d1d62bad4909d04e7ad24296900b60d18d6a",
+      "sha256": "813f7e1a708d256259a07a0aa113d1d62bad4909d04e7ad24296900b60d18d6a",
+      "dependencies": [
+        "readline"
       ]
     },
     "tree": {
@@ -89,6 +206,56 @@
       "dependencies": [
         "lz4",
         "xz"
+      ]
+    }
+  },
+  "casks": {
+    "bonjeff": {
+      "version": "2.0.1",
+      "url": "https://github.com/lapcat/Bonjeff/releases/download/v2.0.1/Bonjeff2.0.1.zip",
+      "sha256": "def276e47c60d8ffa7922356c6b6c7a90671590d283b48fb46d78a15dbd43772",
+      "container": "zip",
+      "apps": [
+        "Bonjeff.app"
+      ],
+      "binaries": [
+
+      ]
+    },
+    "coteditor": {
+      "version": "7.1.3",
+      "url": "https://github.com/coteditor/CotEditor/releases/download/7.1.3/CotEditor_7.1.3.dmg",
+      "sha256": "c8cbe6437434516bb23f93efe057fd058ad56ded5523ac113081a8ae68dab184",
+      "container": "dmg",
+      "apps": [
+        "CotEditor.app"
+      ],
+      "binaries": [
+        "$APPDIR/CotEditor.app/Contents/SharedSupport/bin/cot"
+      ]
+    },
+    "netnewswire": {
+      "version": "7.3.1",
+      "url": "https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.3.1/NetNewsWire7.3.1.zip",
+      "sha256": "280ffd15e2df86a39146410d362f2bafca2c559f33cab78cd538669e96245ab9",
+      "container": "zip",
+      "apps": [
+        "NetNewsWire.app"
+      ],
+      "binaries": [
+
+      ]
+    },
+    "textmate": {
+      "version": "2.0.23",
+      "url": "https://github.com/textmate/textmate/releases/download/v2.0.23/TextMate_2.0.23.tbz",
+      "sha256": "f8dba933209bd01070028892474bf0b72f36c673f7bcb8da5973f93ddc387420",
+      "container": "tbz",
+      "apps": [
+        "TextMate.app"
+      ],
+      "binaries": [
+        "$APPDIR/TextMate.app/Contents/MacOS/mate"
       ]
     }
   }
