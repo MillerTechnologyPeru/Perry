@@ -47,7 +47,26 @@ struct LoaderTests {
             "strtol overflow errno=34 (ERANGE=34) value-positive=1",
             "after success errno=0",
             "fopen null=1 errno=2 (ENOENT=2) message=No such file or directory",
+            "repeated failure errno=2",
             "darwin EAGAIN message=Resource temporarily unavailable",
+        ])
+    }
+
+    @Test("SIGINFO handlers are accepted; pathconf answers as Darwin")
+    func unmappedSignalsAndPathconf() throws {
+        let exe = try FixtureBuilder.executable("unmapped_signals.c")
+        let result = try runPerry([exe.path])
+        #expect(result.status == 0, "\(result.stderr)")
+        // As a Mac prints it.
+        #expect(result.stdout.lines == [
+            "siginfo query 0 handler 1",
+            "siginfo set 0 query 0 handler kept 1",
+            "siginfo replaced 1",
+            "path max 1024 name max 255",
+            "fd path max 1024 name max 255",
+            "missing path -1 errno 2",
+            "unknown name -1 errno 22",
+            "vdisable of a directory -1 errno 22",
         ])
     }
 
