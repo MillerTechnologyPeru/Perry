@@ -1,0 +1,25 @@
+# Tests for Homebrew formulae, run by Scripts/homebrew/run-cli.rb. Each
+# formula has a list of tests:
+#   args, command (default: the formula's name), stdin, files (written to the
+#   test's directory first), match (a regex the stdout must match, instead of
+#   the Mac's output) and ignore_stdout.
+jq:
+  - args: [--version]
+  - args: [-c, .a]
+    stdin: '{"a":[1,2]}'
+xz:
+  - args: [--version]
+zstd:
+  - args: [--version]
+# tree writes (c) for a codeset that isn't UTF-8, and a copyright sign for
+# one that is. Perry's nl_langinfo always says UTF-8, and a Mac's C locale
+# says US-ASCII.
+tree:
+  - args: [--version]
+    match: '\Atree v2\.3\.2 (\(c\)|©) 1996 - \d{4} by '
+ripgrep:
+  - command: rg
+    args: [-c, foo, fixture.txt]
+    files: { fixture.txt: "foo\nbar\nfoo\n" }
+fd:
+  - args: [--version]
