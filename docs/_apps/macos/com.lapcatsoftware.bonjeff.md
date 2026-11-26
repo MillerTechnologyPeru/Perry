@@ -17,4 +17,7 @@ reports:
     level: 3
     source: body
     notes: Launches with its menu bar and lists the network's Bonjour service types under local., browsed through Avahi. Expanding and resolving services is not yet tested.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/2a368b23-b058-44ae-9314-d7c12b188867
+        caption: Bonjour service types under local.
 ---
