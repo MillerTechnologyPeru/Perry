@@ -134,6 +134,185 @@ typedef struct {
 #endif
 } UnsignedWide;
 
+// MARK: File Manager
+
+typedef struct {
+    int16_t vRefNum;
+    int32_t parID;
+    unsigned char name[64];
+} FSSpec;
+
+typedef struct {
+    uint16_t length;
+    uint16_t unicode[255];
+} HFSUniStr255;
+
+/// CoreServices' own: an FSRef names a path in its table.
+typedef struct { uint8_t hidden[80]; } FSRef;
+
+/// Where FSIterateForks is in an item's forks: initialize is 0 before the
+/// first call.
+typedef struct {
+    int32_t initialize;
+    int16_t priv[6];
+} CatPositionRec;
+
+/// The original File Manager's read and write parameter block.
+typedef struct io_block {
+    struct io_block *qLink;
+    int16_t qType, ioTrap;
+    void *ioCmdAddr;
+    void (*ioCompletion)(struct io_block *);
+    volatile int16_t ioResult;
+    unsigned char *ioNamePtr;
+    int16_t ioVRefNum, ioRefNum;
+    int8_t ioVersNum, ioPermssn;
+    void *ioMisc, *ioBuffer;
+    int32_t ioReqCount, ioActCount;
+    int16_t ioPosMode;
+    int32_t ioPosOffset;
+} IOParam;
+
+/// The header every other parameter block starts with: qLink, qType,
+/// ioTrap, ioCmdAddr, ioCompletion, ioResult, ioNamePtr, ioVRefNum.
+typedef struct {
+    void *qLink;
+    int16_t qType;
+    int16_t ioTrap;
+    void *ioCmdAddr;
+    void *ioCompletion;
+    OSErr ioResult;
+    unsigned char *ioNamePtr;
+    int16_t ioVRefNum;
+} ParamHeader;
+
+/// A file's or folder's catalog information: a file's Finder info, then
+/// its ID and its forks' sizes; a folder's the same 16 bytes of Finder
+/// info, its ID and its count of items.
+typedef struct {
+    ParamHeader header;
+    int16_t ioFRefNum;
+    int8_t ioFVersNum;
+    int8_t filler1;
+    int16_t ioFDirIndex;
+    int8_t ioFlAttrib;
+    int8_t ioACUser;
+    uint8_t ioFlFndrInfo[16];
+    int32_t ioDirID;            // ioDrDirID for a folder
+    uint16_t ioFlStBlk;         // ioDrNmFls for a folder
+    int32_t ioFlLgLen;
+    int32_t ioFlPyLen;
+    uint16_t ioFlRStBlk;
+    int32_t ioFlRLgLen;
+    int32_t ioFlRPyLen;
+    uint32_t ioFlCrDat;
+    uint32_t ioFlMdDat;
+    uint32_t ioFlBkDat;
+    uint8_t ioFlXFndrInfo[16];
+    int32_t ioFlParID;          // ioDrParID for a folder
+    int32_t ioFlClpSiz;
+} CInfoPB;
+
+typedef struct {
+    ParamHeader header;
+    int32_t filler1;
+    int16_t ioVolIndex;
+    uint32_t ioVCrDate;
+    uint32_t ioVLsMod;
+    int16_t ioVAtrb;
+    uint16_t ioVNmFls;
+    uint16_t ioVBitMap;
+    uint16_t ioAllocPtr;
+    uint16_t ioVNmAlBlks;
+    uint32_t ioVAlBlkSiz;
+    uint32_t ioVClpSiz;
+    uint16_t ioAlBlSt;
+    uint32_t ioVNxtCNID;
+    uint16_t ioVFrBlk;
+    uint16_t ioVSigWord;
+    int16_t ioVDrvInfo;
+    int16_t ioVDRefNum;
+    int16_t ioVFSID;
+    uint32_t ioVBkUp;
+    int16_t ioVSeqNum;
+    uint32_t ioVWrCnt;
+    uint32_t ioVFilCnt;
+    uint32_t ioVDirCnt;
+    int32_t ioVFndrInfo[8];
+} HVolumeParam;
+
+typedef struct {
+    ParamHeader header;
+    int16_t ioRefNum;
+    int8_t ioVersNum;
+    int8_t ioPermssn;
+    void *ioMisc;
+    void *ioBuffer;
+    int32_t ioReqCount;
+    int32_t ioActCount;
+} HIOParam;
+
+typedef struct {
+    ParamHeader header;
+    int16_t ioDTRefNum;
+    int16_t ioIndex;
+    int32_t ioTagInfo;
+    void *ioDTBuffer;
+    int32_t ioDTReqCount;
+    int32_t ioDTActCount;
+    int8_t ioFiller1;
+    uint8_t ioIconType;
+    int16_t ioFiller2;
+    int32_t ioDirID;
+    OSType ioFileCreator;
+    OSType ioFileType;
+    int32_t ioFiller3;
+    int32_t ioDTLgLen;
+    int32_t ioDTPyLen;
+    int16_t ioFiller4[14];
+    int32_t ioAPPLParID;
+} DTPB;
+
+/// A working directory's parameters, for PBHSetVol and PBHGetVol.
+typedef struct {
+    ParamHeader header;
+    int16_t filler1;
+    int16_t ioWDIndex;
+    int32_t ioWDProcID;
+    int16_t ioWDVRefNum;
+    int16_t filler2[7];
+    int32_t reserved1;
+    int32_t ioWDDirID;
+    int32_t reserved2;
+} WDPBRec;
+
+/// A shared folder's access rights: AccessParam's fields after the header.
+typedef struct {
+    ParamHeader header;
+    int16_t ioRefNum;
+    int16_t ioDenyModes;
+    int8_t filler4;
+    int8_t ioACUser;
+    int32_t filler5;
+    int32_t ioACOwnerID;
+    int32_t ioACGroupID;
+    int32_t ioACAccess;
+    int32_t ioDirID;
+} AccessParam;
+
+/// The volume's parameters, version 4's GetVolParmsInfoBuffer.
+typedef struct {
+    int16_t vMVersion;
+    int32_t vMAttrib;
+    void *vMLocalHand;
+    int32_t vMServerAdr;
+    int32_t vMVolumeGrade;
+    int16_t vMForeignPrivID;
+    int32_t vMExtendedAttributes;
+    void *vMDeviceID;
+    uint32_t vMMaxNameLength;
+} GetVolParmsInfoBuffer;
+
 #pragma pack(pop)
 
 // AppKit's geometry: CGFloat is a float on 32-bit Darwin.
@@ -274,6 +453,18 @@ bool carbon_dialog_command(uint32_t command);
 
 /// The application is asked to quit (Quit in its menu).
 OSStatus carbon_quit_requested(void);
+
+// MARK: - Places
+
+/// The main bundle's folder and its executable's path, NULL if there is no
+/// bundle: programs find their data beside them.
+const char *carbon_bundle_path(void);
+const char *carbon_executable_path(void);
+/// The disc mounted at `index` (from 0): its name and mount point. Returns
+/// the count of discs mounted, so a disc is there if `index` is below it.
+int carbon_disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size);
+/// Where the startup volume's space is counted: the home's file system.
+const char *carbon_startup_volume_path(void);
 
 // MARK: - Apple events
 
