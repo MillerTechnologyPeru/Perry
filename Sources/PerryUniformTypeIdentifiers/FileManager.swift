@@ -1,4 +1,6 @@
 import Glibc
+import GraphiteBase
+import GraphiteFiles
 
 // Mac apps' alone: armv7 runs only iOS apps, so it has none of this.
 #if !arch(arm)
@@ -6,8 +8,10 @@ import Glibc
 // their folders and files with it: FSRefs over paths. An FSRef is 80 opaque
 // bytes; here it holds a tag and the index of its path in a table that only
 // grows, so a copy names the same item and two refs to one path are equal.
-// An alias keeps its item's path. There are no alias files, resource forks
-// or HFS catalog IDs here.
+// Catalog information and aliases are Graphite's File Manager's: folder IDs
+// are inodes with the root as 2, as Carbon's FSSpecs name folders, Finder
+// info and resource forks are in AppleDouble files beside their items, and
+// an alias finds its item after it moves. There are no alias files.
 
 private let noErr: Int16 = 0
 private let fnfErr: Int16 = -43
@@ -226,23 +230,25 @@ public func FSResolveAliasFileWithMountFlags(_ ref: UnsafeMutableRawPointer?, _ 
     FSResolveAliasFile(ref, chains, targetIsFolder, wasAliased)
 }
 
-// An alias record is opaque past its user type (4 bytes) and its size (2):
-// Perry's keeps a mark ('PRRY') and the item's path after them, which
-// FSResolveAlias makes an FSRef of again.
-private let aliasHeaderSize = 10
+// An alias record is opaque past its user type (4 bytes) and its size (2,
+// in this machine's byte order): after them, Graphite's record ('PRRY', the
+// item's path, and its device and inode), which FSResolveAlias makes an
+// FSRef of again.
+private let aliasHeaderSize = 6
+
+/// The File Manager's catalog, for folder IDs and aliases.
+let catalogFileSystem = FileSystem(folders: .macHome(getenv("HOME").map { String(cString: $0) } ?? "/"))
 
 private func newAlias(_ target: UnsafeRawPointer?, _ alias: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int16 {
     guard let alias else { return paramErr }
     alias.pointee = nil
-    guard let path = FileRefs.path(of: target) else { return fnfErr }
-    let bytes = Array(path.utf8)
-    let size = aliasHeaderSize + bytes.count + 1
+    guard let path = FileRefs.path(of: target), let record = try? Alias(target: path).record else { return fnfErr }
+    let size = aliasHeaderSize + record.count
     guard size <= 0xffff else { return paramErr }
     guard let handle = NewHandleClear(size),
-          let record = handle.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return -108 }   // memFullErr
-    record.storeBytes(of: UInt16(size), toByteOffset: 4, as: UInt16.self)
-    record.storeBytes(of: FileRefs.code("PRRY").bigEndian, toByteOffset: 6, as: UInt32.self)
-    (record + aliasHeaderSize).copyMemory(from: bytes, byteCount: bytes.count)
+          let storage = handle.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return -108 }   // memFullErr
+    storage.storeBytes(of: UInt16(size), toByteOffset: 4, as: UInt16.self)
+    record.withUnsafeBytes { (storage + aliasHeaderSize).copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
     alias.pointee = handle
     return noErr
 }
@@ -267,12 +273,15 @@ public func FSNewAliasMinimal(_ target: UnsafeRawPointer?, _ alias: UnsafeMutabl
 public func FSResolveAliasWithMountFlags(_ from: UnsafeRawPointer?, _ alias: UnsafeMutableRawPointer?, _ target: UnsafeMutableRawPointer?,
                                          _ changed: UnsafeMutablePointer<UInt8>?, _ flags: UInt) -> Int16 {
     changed?.pointee = 0
-    guard let target, let record = alias?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return paramErr }
-    let size = Int(record.loadUnaligned(fromByteOffset: 4, as: UInt16.self))
-    guard size > aliasHeaderSize, record.loadUnaligned(fromByteOffset: 6, as: UInt32.self) == FileRefs.code("PRRY").bigEndian else { return paramErr }
-    let path = String(cString: (record + aliasHeaderSize).assumingMemoryBound(to: CChar.self))
-    guard FileRefs.exists(path) else { return fnfErr }
+    guard let target, let storage = alias?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return paramErr }
+    let size = Int(storage.loadUnaligned(fromByteOffset: 4, as: UInt16.self))
+    guard size > aliasHeaderSize,
+          let alias = try? Alias(record: UnsafeRawBufferPointer(start: storage + aliasHeaderSize, count: size - aliasHeaderSize)) else {
+        return paramErr
+    }
+    guard let (path, moved) = try? alias.resolve(in: catalogFileSystem) else { return fnfErr }
     FileRefs.store(path, in: target)
+    changed?.pointee = moved ? 1 : 0
     return noErr
 }
 
@@ -385,57 +394,57 @@ public func FSGetVolumeInfo(_ volume: Int16, _ index: Int, _ actual: UnsafeMutab
 
 /// OSErr FSGetCatalogInfo(const FSRef *, FSCatalogInfoBitmap whichInfo,
 /// FSCatalogInfo *, HFSUniStr255 *outName, FSSpec *, FSRef *parentRef):
-/// the item's flags, dates, sizes and count of items in a folder, its name,
-/// its FSSpec and its folder. FSCatalogInfo (2-byte packed, 144 bytes): nodeFlags at
-/// 0, the volume (the one, -100) at 2, the parent's and the item's IDs (their
-/// inodes, as 32 bits) at 4 and 8, five UTCDateTimes from 16, the data fork's sizes at 104 and 112, the
-/// resource fork's (none) at 120 and 128, valence at 136.
+/// the item's flags, IDs, dates, Finder info, sizes and count of items in a
+/// folder, its name, its FSSpec and its folder. FSCatalogInfo (2-byte
+/// packed, 144 bytes): nodeFlags at 0, the volume (the one, -100) at 2, the
+/// parent's and the item's IDs at 4 and 8 (a folder's as Carbon's FSSpecs
+/// name it, the root 2 and its parent 1; a file's its inode), five
+/// UTCDateTimes from 16, Finder info at 72 and extended Finder info at 88,
+/// the data fork's sizes at 104 and 112, the resource fork's at 120 and
+/// 128, valence at 136.
 @c(_FSGetCatalogInfo)
 public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalog: UnsafeMutableRawPointer?,
                              _ outName: UnsafeMutablePointer<UInt16>?, _ spec: UnsafeMutableRawPointer?,
                              _ parent: UnsafeMutableRawPointer?) -> Int16 {
     guard let path = FileRefs.path(of: ref) else { return paramErr }
-    var info = stat()
-    guard stat(path, &info) == 0 else { return fnfErr }
-    let directory = info.st_mode & S_IFMT == S_IFDIR
+    let info: CatalogInfo
+    do {
+        info = try catalogFileSystem.catalogInfo(at: path)
+    } catch {
+        return Int16(truncatingIfNeeded: error.code)
+    }
     if let catalog {
         catalog.initializeMemory(as: UInt8.self, repeating: 0, count: 144)
-        var flags: UInt16 = directory ? 0x0010 : 0          // kFSNodeIsDirectoryMask
-        if access(path, W_OK) != 0 { flags |= 0x0001 }      // kFSNodeLockedMask
+        var flags: UInt16 = info.isDirectory ? 0x0010 : 0   // kFSNodeIsDirectoryMask
+        if info.isLocked { flags |= 0x0001 }                // kFSNodeLockedMask
         catalog.storeBytes(of: flags, as: UInt16.self)
         catalog.storeBytes(of: Int16(-100), toByteOffset: 2, as: Int16.self)
-        var parentInfo = stat()
-        let parentPath = path == "/" ? "/" : "/" + path.split(separator: "/").dropLast().joined(separator: "/")
-        if stat(parentPath, &parentInfo) == 0 {
-            catalog.storeBytes(of: UInt32(truncatingIfNeeded: parentInfo.st_ino), toByteOffset: 4, as: UInt32.self)
-        }
-        catalog.storeBytes(of: UInt32(truncatingIfNeeded: info.st_ino), toByteOffset: 8, as: UInt32.self)
+        catalog.storeBytes(of: info.parentID.rawValue, toByteOffset: 4, as: UInt32.self)
+        catalog.storeBytes(of: info.nodeID, toByteOffset: 8, as: UInt32.self)
         // UTCDateTime: seconds since 1904 in a 48-bit count, then a fraction.
-        // In 64 bits: since 1904 passes a 32-bit Int's largest.
-        func store(_ seconds: Int64, at offset: Int) {
-            let since1904 = UInt64(max(0, seconds + 2_082_844_800))
+        func store(_ date: MacDate, at offset: Int) {
+            let since1904 = UInt64(max(0, date.utcSeconds))
             catalog.storeBytes(of: UInt16(truncatingIfNeeded: since1904 >> 32), toByteOffset: offset, as: UInt16.self)
             catalog.storeBytes(of: UInt32(truncatingIfNeeded: since1904), toByteOffset: offset + 2, as: UInt32.self)
         }
-        store(Int64(info.st_ctim.tv_sec), at: 16)
-        store(Int64(info.st_mtim.tv_sec), at: 24)
-        store(Int64(info.st_ctim.tv_sec), at: 32)
-        store(Int64(info.st_atim.tv_sec), at: 40)
-        if !directory {
-            catalog.storeBytes(of: UInt64(info.st_size), toByteOffset: 104, as: UInt64.self)
-            catalog.storeBytes(of: UInt64(info.st_blocks) * 512, toByteOffset: 112, as: UInt64.self)
-        } else if let folder = opendir(path) {
-            var count: UInt32 = 0
-            while let entry = readdir(folder) {
-                let name = withUnsafeBytes(of: entry.pointee.d_name) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
-                if name != "." && name != ".." { count += 1 }
-            }
-            closedir(folder)
-            catalog.storeBytes(of: count, toByteOffset: 136, as: UInt32.self)
+        store(info.created, at: 16)
+        store(info.contentModified, at: 24)
+        store(info.attributeModified, at: 32)
+        store(info.accessed, at: 40)
+        for (index, byte) in info.finderInfo.bytes.enumerated() {
+            catalog.storeBytes(of: byte, toByteOffset: 72 + index, as: UInt8.self)
+        }
+        if info.isDirectory {
+            catalog.storeBytes(of: info.valence, toByteOffset: 136, as: UInt32.self)
+        } else {
+            catalog.storeBytes(of: UInt64(info.dataLogicalSize), toByteOffset: 104, as: UInt64.self)
+            catalog.storeBytes(of: UInt64(info.dataPhysicalSize), toByteOffset: 112, as: UInt64.self)
+            catalog.storeBytes(of: UInt64(info.resourceLogicalSize), toByteOffset: 120, as: UInt64.self)
+            catalog.storeBytes(of: UInt64(info.resourcePhysicalSize), toByteOffset: 128, as: UInt64.self)
         }
     }
     if let outName {
-        let leaf = Array((path == "/" ? "" : String(path.split(separator: "/").last ?? "")).utf16.prefix(255))
+        let leaf = Array((path == "/" ? "" : FileNames.hfs(String(path.split(separator: "/").last ?? ""))).utf16.prefix(255))
         outName.pointee = UInt16(leaf.count)
         for (index, unit) in leaf.enumerated() { outName[1 + index] = unit }
     }
@@ -443,21 +452,15 @@ public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalo
         let folder = path.split(separator: "/").dropLast().joined(separator: "/")
         FileRefs.store("/" + folder, in: parent)
     }
-    // FSSpec (2-byte packed, 70 bytes): the volume at 0, the folder's ID (its
-    // inode, as parID is above; 1 for the root's parent) at 2, and the name as
-    // a Pascal string of at most 63 bytes at 6, ':' in it as '/' (HFS parts a
-    // path with ':').
+    // FSSpec (2-byte packed, 70 bytes): the volume at 0, the folder's ID at
+    // 2, and the name as a Pascal string of at most 63 MacRoman bytes at 6.
     if let spec {
+        let made = catalogFileSystem.spec(forPath: path)
         spec.initializeMemory(as: UInt8.self, repeating: 0, count: 70)
-        spec.storeBytes(of: Int16(-100), as: Int16.self)
-        var parentInfo = stat()
-        let parentPath = "/" + path.split(separator: "/").dropLast().joined(separator: "/")
-        let parentID: UInt32 = path == "/" ? 1 : stat(parentPath, &parentInfo) == 0 ? UInt32(truncatingIfNeeded: parentInfo.st_ino) : 1
-        spec.storeBytes(of: parentID, toByteOffset: 2, as: UInt32.self)
-        let leaf = path == "/" ? "Macintosh HD" : String(path.split(separator: "/").last ?? "")
-        let bytes = Array(leaf.utf8.map { $0 == UInt8(ascii: ":") ? UInt8(ascii: "/") : $0 }.prefix(63))
-        spec.storeBytes(of: UInt8(bytes.count), toByteOffset: 6, as: UInt8.self)
-        for (index, byte) in bytes.enumerated() { spec.storeBytes(of: byte, toByteOffset: 7 + index, as: UInt8.self) }
+        spec.storeBytes(of: made.volume, as: Int16.self)
+        spec.storeBytes(of: made.parent.rawValue, toByteOffset: 2, as: UInt32.self)
+        spec.storeBytes(of: UInt8(made.name.count), toByteOffset: 6, as: UInt8.self)
+        for (index, byte) in made.name.bytes.enumerated() { spec.storeBytes(of: byte, toByteOffset: 7 + index, as: UInt8.self) }
     }
     return noErr
 }
