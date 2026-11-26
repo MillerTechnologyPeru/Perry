@@ -592,6 +592,28 @@ int darwin_select(int count, fd_set *read, fd_set *write, fd_set *error, struct 
     return result;
 }
 
+// select with a struct timespec and a signal mask, which is set around the
+// wait rather than atomically with it.
+int darwin_sigprocmask(int how, const uint32_t *set, uint32_t *old) __asm__("_sigprocmask");
+int darwin_pselect(int count, fd_set *read, fd_set *write, fd_set *error, const struct timespec *timeout, const uint32_t *mask)
+    DARWIN_SYMBOL(pselect);
+int darwin_pselect(int count, fd_set *read, fd_set *write, fd_set *error, const struct timespec *timeout, const uint32_t *mask) {
+    uint32_t previous = 0;
+    if (mask)
+        darwin_sigprocmask(3, mask, &previous);    // SIG_SETMASK
+    struct timeval linux_timeout;
+    if (timeout) {
+        linux_timeout.tv_sec = timeout->tv_sec;
+        linux_timeout.tv_usec = timeout->tv_nsec / 1000;
+    }
+    int result = select(count, read, write, error, timeout ? &linux_timeout : NULL);
+    int saved = errno;
+    if (mask)
+        darwin_sigprocmask(3, &previous, NULL);
+    errno = saved;
+    return result;
+}
+
 // The check FD_SET makes on Darwin: nonzero when the descriptor fits.
 int darwin_check_fd_set_overflow(int fd, const void *set, int unlimited) DARWIN_SYMBOL(__darwin_check_fd_set_overflow);
 int darwin_check_fd_set_overflow(int fd, const void *set, int unlimited) {
