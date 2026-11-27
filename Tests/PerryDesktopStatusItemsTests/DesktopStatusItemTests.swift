@@ -57,6 +57,7 @@ struct DesktopStatusItemTests {
         }
 
         // Made before the menu bar: registered once its watcher is there.
+        await item.waitUntilServed()
         let watcher = try await watcher(on: bus.address, log: log)
         #expect(await eventually { await log.registered.count == 1 })
         let registered = try #require(await log.registered.first)
@@ -111,7 +112,7 @@ struct DesktopStatusItemTests {
             Task { await log.activate() }
         } onMenuClick: { id in
             Task { await log.click(id) }
-        } onMenuAboutToShow: { id in
+        } onMenuAboutToShow: { [updated] id in
             await log.show(id)
             box.item?.publish(updated)
         }
