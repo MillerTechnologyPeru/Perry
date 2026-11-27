@@ -257,4 +257,7 @@ for (a, b), x, y in zip(pairs, original, alias):
         print(a, b)
 ' > "$aliases"
 link -Xlinker -alias_list -Xlinker "$aliases"
+# Also expose the versioned macOS path for loaders without framework-path fallback.
+mkdir -p "$out/SwiftUI.framework/Versions/A"
+ln -sfn ../../SwiftUI "$out/SwiftUI.framework/Versions/A/SwiftUI"
 echo "$out/SwiftUI.framework/SwiftUI ($(wc -l < "$aliases" | tr -d ' ') same-module aliases)"
