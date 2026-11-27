@@ -59,8 +59,8 @@ were needed for idle inhibition on this VM.
 
 ## Remaining work
 
-Provide the missing SwiftUI runtime, Electron framework/loader dependencies,
-and IOKit HID/user-client APIs, then rerun startup checks. Validate batteries
+Resolve the remaining SwiftUI runtime symbols, Electron framework/loader
+dependencies, and IOKit HID/user-client APIs, then rerun startup checks. Validate batteries
 and thermal sensors on hardware exposing them before claiming live coverage.
 
 ## SwiftUI overlay follow-up
@@ -76,3 +76,40 @@ to a missing libc++ symbol in the Darwin Swift runtime:
 `__ZNSt3__112__next_primeEm`. It also reports missing Combine, CoreTransferable,
 Symbols, MobileGestalt, CoreImage, Spatial, and LocationEssentials dependencies.
 The overlay build is complete; SwiftUI runtime execution is not yet passing.
+
+## Complete ARM64 overlay build and libc++
+
+All ARM64 steps in `Scripts/build-swift-overlays.sh` have now built on macOS,
+including Foundation, optimized SwiftUI, Combine, and the five SwiftUI
+cross-import frameworks. Foundation uses the native SwiftPM build system to
+separate target objects from host macros. The MapKit, StoreKit,
+AuthenticationServices, and AVKit cross-import scripts now read SwiftUI's
+modules from that build layout.
+
+`Scripts/build-libcxx.sh` builds Darwin ARM64 libc++ with libc++abi statically
+included, using a pinned Swift LLVM revision and Xcode's iOS SDK. Its output
+is `libc++.1.dylib`, with install name `/usr/lib/libc++.1.dylib`; it exports
+`__ZNSt3__112__next_primeEm` and `___cxa_throw`.
+
+```sh
+Scripts/build-swift-overlays.sh
+Scripts/build-libcxx.sh
+```
+
+The output directory is `.build/perry-swift-runtime`. Validation confirmed
+all 68 expected Mach-O libraries (67 overlays/frameworks plus libc++) are
+ARM64, along with ten Darwin-library aliases. These are iOS-targeted Darwin
+libraries built on macOS for the ARM64 Perry runtime; the x86_64 overlay set
+was not built in this run.
+
+The complete directory was copied to the Linux VM. With a loader rebuilt
+from current sources and this directory added to `PERRY_LIBRARY_PATH`, the
+strict SwiftUI probe gets past `__next_prime` and stops at:
+
+```text
+perry: error: .../libswiftCore.dylib: unresolved symbol __ZdlPvSt19__type_descriptor_t from <weak>
+```
+
+It also reports unavailable `libSpatial.dylib`, `libMobileGestalt.dylib`, and
+CoreTransferable. The build milestone is complete; SwiftUI execution still
+requires runtime compatibility work.
