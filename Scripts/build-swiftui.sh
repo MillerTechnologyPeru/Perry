@@ -61,10 +61,14 @@ JSON
     catalyst=(-Fsystem "$frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift" -L "$support/usr/lib"
               -Xlinker -U -Xlinker __AXSHoverTextEnabled) ;;
 arm64-*)
+    # Xcode's build system also passes target CPU flags to host macro tools.
+    # The native build system keeps those compilations separate.
+    spm_system=(--build-system native)
+    export OPENSWIFTUI_NO_TESTS=1
     # An arm64 target's code is for apple-a7, plain Armv8.0, as
     # Scripts/darwin-toolchain.sh builds the overlays SwiftUI imports
     # (Scripts/check-armv8.sh), so that the modules SwiftPM precompiles agree
-    # with theirs. SwiftPM's default build system gives these to the
+    # with theirs. SwiftPM's native build system gives these to the
     # target's compiles alone, not the host tools' (a destination file
     # would be taken for a macOS build there).
     spm_target+=(-Xswiftc -target-cpu -Xswiftc apple-a7 -Xcc -mcpu=apple-a7 -Xcxx -mcpu=apple-a7) ;;
