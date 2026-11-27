@@ -10,7 +10,7 @@ and Darwin ARM64 executables compiled with the macOS SDK.
 | Native logind idle inhibitor | Appeared while held and disappeared after release |
 | HardwareKit Linux tests, including private D-Bus and real logind | 48 passed |
 | AppKit initialization and IOKit identity lookup | Passed |
-| SwiftUI Text construction | Blocked: SwiftUI framework and Text metadata unavailable |
+| SwiftUI Text construction | Overlay built and Text metadata resolved; blocked by Darwin Swift runtime libc++ dependency |
 | Electron startup (OpenMTP ARM64) | Blocked during binding: unresolved `_freopen` in libSystem; several framework providers unavailable |
 
 Electron's dependency report also lists missing IOKit APIs including
@@ -62,3 +62,17 @@ were needed for idle inhibition on this VM.
 Provide the missing SwiftUI runtime, Electron framework/loader dependencies,
 and IOKit HID/user-client APIs, then rerun startup checks. Validate batteries
 and thermal sensors on hardware exposing them before claiming live coverage.
+
+## SwiftUI overlay follow-up
+
+The overlay built on macOS with `Scripts/build-swiftui.sh`, using the native
+SwiftPM build system to keep ARM target flags out of host macro compilations.
+The output is an ARM64 Darwin (iOS-targeted) SwiftUI framework with 1,176 ABI
+aliases and exported `_$s7SwiftUI4TextVN` metadata. The script also creates the
+versioned framework path used by the macOS probe.
+
+After deployment to Linux, the strict probe loads this framework and proceeds
+to a missing libc++ symbol in the Darwin Swift runtime:
+`__ZNSt3__112__next_primeEm`. It also reports missing Combine, CoreTransferable,
+Symbols, MobileGestalt, CoreImage, Spatial, and LocationEssentials dependencies.
+The overlay build is complete; SwiftUI runtime execution is not yet passing.
