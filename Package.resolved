@@ -7,7 +7,7 @@
       "location" : "https://github.com/PureSwift/Cacao.git",
       "state" : {
         "branch" : "develop",
-        "revision" : "032662ae488285b219bc7443a72195229e053756"
+        "revision" : "7da44d09ff5d035f993d6e2b7b4c0af6aa65dda7"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/PureSwift/CoreModel.git",
       "state" : {
-        "revision" : "456c3e1daa14f5fc719ca48f26ed75e0f1378ca4",
-        "version" : "2.11.1"
+        "revision" : "944c938874689c5ae43a5e4c2e685993a72dc099",
+        "version" : "2.11.2"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/PureSwift/DBus.git",
       "state" : {
-        "branch" : "master",
-        "revision" : "57a53fb33911924520d188afc66eaf588b3817a3"
+        "revision" : "57a53fb33911924520d188afc66eaf588b3817a3",
+        "version" : "0.3.1"
       }
     },
     {
@@ -204,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
-        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
-        "version" : "603.0.2"
+        "revision" : "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+        "version" : "604.0.0"
       }
     },
     {
