@@ -24,6 +24,7 @@ enum HardwareBridge {
             return true
         }
         if shouldStart {
+            DBusPowerProvider.shared.installSystemSleepAssertions()
             Task { await DBusPowerProvider.shared.register(with: registry) }
         }
     }
