@@ -142,8 +142,8 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/Graphite.git", branch: "master"),
         // Cairo and FontConfig, which Silica renders with, and CoreGraphics
         // and CoreText use directly.
-        .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
-        .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
+        .package(url: "https://github.com/PureSwift/Cairo.git", from: "1.4.0"),
+        .package(url: "https://github.com/PureSwift/FontConfig.git", from: "2.0.0"),
         // Cacao's engine: the display list QuartzCore's layers are drawn as,
         // and its compositor on an SDL renderer; and its settings portal
         // client, which AppKit's appearance follows.
