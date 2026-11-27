@@ -113,3 +113,59 @@ perry: error: .../libswiftCore.dylib: unresolved symbol __ZdlPvSt19__type_descri
 It also reports unavailable `libSpatial.dylib`, `libMobileGestalt.dylib`, and
 CoreTransferable. The build milestone is complete; SwiftUI execution still
 requires runtime compatibility work.
+
+## SwiftUI dependency and libc++ compatibility fixes
+
+The libc++ build now includes LLVM's Apple vendor allocation shims as a tracked
+CMake link dependency. All ten typed new/delete exports are present, including
+`__ZdlPvSt19__type_descriptor_t`. SwiftUI no longer links MobileGestalt, since
+its built objects do not import any of that library's symbols. The ARM64 bulk
+overlay build now supplies CoreTransferable and the empty `libSpatial.dylib`
+load dependency (the SDK's libSpatial stub has no exports).
+
+CoreTransferable supplies the protocol metadata, Never witnesses and URL
+conformance imported by this SwiftUI build. Its representation implementation
+is deliberately limited; see `Darwin/CoreTransferable/README.md` for supported
+operations and exclusions. Three native Swift Testing cases pass: URL data
+round-trip, invalid UTF-8 rejection, and directional conversion capabilities.
+
+PerrySystem now supports process-local 32/64-bit ulock compare-and-wait,
+wake-one/wake-all and relative microsecond timeouts. It rejects unsupported
+shared/ownership/cancellation modes. Additional libc++ imports are supplied
+through the existing Darwin stdio adapters: locale-format varargs, wide FILE
+operations, long-double conversions, message catalogs, copyfile state lifecycle,
+and utimensat's Darwin flag/time-sentinel translation.
+
+`sh Scripts/build-iokit-fixtures.sh` also builds `ulock` and `libcxx_compat`.
+Both produce the same successful output natively on macOS and under the
+current ARM64 Linux loader with rebuilt PerrySystem and Darwin libc++:
+
+```text
+ulock: mismatch, timeout, wake-all, wake-one, and address isolation passed
+libc++: 42
+```
+
+The libc++ probe exercises hash-table allocation, atomic waiting, formatted and
+wide-character I/O, timestamps, copyfile state allocation and string streams.
+Use the same environment as the IOKit fixtures, adding the Darwin runtime
+directory to `PERRY_LIBRARY_PATH`, and run each executable with `perry --strict`.
+The full SwiftUI probe remains a separate check; passing the C++ tests does not
+establish SwiftUI startup or rendering support.
+
+For the final Linux rerun, the loader and PerrySystem, Perryobjc, PerryNetwork,
+and PerryFoundation providers were rebuilt from current source. Foundation's
+swift-cmark dependency used the Dockerfile's pinned revision in a local build
+prefix. The strict SwiftUI probe now stops at:
+
+```text
+perry: error: .../libswiftos.dylib: unresolved symbol _OBJC_CLASS_$_OS_os_workgroup from /usr/lib/libSystem.B.dylib
+```
+
+There are no unavailable-library warnings for Spatial, MobileGestalt or
+CoreTransferable. Report-only loading lists 154 unresolved import entries in
+this VM's mixed provider set (some other providers remain prebuilt), down from
+576 before refreshing providers and adding these fixes. This is an import
+count, not a count of distinct missing APIs. Workgroup support is the next
+strict blocker; the report also includes UIKit/CoreGraphics and other framework
+symbols. The original dependency fixes and C++ execution probes pass, but the
+full SwiftUI smoke test still does not pass.
