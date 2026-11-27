@@ -22,7 +22,8 @@ root=$PWD
 out=${1:-.build/perry-swift-runtime}
 case $out in /*) ;; *) out=$root/$out ;; esac
 work=$root/.build/perry-swiftui
-products=$work/spm/out/Products/Release-iphoneos
+# Match the native SwiftPM layout used by build-swiftui.sh.
+products=$work/spm/arm64-apple-ios/release/Modules
 sdk=$(darwin_sdk iphoneos)
 target=arm64-apple-ios18.0
 packages=$root/Darwin/SwiftUI

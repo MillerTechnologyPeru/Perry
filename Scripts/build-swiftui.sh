@@ -61,10 +61,14 @@ JSON
     catalyst=(-Fsystem "$frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift" -L "$support/usr/lib"
               -Xlinker -U -Xlinker __AXSHoverTextEnabled) ;;
 arm64-*)
+    # Xcode's build system also passes target CPU flags to host macro tools.
+    # The native build system keeps those compilations separate.
+    spm_system=(--build-system native)
+    export OPENSWIFTUI_NO_TESTS=1
     # An arm64 target's code is for apple-a7, plain Armv8.0, as
     # Scripts/darwin-toolchain.sh builds the overlays SwiftUI imports
     # (Scripts/check-armv8.sh), so that the modules SwiftPM precompiles agree
-    # with theirs. SwiftPM's default build system gives these to the
+    # with theirs. SwiftPM's native build system gives these to the
     # target's compiles alone, not the host tools' (a destination file
     # would be taken for a macOS build there).
     spm_target+=(-Xswiftc -target-cpu -Xswiftc apple-a7 -Xcc -mcpu=apple-a7 -Xcxx -mcpu=apple-a7) ;;
@@ -215,7 +219,7 @@ fi
 link() { # extra linker arguments...
     xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" ${catalyst[@]+"${catalyst[@]}"} -emit-library "${objects[@]}" \
         -framework UIKit -framework CoreServices -framework QuartzCore -framework CoreText \
-        -lMobileGestalt -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
+        -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
         "$out/DeveloperToolsSupport.framework/DeveloperToolsSupport" \
         -Xlinker -install_name -Xlinker "$install/System/Library/Frameworks/SwiftUI.framework/SwiftUI" \
         -Xlinker -not_for_dyld_shared_cache -Xlinker -ObjC "$@" \
@@ -253,4 +257,7 @@ for (a, b), x, y in zip(pairs, original, alias):
         print(a, b)
 ' > "$aliases"
 link -Xlinker -alias_list -Xlinker "$aliases"
+# Also expose the versioned macOS path for loaders without framework-path fallback.
+mkdir -p "$out/SwiftUI.framework/Versions/A"
+ln -sfn ../../SwiftUI "$out/SwiftUI.framework/Versions/A/SwiftUI"
 echo "$out/SwiftUI.framework/SwiftUI ($(wc -l < "$aliases" | tr -d ' ') same-module aliases)"

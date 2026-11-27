@@ -1,13 +1,8 @@
 import Glibc
 import PerryObjCInterop
 
-// The I/O Registry: io_object_t handles, as mach ports are, for its
-// entries and for iterators over matches. It has the root, the platform
-// expert device (IOPlatformUUID, IOPlatformSerialNumber, model) and the
-// keyboard, an IOHIDDevice whose plug-in is the HID device interface, and
-// the optical discs mounted (Discs.swift); matching dictionaries find those
-// by their classes and nothing else, so an app looking for a GPU, a battery
-// or USB devices finds none.
+// I/O Registry handles cover HardwareKit services and Perry's keyboard and
+// optical-disc services. Iterators and hardware objects share one allocator.
 
 public typealias Handle = UInt32
 
@@ -81,18 +76,18 @@ enum Registry {
         },
     ]
 
-    static func entry(_ handle: Handle) -> RegistryEntry? { entries[handle] ?? Discs.entry(handle) }
+    static func entry(_ handle: Handle) -> RegistryEntry? { HardwareBridge.entry(handle) ?? entries[handle] ?? Discs.entry(handle) }
 
     /// An entry's children: the discs are the platform device's.
     static func children(of handle: Handle) -> [Handle] {
-        entries.filter { $0.value.parent == handle }.map(\.key).sorted() + (handle == platformHandle ? Discs.handles() : [])
+        entries.filter { $0.key != platformHandle && $0.value.parent == handle }.map(\.key).sorted() + HardwareBridge.children(of: handle) + (handle == platformHandle ? Discs.handles() : [])
             + (Discs.partition(of: handle).map { [$0] } ?? [])
     }
 
     /// The entries a matching dictionary matches: by IOProviderClass (the
     /// class or a superclass), IONameMatch, or a registry entry ID.
     static func matches(_ matching: UnsafeMutableRawPointer?) -> [Handle] {
-        let found = entriesMatching(matching)
+        let found = Array(Set(entriesMatching(matching).filter { $0 != platformHandle } + HardwareBridge.matches(matching))).sorted()
         Trace.log("matching \(matching.map { NSDictionary($0).keys().sorted().map { key in "\(key)=\(NSDictionary(matching!).object(key).map { $0.isString ? $0.stringValue : "…" } ?? "")" }.joined(separator: ", ") } ?? "nothing"): \(found.map { String($0, radix: 16) })")
         return found
     }
@@ -120,6 +115,13 @@ enum Registry {
             return entries.keys.filter { Int64($0) == value }
         }
         return []
+    }
+
+    static func allocateHandle() -> Handle {
+        lock.withLock {
+            nextIterator += 1
+            return nextIterator
+        }
     }
 
     static func makeIterator(_ handles: [Handle]) -> Handle {
@@ -250,6 +252,7 @@ public func IOObjectGetClass(_ object: Handle, _ name: UnsafeMutablePointer<CCha
 public func IOObjectConformsTo(_ object: Handle, _ name: UnsafePointer<CChar>?) -> UInt32 {
     guard let name, let entry = Registry.entry(object) else { return 0 }
     let wanted = String(cString: name)
+    if let result = HardwareBridge.conforms(object, to: wanted) { return result ? 1 : 0 }
     if entry.className == "IOCDMedia" || entry.className == "IODVDMedia", wanted == "IOMedia" || wanted == "IOStorage" { return 1 }
     return entry.className == wanted || wanted == "IOService" || wanted == "IORegistryEntry" ? 1 : 0
 }

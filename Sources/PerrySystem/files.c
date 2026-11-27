@@ -2030,3 +2030,27 @@ int darwin_shm_unlink(const char *name) {
     shared_memory_name(name, path, sizeof path);
     return shm_unlink(path);
 }
+
+// The current copyfile implementation does not keep per-copy metadata, but
+// libc++ still allocates and releases an opaque state around fcopyfile.
+void *darwin_copyfile_state_alloc(void) DARWIN_SYMBOL(copyfile_state_alloc);
+void *darwin_copyfile_state_alloc(void) { return calloc(1, 1); }
+int darwin_copyfile_state_free(void *state) DARWIN_SYMBOL(copyfile_state_free);
+int darwin_copyfile_state_free(void *state) { free(state); return 0; }
+
+// Darwin uses -1/-2 for UTIME_NOW/UTIME_OMIT and -2 for AT_FDCWD.
+struct darwin_file_time { long seconds; long nanoseconds; };
+int darwin_utimensat(int fd, const char *path, const struct darwin_file_time times[2], int flags)
+    DARWIN_SYMBOL(utimensat);
+int darwin_utimensat(int fd, const char *path, const struct darwin_file_time times[2], int flags) {
+    if (flags & ~DARWIN_AT_SYMLINK_NOFOLLOW) { errno = EINVAL; return -1; }
+    struct timespec converted[2];
+    if (times) {
+        for (int i = 0; i < 2; i++) {
+            converted[i].tv_sec = times[i].seconds;
+            converted[i].tv_nsec = times[i].nanoseconds == -1 ? UTIME_NOW :
+                                   times[i].nanoseconds == -2 ? UTIME_OMIT : times[i].nanoseconds;
+        }
+    }
+    return utimensat(directory_to_linux(fd), path, times ? converted : NULL, at_flags_to_linux(flags));
+}

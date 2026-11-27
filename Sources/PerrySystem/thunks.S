@@ -160,6 +160,9 @@ VARIADIC _snprintf_l, perry_vsnprintf_l, 4
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
 VARIADIC _asprintf, vasprintf, 2
+VARIADIC_DARWIN _asprintf_l, perry_darwin_vasprintf_l, 3
+VARIADIC_DARWIN _sscanf_l, perry_darwin_vsscanf_l, 3
+VARIADIC_DARWIN _swprintf, _vswprintf, 3
 VARIADIC _scanf, vscanf, 1
 VARIADIC_DARWIN _fscanf, _vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
@@ -327,6 +330,11 @@ PASSTHROUGH _strtoull, strtoull
 // BSD's name for strtoull (u_quad_t is unsigned long long).
 PASSTHROUGH _strtouq, strtoull
 PASSTHROUGH _strtod, strtod
+LONG_DOUBLE _strtold, strtod, strtold
+LONG_DOUBLE _wcstold, wcstod, wcstold
+PASSTHROUGH _catopen, catopen
+PASSTHROUGH _catgets, catgets
+PASSTHROUGH _catclose, catclose
 PASSTHROUGH _strtof, strtof
 // The C locale's; the locale argument is ignored. long double is double on
 // Darwin arm64.

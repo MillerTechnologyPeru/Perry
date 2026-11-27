@@ -2,14 +2,10 @@ import Glibc
 import PerryInterface
 import PerryObjCInterop
 
-// libPerryIOKit: the provider for IOKit.framework, for Mac apps. Its
-// registry has the root and the platform expert device, whose UUID and
-// serial number come from this machine's /etc/machine-id; matching finds
-// those and no other services. HID managers find SDL3's gamepads, as Xbox
-// 360 controllers, and there are no power sources or sleep notifications.
-// PerryProviderPlugin generates the entry points; this file binds libobjc
-// first, and libdispatch and mach_absolute_time, which the gamepads are
-// read with.
+// IOKit.framework provider for Mac apps. HardwareKit supplies Linux platform,
+// network, thermal and power services; Perry supplies keyboard, disc and SDL3
+// gamepad support. The provider binds libobjc before creating registry objects,
+// then initializes dispatch, the clock and the hardware backend.
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
@@ -30,6 +26,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Dispatch.mainQueue = symbol(dispatch, "__dispatch_main_q")
     Clock.machAbsoluteTime = symbol("/usr/lib/libSystem.B.dylib", "_mach_absolute_time")
         .map { unsafeBitCast($0, to: (@convention(c) () -> UInt64).self) }
+    HardwareBridge.start()
     return true
 }
 
@@ -103,6 +100,7 @@ extension NSObject {
 @ObjCWrapper("NSNumber")
 class NSNumber: NSObject {
     @ObjCClassMethod("numberWithLongLong:") static func make(int64: Int64) -> NSNumber
+    @ObjCClassMethod("numberWithUnsignedLongLong:") static func make(uint64: UInt64) -> NSNumber
     @ObjCClassMethod("numberWithBool:") static func make(bool: Bool) -> NSNumber
 }
 
