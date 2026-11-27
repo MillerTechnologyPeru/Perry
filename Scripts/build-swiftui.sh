@@ -219,7 +219,7 @@ fi
 link() { # extra linker arguments...
     xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" ${catalyst[@]+"${catalyst[@]}"} -emit-library "${objects[@]}" \
         -framework UIKit -framework CoreServices -framework QuartzCore -framework CoreText \
-        -lMobileGestalt -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
+        -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
         "$out/DeveloperToolsSupport.framework/DeveloperToolsSupport" \
         -Xlinker -install_name -Xlinker "$install/System/Library/Frameworks/SwiftUI.framework/SwiftUI" \
         -Xlinker -not_for_dyld_shared_cache -Xlinker -ObjC "$@" \
