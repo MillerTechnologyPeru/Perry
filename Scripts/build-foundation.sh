@@ -53,14 +53,13 @@ fetch "$packages/swift-syntax" \
 foundation=$packages/swift-foundation
 
 # The package build gives the C shims, ICU and swift-collections as objects
-# for the target, and the Foundation macros as a plugin for this Mac. For
-# a macOS target SwiftPM's default build system puts the target's products
-# and this Mac's in one directory, where swift-syntax built for one
-# replaces the other's: there the native one builds, into a directory of
-# the target's own, each target's objects in its <Target>.build.
+# for the target, and the Foundation macros as a plugin for this Mac. The
+# native build system separates host and target products and keeps ARM
+# CPU flags out of host macro compilations. Each target's objects are in
+# its own <Target>.build directory.
 export SWIFTCI_USE_LOCAL_DEPS=1
-spm=(--scratch-path "$work/spm")
-[ "$platform" = iphoneos ] || spm=(--build-system native --scratch-path "$work/spm-$target")
+# Keep ARM target CPU flags separate from the macOS macro tools.
+spm=(--build-system native --scratch-path "$work/spm-$target")
 # An arm64 target's code is for apple-a7, plain Armv8.0, as
 # Scripts/darwin-toolchain.sh builds the overlays (Scripts/check-armv8.sh),
 # and the modules SwiftPM precompiles for it with it. SwiftPM's build system
@@ -74,15 +73,10 @@ esac
 (cd "$foundation" && swift build "${spm[@]}" "${spm_target[@]}" --product FoundationInternationalization)
 products=$(cd "$foundation" && swift build "${spm[@]}" "${spm_target[@]}" --show-bin-path)
 host=$(cd "$foundation" && swift build "${spm[@]}" --show-bin-path)
-objects=() modules=$products
+objects=() modules=$products/Modules
 for each in _FoundationCShims _FoundationICU _RopeModule DequeModule OrderedCollections InternalCollectionsUtilities; do
-    if [ "$platform" = iphoneos ]; then
-        objects+=("$products/$each.o")
-    else
-        while IFS= read -r file; do objects+=("$file"); done < <(find "$products/$each.build" -name '*.o' | sort)
-    fi
+    while IFS= read -r file; do objects+=("$file"); done < <(find "$products/$each.build" -name '*.o' | sort)
 done
-[ "$platform" = iphoneos ] || modules=$products/Modules
 macros=$host/FoundationMacros
 [ -x "$macros" ] || macros=$host/FoundationMacros-tool
 [ -x "$macros" ] || macros=$(dirname "$products")/Debug/FoundationMacros
