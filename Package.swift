@@ -162,6 +162,8 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/Socket.git", from: "0.7.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-collections", from: "1.7.6"),
+        .package(url: "https://github.com/swiftlang/swift-subprocess.git", from: "1.0.2"),
     ] + (mistKit ? [.package(url: "https://github.com/brightdigit/MistKit.git", from: "1.0.0-beta.5")] : []),
     targets: [
         // perry_settings.def is read by perry_settings.h, not compiled.
