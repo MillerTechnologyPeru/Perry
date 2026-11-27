@@ -26,11 +26,17 @@ if [ -z "${PERRY_LLVM_SOURCE:-}" ] && [ "$(git -C "$source" rev-parse HEAD)" != 
     exit 1
 fi
 sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-mkdir -p "$out"
+mkdir -p "$out" "$work"
+# Apple's runtime exports typed allocation/deallocation overloads that upstream
+# libc++ supplies separately for system-library compatibility testing.
+xcrun --sdk iphoneos clang++ -target arm64-apple-ios18.0 -mcpu=apple-a7 \
+    -std=c++17 -O2 -c "$source/libcxxabi/src/vendor/apple/shims.cpp" \
+    -o "$work/apple-shims.o"
 # Darwin is required here: this LLVM revision treats CMAKE_SYSTEM_NAME=iOS
 # as an ELF target in HandleLLVMOptions and adds the unsupported -z flag.
 cmake -G Ninja -S "$source/runtimes" -B "$work/darwin" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin \
+    -DCMAKE_SHARED_LINKER_FLAGS= "-DLIBCXX_ADDITIONAL_LIBRARIES=$work/apple-shims.o" \
     -DCMAKE_C_COMPILER="$(xcrun -f clang)" -DCMAKE_CXX_COMPILER="$(xcrun -f clang++)" \
     -DCMAKE_C_COMPILER_TARGET=arm64-apple-ios18.0 -DCMAKE_CXX_COMPILER_TARGET=arm64-apple-ios18.0 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT="$sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
