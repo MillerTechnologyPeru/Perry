@@ -284,14 +284,6 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
-#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
-// The same, and asl_log's, for the 32-bit variadic thunks, which pass a
-// Darwin va_list that the format's arguments are repacked from.
-int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
-    (void)locale;
-    return darwin_vsnprintf(buf, size, fmt, ap);
-}
-
 // asprintf_l's and sscanf_l's, in the C locale as well.
 int perry_darwin_vasprintf_l(char **out, void *locale, const char *fmt, darwin_va_list ap) {
     (void)locale;
@@ -301,6 +293,14 @@ int perry_darwin_vasprintf_l(char **out, void *locale, const char *fmt, darwin_v
 int perry_darwin_vsscanf_l(const char *str, void *locale, const char *fmt, darwin_va_list ap) {
     (void)locale;
     return darwin_vsscanf(str, fmt, ap);
+}
+
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
+// The same, and asl_log's, for the 32-bit variadic thunks, which pass a
+// Darwin va_list that the format's arguments are repacked from.
+int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
+    (void)locale;
+    return darwin_vsnprintf(buf, size, fmt, ap);
 }
 
 int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt, darwin_va_list ap) {
