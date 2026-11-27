@@ -220,22 +220,30 @@ public func IOHIDManagerCopyDevices(_ manager: UnsafeMutableRawPointer?) -> Unsa
 
 // MARK: - Power
 
-/// The power sources' snapshot: none.
-@c(_IOPSCopyPowerSourcesInfo) public func IOPSCopyPowerSourcesInfo() -> UnsafeMutableRawPointer? { NSObject.opaque("__IOKitOpaque") }
+/// A retained snapshot whose source dictionaries remain alive with the info object.
+@c(_IOPSCopyPowerSourcesInfo) public func IOPSCopyPowerSourcesInfo() -> UnsafeMutableRawPointer? { ObjCRuntime.retain(HardwareBridge.powerSnapshot().objcObject) }
 
 @c(_IOPSCopyPowerSourcesList)
 public func IOPSCopyPowerSourcesList(_ info: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    ObjCRuntime.retain(NSMutableArray.empty().objcObject)
+    guard let info else { return nil }
+    return ObjCRuntime.retain(NSMutableArray.of(NSArray(info).objects()).objcObject)
 }
 
 @c(_IOPSGetPowerSourceDescription)
-public func IOPSGetPowerSourceDescription(_ info: UnsafeMutableRawPointer?, _ source: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { nil }
+public func IOPSGetPowerSourceDescription(_ info: UnsafeMutableRawPointer?, _ source: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let info, let source, NSArray(info).objects().contains(where: { $0.objcObject == source }) else { return nil }
+    return source
+}
 
 @c(_IOPSGetProvidingPowerSourceType)
-public func IOPSGetProvidingPowerSourceType(_ info: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { PowerKeys.kIOPMACPowerKeyObject }
+public func IOPSGetProvidingPowerSourceType(_ info: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let info else { return PowerKeys.kIOPMACPowerKeyObject }
+    let onBattery = NSArray(info).objects().contains { NSDictionary($0.objcObject).object("Power Source State")?.stringValue == "Battery Power" }
+    return onBattery ? PowerKeys.kIOPMBatteryPowerKeyObject : PowerKeys.kIOPMACPowerKeyObject
+}
 
 /// kIOPSTimeRemainingUnlimited: on AC power.
-@c(_IOPSGetTimeRemainingEstimate) public func IOPSGetTimeRemainingEstimate() -> Double { -2 }
+@c(_IOPSGetTimeRemainingEstimate) public func IOPSGetTimeRemainingEstimate() -> Double { HardwareBridge.isOnBattery() ? -1 : -2 }
 
 @c(_IOPSNotificationCreateRunLoopSource)
 public func IOPSNotificationCreateRunLoopSource(_ callback: UnsafeRawPointer?, _ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
@@ -263,11 +271,12 @@ public func IORegisterForSystemPower(_ refcon: UnsafeMutableRawPointer?, _ port:
 @c(_IOCancelPowerChange) public func IOCancelPowerChange(_ connection: UInt32, _ argument: Int) -> Int32 { IOReturn.success }
 @c(_IOServiceClose) public func IOServiceClose(_ connection: UInt32) -> Int32 { IOReturn.success }
 
-/// Assertions that keep the display awake are granted and change nothing.
+/// Own a HardwareKit assertion until the corresponding handle is released.
 @c(_IOPMAssertionCreateWithName)
 public func IOPMAssertionCreateWithName(_ type: UnsafeMutableRawPointer?, _ level: UInt32, _ name: UnsafeMutableRawPointer?,
                                         _ id: UnsafeMutablePointer<UInt32>?) -> Int32 {
-    id?.pointee = Registry.makeIterator([])
+    guard let id, level == 0 || level == 255 else { return IOReturn.badArgument }
+    id.pointee = HardwareBridge.makeAssertion(reason: name.map { String(objCArgument: $0) } ?? "IOKit assertion", enabled: level != 0)
     return IOReturn.success
 }
 
@@ -280,7 +289,7 @@ public func IOPMAssertionCreateWithDescription(_ type: UnsafeMutableRawPointer?,
 
 @c(_IOPMAssertionRelease)
 public func IOPMAssertionRelease(_ id: UInt32) -> Int32 {
-    Registry.release(id)
+    HardwareBridge.releaseAssertion(id)
     return IOReturn.success
 }
 
