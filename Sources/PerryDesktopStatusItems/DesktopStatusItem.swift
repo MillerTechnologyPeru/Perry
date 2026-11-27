@@ -59,6 +59,8 @@ public final class DesktopStatusItem: Sendable {
     }
 
     private let requests: AsyncStream<Request>.Continuation
+    /// Waits for initialization and all requests queued so far.
+    let waitUntilServed: @Sendable () async -> Void
 
     /// Shows an item on the session bus, or the bus at `address`.
     public init(_ properties: Properties, address: String? = nil,
@@ -67,12 +69,15 @@ public final class DesktopStatusItem: Sendable {
                 onMenuAboutToShow: @escaping @Sendable (_ id: Int32) async -> Void = { _ in }) {
         let (stream, continuation) = AsyncStream.makeStream(of: Request.self)
         requests = continuation
-        let handlers = Handlers(activate: onActivate, menuClick: onMenuClick, menuAboutToShow: onMenuAboutToShow) {
+        let waitUntilServed: @Sendable () async -> Void = {
             await withCheckedContinuation { waiter in
                 // Once the item is gone, nothing is left to wait for.
                 if case .terminated = continuation.yield(.barrier(waiter)) { waiter.resume() }
             }
         }
+        self.waitUntilServed = waitUntilServed
+        let handlers = Handlers(activate: onActivate, menuClick: onMenuClick,
+                                menuAboutToShow: onMenuAboutToShow, served: waitUntilServed)
         Task.detached {
             await Self.run(stream, properties: properties, address: address, handlers: handlers)
         }

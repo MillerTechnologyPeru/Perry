@@ -465,7 +465,7 @@ jobs:
       - name: Build
         run: |
           docker run --rm -v "$PWD:/perry" perry-dev \
-            swift build -c release --build-tests --scratch-path .build/linux
+            swift build -c release --build-tests -Xswiftc -enable-testing --scratch-path .build/linux
 
       - name: Test
         timeout-minutes: 20
