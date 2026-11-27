@@ -156,9 +156,10 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/SDL.git", branch: "master"),
         // D-Bus, which CoreBluetooth talks to BlueZ over, CoreLocation to GeoClue and CoreWLAN to
         // NetworkManager.
-        .package(url: "https://github.com/PureSwift/DBus.git", branch: "master"),
-        // Sockets and their addresses, typed, for CFSocket; its main branch, as DBus asks for.
-        .package(url: "https://github.com/PureSwift/Socket.git", branch: "main"),
+        .package(url: "https://github.com/PureSwift/DBus.git", exact: "0.3.1"),
+        .package(url: "https://github.com/PureSwift/swift-hardware.git", branch: "master"),
+        // Sockets and their addresses, typed, for CFSocket.
+        .package(url: "https://github.com/PureSwift/Socket.git", from: "0.7.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ] + (mistKit ? [.package(url: "https://github.com/brightdigit/MistKit.git", from: "1.0.0-beta.5")] : []),
@@ -440,10 +441,14 @@ let package = Package(
             dependencies: ["CPerryNetwork", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // IOKit, over a registry with the platform device and no others.
+        // IOKit registry and power sources backed by Linux HardwareKit.
         .target(
             name: "PerryIOKit",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: [
+                "PerryInterface", "PerryObjCInterop",
+                .product(name: "HardwareKit", package: "swift-hardware"),
+                .product(name: "HardwareKitDBus", package: "swift-hardware"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // StoreKit's Objective-C classes, with no App Store.
