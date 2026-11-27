@@ -4,8 +4,8 @@
 // The iOS SDK's libxml2 (2.9.13) and Linux's (2.9.x) share their public
 // structs and, on arm64, their calling convention, so most imports bind
 // straight to Linux's libxml2: perry_provider_symbol looks each one up
-// there. What differs is variadic: Darwin passes variadic arguments on the
-// stack and va_list as a pointer. thunks.S converts libxml2's variadic and
+// there. The arm64 variadic ABI differs: Darwin passes variadic arguments
+// on the stack and va_list as a pointer. thunks.S converts libxml2's variadic and
 // va_list functions; this file bridges the variadic error handlers that
 // libxml2 calls back, much as box64's wrapper does: a fixed pool of native
 // trampolines, each forwarding to one Darwin handler.
@@ -44,7 +44,7 @@ extern void xmlRegisterDefaultInputCallbacks(void);
 extern char *xmlURIUnescapeString(const char *string, int length, char *target);
 extern void xmlFree_(void *) __asm__("free");
 
-// thunks.S
+// Implemented below or in thunks.S on arm64.
 INTERNAL extern void perry_xml_call_darwin_variadic(void *function, void *ctx, const char *format, const char *argument);
 INTERNAL extern void perry_xml_generic_error_darwin(void *ctx, const char *msg, ...);
 
@@ -144,7 +144,7 @@ REPORTER(perry_xml_parser_validity_warning_v, xmlParserValidityWarning)
 // MARK: - Generic error handlers
 
 // libxml2 calls its generic error handler as a Linux variadic function, but
-// a handler from Darwin code reads its arguments from the stack. Each
+// an arm64 Darwin handler reads its variadic arguments from the stack. Each
 // Darwin handler gets a native trampoline that formats the message and
 // calls the handler with "%s" and the text, Darwin's way.
 
@@ -236,9 +236,11 @@ INTERNAL void perry_xml_generic_error_v(void *ctx, const char *msg, va_list ap) 
     free(text);
 }
 
-#if defined(__x86_64__) || defined(__i386__) || (defined(__powerpc__) && !defined(__powerpc64__))
-// Darwin's x86_64 and i386 variadic ABIs are Linux's, so these need no
-// assembly, and libxml2's variadic functions bind to Linux's with no thunks.
+#if defined(__x86_64__) || defined(__i386__) || defined(__arm__) || \
+    (defined(__powerpc__) && !defined(__powerpc64__))
+// Darwin and Linux share the x86_64 and i386 variadic calling conventions.
+// Darwin armv7 and Linux AAPCS also pass these word-sized arguments in
+// r0-r3 and then on the stack. Only arm64 needs variadic assembly thunks.
 // Darwin's ppc one takes its words in r3-r10 too, as Linux's does, but reads
 // them from its caller's parameter area at 24(r1), and saves its lr at 8(r1),
 // where Linux code keeps its own registers: so a Darwin handler is called
