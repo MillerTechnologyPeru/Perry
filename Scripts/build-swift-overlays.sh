@@ -102,7 +102,7 @@ ios_overlays=(AssetsLibrary CallKit CarPlay DataDetection HomeKit MediaPlayer OS
 darwin_parts=(_DarwinFoundation1 _DarwinFoundation2 _DarwinFoundation3 _errno _math _signal _stdio _time sys_time unistd)
 # Scripts/build-framework.sh's, after DeveloperToolsSupport, which SwiftUI
 # builds against.
-frameworks=(ActivityKit AppIntents CryptoKit DeclaredAgeRange GroupActivities MusicKit StoreKit TabularData TipKit
+frameworks=(CoreTransferable ActivityKit AppIntents CryptoKit DeclaredAgeRange GroupActivities MusicKit StoreKit TabularData TipKit
             WeatherKit WidgetKit)
 
 # Leads Darwin's split names to libswiftDarwin.dylib.
@@ -119,6 +119,7 @@ if [ "$arch" = arm64 ]; then
         step "$module" Scripts/build-overlay.sh "$module" "$out"
     done
     link_darwin_parts
+    step Spatial Scripts/build-spatial.sh "$out"
     step System Scripts/build-system.sh "$out"
     step UIKit Scripts/build-overlay.sh UIKit "$out"
     step WebKit Scripts/build-webkit.sh "$out"
