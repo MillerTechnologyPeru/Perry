@@ -65,15 +65,6 @@
       }
     },
     {
-      "identity" : "javascriptkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftwasm/JavaScriptKit.git",
-      "state" : {
-        "revision" : "0628da70ac182ec34adfa8731195c9c5a82ef83a",
-        "version" : "0.64.0"
-      }
-    },
-    {
       "identity" : "netlink",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/PureSwift/Netlink.git",
@@ -97,7 +88,7 @@
       "location" : "https://github.com/PureSwift/Silica.git",
       "state" : {
         "branch" : "master",
-        "revision" : "97ca8a84295e68e4403fab625046bd7bc4dea9d6"
+        "revision" : "b4d06c44327fd4672d68f17705ee53db3157389f"
       }
     },
     {
