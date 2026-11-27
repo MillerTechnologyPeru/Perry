@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <wchar.h>
 
 FILE *perry_fopen(const char *path, const char *mode);
 
@@ -284,3 +285,26 @@ void darwin_setbuffer(FILE *stream, char *buffer, int size) DARWIN_SYMBOL(setbuf
 void darwin_setbuffer(FILE *stream, char *buffer, int size) {
     setvbuf(REAL(stream), buffer, buffer ? _IOFBF : _IONBF, buffer ? (size_t)size : 0);
 }
+
+#if defined(__aarch64__) || defined(__x86_64__)
+// Wide-character I/O must unwrap Darwin FILE objects just like byte I/O.
+wint_t darwin_fputwc(wchar_t character, FILE *stream) DARWIN_SYMBOL(fputwc);
+wint_t darwin_fputwc(wchar_t character, FILE *stream) {
+    wint_t result = fputwc(character, REAL(stream));
+    sync_flags(stream);
+    return result;
+}
+wint_t darwin_getwc(FILE *stream) DARWIN_SYMBOL(getwc);
+wint_t darwin_getwc(FILE *stream) {
+    wint_t result = getwc(REAL(stream));
+    sync_flags(stream);
+    return result;
+}
+wint_t darwin_ungetwc(wint_t character, FILE *stream) DARWIN_SYMBOL(ungetwc);
+wint_t darwin_ungetwc(wint_t character, FILE *stream) {
+    wint_t result = ungetwc(character, REAL(stream));
+    sync_flags(stream);
+    return result;
+}
+
+#endif
